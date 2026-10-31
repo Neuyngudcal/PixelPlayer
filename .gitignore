@@ -1,0 +1,55 @@
+# IntelliJ IDEA / Android Studio
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# OS & Log files
+.DS_Store
+Thumbs.db
+hs_err_pid*.log
+*.log
+message.txt
+*.salive
+*.apk
+*.aab
+**.jks
+*.keystore
+
+# Gradle & Kotlin
+.gradle
+.gradle-local/
+.gradle-temp/
+.kotlin/
+/local.properties
+local.properties
+keystore.properties
+
+# Build & native
+/build
+/captures
+.externalNativeBuild
+.cxx
+benchmark-results/
+
+app/build/
+app/release/
+wear/build/
+wear/release/
+shared/build/
+baselineprofile/build/
+
+misc.xml
+CLAUDE.md
+markdown.xml
+.vscode/
+.agents/
+
+# Node/tooling dependencies and local env files
+**/node_modules/
+**/dist/
+**/.vite/
+**/.understand-anything/
+**/.env
+**/.env.*
+!**/.env.example
