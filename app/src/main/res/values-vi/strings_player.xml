@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="lyrics_empty_title">Tệp này chưa có lời bài hát</string>
+    <string name="lyrics_empty_description">Tìm lời trực tuyến ngay từ trình phát qua chuỗi nguồn Zarz-LRC: Apple Music, lrc.red, LyricsPlus, BetterLyrics, LRCLIB, NetEase, Kugou &amp; QQ Music.</string>
+    <string name="lyrics_empty_search_auto">Tìm lời trực tuyến tự động</string>
+    <string name="lyrics_empty_search_manual">Tìm thủ công / Chọn bản lời</string>
+    <string name="lyrics_empty_sources">Nguồn Zarz-LRC</string>
+    <string name="lyrics_empty_import">Nhập LRC/TTML</string>
+    <string name="lyrics_show_controls">Hiện điều khiển</string>
+</resources>

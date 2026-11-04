@@ -41,6 +41,8 @@ import androidx.compose.animation.core.Spring
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -110,6 +112,10 @@ import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -323,16 +329,19 @@ fun LyricsSheet(
     val isPlaying by remember(stablePlayerState) { derivedStateOf { stablePlayerState.isPlaying } }
     val currentSong by remember(stablePlayerState) { derivedStateOf { stablePlayerState.currentSong } }
 
-    val hasTranslatedLyrics = remember(lyrics) {
-        // Translated lyrics read same timestamp on the lrc, not possible in plain type lyrics
-        lyrics?.synced?.any { !it.translation.isNullOrBlank() } == true
+    // Plain lyrics carry their romanization / translation as extra "\n" lines inside each entry.
+    val plainLineParts = remember(lyrics) { lyrics?.plain?.map(::splitPlainLyricLine).orEmpty() }
+
+    val hasTranslatedLyrics = remember(lyrics, plainLineParts) {
+        val hasSynced = lyrics?.synced?.any { !it.translation.isNullOrBlank() } == true
+        val hasPlain = plainLineParts.any { it.translation.isNotBlank() }
+        hasSynced || hasPlain
     }
 
-    val hasRomanizedLyrics = remember(lyrics) {
+    val hasRomanizedLyrics = remember(lyrics, plainLineParts) {
         val hasSynced = lyrics?.synced?.any { !it.romanization.isNullOrBlank() } == true
-        val hasPlain = lyrics?.plain?.any { line ->
-            MultiLangRomanizer.isScriptThatNeedsRomanization(line)
-        } == true
+        val hasPlain = plainLineParts.any { it.romanization.isNotBlank() } ||
+            lyrics?.plain?.any { line -> MultiLangRomanizer.isScriptThatNeedsRomanization(line) } == true
         hasSynced || hasPlain
     }
 
@@ -476,6 +485,9 @@ fun LyricsSheet(
     // Swipe Gesture State
     val hapticFeedback = LocalHapticFeedback.current
     var dragOffset by remember { mutableFloatStateOf(0f) }
+    // Direction of the last swipe, kept until the feedback overlay has fully faded out so the
+    // icon doesn't flip to the opposite edge when dragOffset is reset.
+    var swipeTowardsNext by remember { mutableStateOf(true) }
     var isSwipeActive by remember { mutableStateOf(false) }
     var hasTriggeredAction by remember { mutableStateOf(false) }
     val swipeThresholdPx = with(LocalDensity.current) { swipeThreshold.toPx() }
@@ -621,8 +633,12 @@ fun LyricsSheet(
                 scaleX = scale
                 scaleY = scale
                 translationY = lerp(0f, size.height * 0.08f, p)
+                alpha = lerp(1f, 0.72f, p)
+                // Round corners only while entering / predictive-back so the fully open
+                // screen doesn't expose the player behind its four corners.
+                shape = RoundedCornerShape(lerp(0f, 32f, (p * 4f).coerceIn(0f, 1f)).dp)
+                clip = p > 0f
             }
-            .clip(RoundedCornerShape(32.dp))
             .pointerInput(Unit) {
                 detectDragGestures(
                     onDragStart = {
@@ -661,6 +677,7 @@ fun LyricsSheet(
                         
                         if (!hasTriggeredAction) {
                             dragOffset += dragAmount.x
+                            if (dragOffset != 0f) swipeTowardsNext = dragOffset < 0
                             val progress = (abs(dragOffset) / swipeThresholdPx).coerceIn(0f, 1f)
                             
                             coroutineScope.launch {
@@ -721,7 +738,6 @@ fun LyricsSheet(
                     LyricsTrackInfo(
                         song = song,
                         modifier = Modifier
-                            .align(Alignment.TopStart)
                             .padding(
                                 top = 4.dp, bottom = 24.dp, start = 18.dp, end = 18.dp
                             )
@@ -731,7 +747,6 @@ fun LyricsSheet(
                             )
                             .wrapContentWidth()
                             .animateContentSize(), // Animate width changes
-                        backgroundColor = backgroundColor, // Distinct solid background
                         contentColor = onBackgroundColor,
                         isPlaying = isPlaying
                     )
@@ -739,15 +754,19 @@ fun LyricsSheet(
 
                 when (showSyncedLyrics) {
                     null -> {
-                        LazyColumn(
-                            modifier = Modifier.fillMaxSize(),
-                            contentPadding = PaddingValues(top = 110.dp, bottom = 24.dp, start = 24.dp, end = 24.dp)
+                        // Centered within the area below the header; scrolls instead of being
+                        // clipped when the card is taller than the viewport (landscape / split screen).
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(top = 110.dp, bottom = 24.dp, start = 24.dp, end = 24.dp),
+                            contentAlignment = Alignment.Center
                         ) {
-                            item(key = "loader_or_empty") {
-                                Box(
+                                Column(
                                     modifier = Modifier
-                                        .fillParentMaxSize(),
-                                    contentAlignment = Alignment.Center
+                                        .fillMaxWidth()
+                                        .verticalScroll(rememberScrollState()),
+                                    horizontalAlignment = Alignment.CenterHorizontally
                                 ) {
                                     if (isLoadingLyrics) {
                                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -785,7 +804,7 @@ fun LyricsSheet(
                                                     modifier = Modifier.size(36.dp)
                                                 )
                                                 Text(
-                                                    text = "Tệp này chưa có lời bài hát",
+                                                    text = stringResource(R.string.lyrics_empty_title),
                                                     style = MaterialTheme.typography.titleMedium,
                                                     fontFamily = GoogleSansRounded,
                                                     fontWeight = FontWeight.Bold,
@@ -793,7 +812,7 @@ fun LyricsSheet(
                                                     textAlign = TextAlign.Center
                                                 )
                                                 Text(
-                                                    text = "Tìm lời trực tuyến ngay từ trình phát qua chuỗi nguồn Zarz-LRC, Apple Music, lrc.red, LyricsPlus, BetterLyrics, LRCLIB, NetEase, Kugou & QQ Music.",
+                                                    text = stringResource(R.string.lyrics_empty_description),
                                                     style = MaterialTheme.typography.bodySmall,
                                                     color = onBackgroundColor.copy(alpha = 0.75f),
                                                     textAlign = TextAlign.Center
@@ -818,7 +837,7 @@ fun LyricsSheet(
                                                     )
                                                     Spacer(modifier = Modifier.width(8.dp))
                                                     Text(
-                                                        text = "Tìm lời trực tuyến tự động",
+                                                        text = stringResource(R.string.lyrics_empty_search_auto),
                                                         fontFamily = GoogleSansRounded,
                                                         fontWeight = FontWeight.SemiBold
                                                     )
@@ -838,7 +857,7 @@ fun LyricsSheet(
                                                     )
                                                     Spacer(modifier = Modifier.width(8.dp))
                                                     Text(
-                                                        text = "Tìm thủ công / Chọn bản lời",
+                                                        text = stringResource(R.string.lyrics_empty_search_manual),
                                                         fontFamily = GoogleSansRounded
                                                     )
                                                 }
@@ -858,7 +877,7 @@ fun LyricsSheet(
                                                         )
                                                         Spacer(modifier = Modifier.width(4.dp))
                                                         Text(
-                                                            text = "Nguồn Zarz-LRC",
+                                                            text = stringResource(R.string.lyrics_empty_sources),
                                                             maxLines = 1,
                                                             overflow = TextOverflow.Ellipsis
                                                         )
@@ -875,7 +894,7 @@ fun LyricsSheet(
                                                         )
                                                         Spacer(modifier = Modifier.width(4.dp))
                                                         Text(
-                                                            text = "Nhập LRC/TTML",
+                                                            text = stringResource(R.string.lyrics_empty_import),
                                                             maxLines = 1,
                                                             overflow = TextOverflow.Ellipsis
                                                         )
@@ -885,7 +904,6 @@ fun LyricsSheet(
                                         }
                                     }
                                 }
-                            }
                         }
                     }
 
@@ -958,7 +976,8 @@ fun LyricsSheet(
                                     start = 24.dp,
                                     end = 24.dp,
                                     top = 130.dp,
-                                    bottom = 24.dp
+                                    // Clear the 80dp bottom fade so the last lines stay readable.
+                                    bottom = 100.dp
                                 )
                             ) {
                                 itemsIndexed(
@@ -969,8 +988,8 @@ fun LyricsSheet(
                                         line = line,
                                         style = lyricsTextStyle,
                                         lyricsAlignment = lyricsAlignment,
-                                        showTranslation = if (hasTranslatedLyrics) showLyricsTranslation else true,
-                                        showRomanization = if (hasRomanizedLyrics) showLyricsRomanization else true,
+                                        showTranslation = showLyricsTranslation,
+                                        showRomanization = showLyricsRomanization,
                                         onLongClick = {
                                             hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
                                             shareCardInitialLineIndex = index
@@ -1102,7 +1121,7 @@ fun LyricsSheet(
                                 Icon(
                                     modifier = Modifier.size(32.dp),
                                     imageVector = Icons.Rounded.Pause,
-                                    contentDescription = "Pause",
+                                    contentDescription = stringResource(R.string.common_pause),
                                     tint = onPlayPauseColor
                                 )
                             } else {
@@ -1299,7 +1318,8 @@ fun LyricsSheet(
             exit = fadeOut() + slideOutVertically { it / 2 },
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .padding(bottom = 32.dp)
+                // Respect the navigation bar (edge-to-edge) so the button is never covered.
+                .padding(bottom = paddingValues.calculateBottomPadding() + 32.dp)
         ) {
             FilledIconButton(
                 onClick = { resetImmersiveTimer() },
@@ -1311,14 +1331,14 @@ fun LyricsSheet(
             ) {
                 Icon(
                     imageVector = Icons.Rounded.KeyboardArrowUp,
-                    contentDescription = "Show Controls"
+                    contentDescription = stringResource(R.string.lyrics_show_controls)
                 )
             }
         }
        
        // Swipe Feedback Overlay
        if (isSwipeActive || swipeProgress.value > 0f) {
-           val isNext = dragOffset < 0
+           val isNext = swipeTowardsNext
            val overlayAlignment = if (isNext) Alignment.CenterEnd else Alignment.CenterStart
            val icon = if (isNext) Icons.Rounded.SkipNext else Icons.Rounded.SkipPrevious
            
@@ -1430,9 +1450,19 @@ fun SyncedLyricsList(
         }
     }
     val isPreviewSeeking = positionOverrideMs != null
-    val currentLineIndex by remember(lines, positionState) {
+    // Precomputed once per lyrics set: the per-frame lookup below is then a single O(n) pass
+    // instead of the previous O(n²) scan on every interpolated position tick.
+    val nextLineStartTimes = remember(lines) { resolveNextLineStartTimes(lines) }
+    val lineEndTimes = remember(lines, nextLineStartTimes) {
+        LongArray(lines.size) { i -> resolveLineEndTimeMs(lines[i], nextLineStartTimes[i]) }
+    }
+    val currentLineIndex by remember(lines, lineEndTimes, positionState) {
         derivedStateOf {
-            resolveCurrentLineIndex(lines = lines, position = positionState.value)
+            resolveCurrentLineIndex(
+                lines = lines,
+                position = positionState.value,
+                lineEndTimes = lineEndTimes
+            )
         }
     }
     var hasAlignedInitialLine by remember(lines) { mutableStateOf(false) }
@@ -1455,7 +1485,11 @@ fun SyncedLyricsList(
         LaunchedEffect(currentLineIndex, lines.size, isPreviewSeeking) {
             if (lines.isEmpty()) return@LaunchedEffect
             if (currentLineIndex !in lines.indices) return@LaunchedEffect
-            if (listState.layoutInfo.totalItemsCount == 0) return@LaunchedEffect
+            // Wait for the first layout pass instead of bailing out: otherwise the initial
+            // alignment is skipped and (while paused) the active line stays under the top fade.
+            if (listState.layoutInfo.totalItemsCount == 0) {
+                snapshotFlow { listState.layoutInfo.totalItemsCount }.first { it > 0 }
+            }
 
             if (!hasAlignedInitialLine) {
                 listState.scrollToItem(currentLineIndex)
@@ -1516,6 +1550,26 @@ fun SyncedLyricsList(
             lastAutoScrolledLineIndex = currentLineIndex
         }
 
+        // Re-align the active line when the viewport height changes (e.g. the controls
+        // collapsing / expanding in immersive mode), so it stays in the highlight zone.
+        LaunchedEffect(listState, snapperLayoutInfo) {
+            snapshotFlow { listState.layoutInfo.viewportSize.height }
+                .filter { it > 0 }
+                .distinctUntilChanged()
+                .drop(1)
+                .collectLatest {
+                    if (!hasAlignedInitialLine || isUserDragging || listState.isScrollInProgress) return@collectLatest
+                    val target = currentLineIndex
+                    if (target !in lines.indices) return@collectLatest
+                    if (listState.layoutInfo.visibleItemsInfo.none { it.index == target }) return@collectLatest
+                    snapToSnapIndex(
+                        listState = listState,
+                        layoutInfo = snapperLayoutInfo,
+                        targetIndex = target
+                    )
+                }
+        }
+
         Box(modifier = Modifier.fillMaxSize()) {
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
@@ -1527,11 +1581,7 @@ fun SyncedLyricsList(
                     items = lines,
                     key = { index, item -> "${item.time}_$index" }
                 ) { index, line ->
-                    val nextTime = remember(lines, index, line.isBackground) {
-                        lines.subList(index + 1, lines.size)
-                            .firstOrNull { !it.isBackground || line.isBackground }
-                            ?.time ?: lines.getOrNull(index + 1)?.time ?: Int.MAX_VALUE
-                    }
+                    val nextTime = nextLineStartTimes.getOrElse(index) { Int.MAX_VALUE }
                     val distanceFromCurrent = if (currentLineIndex != -1) abs(currentLineIndex - index) else 100
                     
                     val parallaxModifier = if (useAnimatedLyrics) {
@@ -1915,66 +1965,6 @@ fun LyricLineRow(
     }
 }
 
-@Composable
-fun LyricWordSpan(
-    word: SyncedWord,
-    isHighlighted: Boolean,
-    useAnimatedLyrics: Boolean = false,
-    style: TextStyle,
-    highlightedColor: Color,
-    unhighlightedColor: Color,
-    modifier: Modifier = Modifier
-) {
-    val wordAnimSpec = if (useAnimatedLyrics) spring<Float>(
-        stiffness = Spring.StiffnessVeryLow,
-        dampingRatio = Spring.DampingRatioMediumBouncy
-    ) else tween(durationMillis = 200)
-
-    val color by animateColorAsState(
-        targetValue = if (isHighlighted) highlightedColor else unhighlightedColor,
-        animationSpec = if (useAnimatedLyrics) spring(
-            stiffness = Spring.StiffnessVeryLow,
-            dampingRatio = Spring.DampingRatioMediumBouncy
-        ) else tween(durationMillis = 200),
-        label = "wordColor"
-    )
-
-    val scale by animateFloatAsState(
-        targetValue = if (useAnimatedLyrics && isHighlighted) 1.10f else 1f,
-        animationSpec = wordAnimSpec,
-        label = "wordScale"
-    )
-
-    val alpha by animateFloatAsState(
-        targetValue = if (useAnimatedLyrics && !isHighlighted) 0.55f else 1f,
-        animationSpec = wordAnimSpec,
-        label = "wordAlpha"
-    )
-
-    Box(
-        modifier = modifier,
-        contentAlignment = Alignment.Center
-    ) {
-        Text(
-            text = word.word,
-            style = style,
-            color = Color.Transparent,
-            fontWeight = FontWeight.Bold,
-        )
-        Text(
-            text = word.word,
-            style = style,
-            color = color,
-            fontWeight = if (isHighlighted) FontWeight.Bold else FontWeight.Normal,
-            modifier = Modifier.graphicsLayer {
-                scaleX = scale
-                scaleY = scale
-                this.alpha = alpha
-            }
-        )
-    }
-}
-
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun PlainLyricsLine(
@@ -1986,34 +1976,10 @@ fun PlainLyricsLine(
     onLongClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
-    val sanitizedLines = remember(line) { line.split("\n") }
-    val primaryText = remember(sanitizedLines) { if (sanitizedLines.isNotEmpty()) sanitizeLyricLineText(sanitizedLines[0]) else "" }
-
-    val isRomanizedScript = remember(primaryText) {
-        MultiLangRomanizer.isScriptThatNeedsRomanization(primaryText)
-    }
-
-    val translationText = remember(sanitizedLines, primaryText, isRomanizedScript) {
-        if (sanitizedLines.size > 1) {
-            val firstExtra = sanitizedLines[1]
-            val rest = if (sanitizedLines.size > 2) sanitizedLines.drop(2).joinToString("\n") { sanitizeLyricLineText(it) } else ""
-            
-            val isLatin = firstExtra.any { it.code in 32..126 } 
-            val isFirstRomanization = isRomanizedScript && isLatin
-
-            if (isFirstRomanization) rest else sanitizedLines.drop(1).joinToString("\n") { sanitizeLyricLineText(it) }
-        } else ""
-    }
-
-    val romanizationText = remember(sanitizedLines, primaryText, isRomanizedScript) {
-         if (sanitizedLines.size > 1) {
-            val firstExtra = sanitizedLines[1]
-            val isLatin = firstExtra.any { it.code in 32..126 } 
-            val isFirstRomanization = isRomanizedScript && isLatin
-            
-            if (isFirstRomanization) sanitizeLyricLineText(firstExtra) else ""
-        } else ""
-    }
+    val parts = remember(line) { splitPlainLyricLine(line) }
+    val primaryText = parts.primary
+    val romanizationText = parts.romanization
+    val translationText = parts.translation
     val textAlign = when (lyricsAlignment) {
         "center" -> TextAlign.Center
         "right" -> TextAlign.Right
@@ -2039,6 +2005,9 @@ fun PlainLyricsLine(
             modifier
                 .clip(RoundedCornerShape(10.dp))
                 .combinedClickable(
+                    // Plain lines have no tap action; avoid a ripple that suggests one.
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
                     onClick = {},
                     onLongClick = onLongClick
                 )
@@ -2072,6 +2041,53 @@ fun PlainLyricsLine(
         }
     }
 }
+
+internal data class PlainLyricLineParts(
+    val primary: String,
+    val romanization: String,
+    val translation: String
+)
+
+/**
+ * Splits a plain lyrics entry ("original\n[romanization\n]translation…") into its parts.
+ * The first extra line is treated as romanization only when the original uses a script that
+ * needs romanizing AND the extra line actually looks like a romanization (Latin letters only,
+ * no Vietnamese letters). Previously any line containing a space counted as "Latin",
+ * so e.g. Vietnamese translations of Japanese/Korean/Chinese songs were shown as romanization.
+ */
+internal fun splitPlainLyricLine(line: String): PlainLyricLineParts {
+    val rawLines = line.split("\n")
+    val primary = sanitizeLyricLineText(rawLines.firstOrNull().orEmpty())
+    if (rawLines.size <= 1) return PlainLyricLineParts(primary, "", "")
+
+    val extras = rawLines.drop(1).map(::sanitizeLyricLineText).filter { it.isNotBlank() }
+    if (extras.isEmpty()) return PlainLyricLineParts(primary, "", "")
+
+    val firstIsRomanization = MultiLangRomanizer.isScriptThatNeedsRomanization(primary) &&
+        looksLikeRomanization(extras.first())
+
+    return if (firstIsRomanization) {
+        PlainLyricLineParts(primary, extras.first(), extras.drop(1).joinToString("\n"))
+    } else {
+        PlainLyricLineParts(primary, "", extras.joinToString("\n"))
+    }
+}
+
+internal fun looksLikeRomanization(text: String): Boolean {
+    val letters = text.filter { it.isLetter() }
+    if (letters.isEmpty()) return false
+    if (letters.any { Character.UnicodeScript.of(it.code) != Character.UnicodeScript.LATIN }) return false
+    // Decomposed diacritics or Vietnamese letters mean this is a (Vietnamese) translation.
+    if (text.any { it in '\u0300'..'\u036F' }) return false
+    return letters.none { it in VietnameseLetters || it in '\u1EA0'..'\u1EF9' }
+}
+
+/**
+ * Letters common in Vietnamese but practically absent from the romanizations we show
+ * (Hepburn uses macrons, Pinyin tone marks, Revised Romanization none). Circumflex vowels
+ * are included because Vietnamese uses them constantly ("yêu", "tôi", "cần").
+ */
+private const val VietnameseLetters = "đĐăĂơƠưƯâÂêÊôÔãÃõÕýÝ"
 
 private val LeadingTagRegex = Regex("^v\\d+:\\s*", RegexOption.IGNORE_CASE)
 
@@ -2246,27 +2262,55 @@ internal suspend fun snapToSnapIndex(
     }
 }
 
+/**
+ * Start time of the line that ends each line: for a lead line that's the next lead (non-background)
+ * line, falling back to the immediately following line; for a background line it's simply the
+ * following line. Computed in a single backwards pass (O(n)).
+ */
+internal fun resolveNextLineStartTimes(lines: List<SyncedLine>): IntArray {
+    val result = IntArray(lines.size)
+    var nextLeadStart: Int? = null
+    for (index in lines.indices.reversed()) {
+        val line = lines[index]
+        val immediateNext = lines.getOrNull(index + 1)?.time
+        result[index] = if (line.isBackground) {
+            immediateNext ?: Int.MAX_VALUE
+        } else {
+            nextLeadStart ?: immediateNext ?: Int.MAX_VALUE
+        }
+        if (!line.isBackground) nextLeadStart = line.time
+    }
+    return result
+}
+
+internal fun resolveLineEndTimes(lines: List<SyncedLine>): LongArray {
+    val nextStarts = resolveNextLineStartTimes(lines)
+    return LongArray(lines.size) { i -> resolveLineEndTimeMs(lines[i], nextStarts[i]) }
+}
+
 internal fun resolveCurrentLineIndex(
     lines: List<SyncedLine>,
-    position: Long
+    position: Long,
+    lineEndTimes: LongArray = resolveLineEndTimes(lines)
 ): Int {
     if (lines.isEmpty()) return -1
 
-    val activeMatches = lines.withIndex().filter { (index, line) ->
-        val nextTime = lines.subList(index + 1, lines.size)
-            .firstOrNull { !it.isBackground || line.isBackground }
-            ?.time ?: lines.getOrNull(index + 1)?.time ?: Int.MAX_VALUE
-        val lineEndTime = resolveLineEndTimeMs(line, nextTime)
-        position in line.time.toLong()..<lineEndTime
+    var lastActive = -1
+    var lastActiveLead = -1
+    for (index in lines.indices) {
+        val line = lines[index]
+        if (position >= line.time.toLong() && position < lineEndTimes[index]) {
+            lastActive = index
+            if (!line.isBackground) lastActiveLead = index
+        }
     }
-    return (activeMatches.lastOrNull { !it.value.isBackground } ?: activeMatches.lastOrNull())?.index ?: -1
+    return if (lastActiveLead >= 0) lastActiveLead else lastActive
 }
 
 @Composable
 private fun LyricsTrackInfo(
     song: Song?,
     modifier: Modifier = Modifier,
-    backgroundColor: Color,
     contentColor: Color,
     isPlaying: Boolean
 ) {
@@ -2314,7 +2358,7 @@ private fun LyricsTrackInfo(
         SmartImage(
             model = song.albumArtUriString ?: R.drawable.rounded_album_24,
             shape = albumShape,
-            contentDescription = "Cover Art",
+            contentDescription = stringResource(R.string.common_album_art),
             modifier = Modifier
                 .size(66.dp)
                 .padding(6.dp)

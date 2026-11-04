@@ -225,4 +225,69 @@ class LyricsSheetLogicTest {
 
         assertEquals(0, activeIndex)
     }
+
+    @Test
+    fun resolveNextLineStartTimes_skipsBackgroundLinesForLeadVocals() {
+        val lines = listOf(
+            SyncedLine(time = 1_000, line = "Lead A"),
+            SyncedLine(time = 2_000, line = "Backing", isBackground = true),
+            SyncedLine(time = 3_000, line = "Lead B"),
+            SyncedLine(time = 4_000, line = "Trailing backing", isBackground = true)
+        )
+
+        val nextStarts = resolveNextLineStartTimes(lines)
+
+        // Lead A ends at the next lead line, the backing line at whatever follows it,
+        // and the last lead line (no following lead) falls back to the immediate next line.
+        assertEquals(listOf(3_000, 3_000, 4_000, Int.MAX_VALUE), nextStarts.toList())
+    }
+
+    @Test
+    fun resolveCurrentLineIndex_matchesAcrossWholeSong() {
+        val lines = listOf(
+            SyncedLine(time = 0, line = "One"),
+            SyncedLine(time = 2_000, line = "Two"),
+            SyncedLine(time = 2_500, line = "bg", isBackground = true),
+            SyncedLine(time = 4_000, line = "Three")
+        )
+
+        assertEquals(0, resolveCurrentLineIndex(lines, 1_000L))
+        assertEquals(1, resolveCurrentLineIndex(lines, 3_000L))
+        assertEquals(3, resolveCurrentLineIndex(lines, 9_000L))
+        assertEquals(-1, resolveCurrentLineIndex(emptyList(), 0L))
+    }
+
+    @Test
+    fun splitPlainLyricLine_vietnameseTranslationIsNotRomanization() {
+        val parts = splitPlainLyricLine("君が好きだ\nTôi thích em")
+
+        assertEquals("君が好きだ", parts.primary)
+        assertEquals("", parts.romanization)
+        assertEquals("Tôi thích em", parts.translation)
+    }
+
+    @Test
+    fun splitPlainLyricLine_detectsRomanizationThenTranslation() {
+        val parts = splitPlainLyricLine("君が好きだ\nkimi ga suki da\nTôi thích em")
+
+        assertEquals("kimi ga suki da", parts.romanization)
+        assertEquals("Tôi thích em", parts.translation)
+    }
+
+    @Test
+    fun splitPlainLyricLine_cjkTranslationWithSpacesStaysTranslation() {
+        val parts = splitPlainLyricLine("사랑해요\n我 爱 你")
+
+        assertEquals("", parts.romanization)
+        assertEquals("我 爱 你", parts.translation)
+    }
+
+    @Test
+    fun splitPlainLyricLine_latinOriginalHasOnlyTranslation() {
+        val parts = splitPlainLyricLine("I love you\nAnh yêu em")
+
+        assertEquals("I love you", parts.primary)
+        assertEquals("", parts.romanization)
+        assertEquals("Anh yêu em", parts.translation)
+    }
 }

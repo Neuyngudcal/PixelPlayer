@@ -195,4 +195,11 @@
     <string name="lyrics_artist_album_line">%1$s • %2$s</string>
     <string name="lyrics_provided_by">Lyrics provided by</string>
     <string name="lyrics_lrclib_uri">https://lrclib.net/</string>
+    <string name="lyrics_empty_title">This file has no lyrics yet</string>
+    <string name="lyrics_empty_description">Search for lyrics online right from the player through the Zarz-LRC source chain: Apple Music, lrc.red, LyricsPlus, BetterLyrics, LRCLIB, NetEase, Kugou &amp; QQ Music.</string>
+    <string name="lyrics_empty_search_auto">Search online automatically</string>
+    <string name="lyrics_empty_search_manual">Manual search / pick a version</string>
+    <string name="lyrics_empty_sources">Zarz-LRC sources</string>
+    <string name="lyrics_empty_import">Import LRC/TTML</string>
+    <string name="lyrics_show_controls">Show controls</string>
 </resources>
