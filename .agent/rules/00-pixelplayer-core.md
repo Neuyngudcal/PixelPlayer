@@ -10,7 +10,7 @@ của tài liệu chi tiết. Nếu file này mâu thuẫn với `AGENTS.md`, `A
 
 ## Tóm tắt bắt buộc (đồng bộ với AGENTS.md §2–§3)
 
-- Stack cố định: Kotlin 2.4 (built-in Kotlin của AGP 9), JVM 21, minSdk 30, KSP2, Jetpack Compose +
+- Stack cố định: Kotlin 2.3 (built-in Kotlin của AGP 9), JVM 21, minSdk 30, KSP2, Jetpack Compose +
   Material 3 Expressive, Hilt, Room (có migration), DataStore, Coroutines/Flow, Media3, Coil 2, Timber.
 - Theo pattern có sẵn: tìm file cùng loại và bắt chước; không phát minh kiến trúc mới.
 - KHÔNG sinh mới: XML layout/Fragment, Compose Material 2, LiveData, `collectAsState()`, `GlobalScope`,

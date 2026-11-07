@@ -19,15 +19,15 @@ PixelPlayer — trình phát nhạc Android, **100% Kotlin + Jetpack Compose + M
 
 | Module            | Vai trò                                                                     |
 | ----------------- | --------------------------------------------------------------------------- |
-| `:app`            | Ứng dụng điện thoại (package `com.theveloper.pixelplay`)                    |
+| `:app`            | Ứng dụng điện thoại Neuro Player (applicationId `com.neuyngudcal.neuroplayer`, package Kotlin `com.theveloper.pixelplay`) |
 | `:shared`         | Hợp đồng dữ liệu phone ↔ Wear (`@Serializable`, phải tương thích ngược)     |
 | `:wear`           | Ứng dụng Wear OS (Wear Compose Material 3 + Horologist)                     |
 | `:baselineprofile`| Sinh Baseline Profile                                                       |
 
 **Nền tảng cố định — không được hạ cấp hay thay thế:**
-Kotlin 2.4 (K2) · AGP 9.2 với *built-in Kotlin* (`android.builtInKotlin=true`, `android.newDsl=true`) ·
-Java/JVM target 21 · `minSdk 30` · `compileSdk/targetSdk 37` · KSP2 (không kapt) · Compose BOM 2026.06 ·
-Material3 `1.5.0-alpha` (Expressive API) · Hilt 2.59 · Room 2.8 (schema v42) · Media3 1.10 · Coil **2.x** ·
+Kotlin 2.3 (K2) · AGP 9.2 với *built-in Kotlin* (`android.builtInKotlin=true`, `android.newDsl=true`) ·
+Java/JVM target 21 · `minSdk 30` · `compileSdk/targetSdk 37` · KSP2 (không kapt) · Compose BOM 2026.05 ·
+Material3 `1.5.0-alpha` (Expressive API) · Hilt 2.59 · Room 2.8 (schema v40) · Media3 1.10 · Coil **2.x** ·
 DataStore Preferences · kotlinx.coroutines/serialization/collections-immutable · Timber.
 
 ---

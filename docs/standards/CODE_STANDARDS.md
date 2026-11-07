@@ -11,7 +11,7 @@
 
 | Hạng mục              | Chuẩn                                                                                 |
 | --------------------- | ------------------------------------------------------------------------------------- |
-| Kotlin                | 2.4 (K2), `kotlin.code.style=official`                                                |
+| Kotlin                | 2.3 (K2), `kotlin.code.style=official`                                                |
 | Plugin Kotlin         | **Built-in Kotlin của AGP 9** — *không* thêm `org.jetbrains.kotlin.android`           |
 | JVM                   | `JavaVersion.VERSION_21`, `JvmTarget.JVM_21`, có core library desugaring              |
 | Annotation processing | **KSP2** (`ksp(...)`) — không `kapt`                                                  |
