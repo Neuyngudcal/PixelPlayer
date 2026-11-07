@@ -182,7 +182,7 @@
     <string name="presentation_batch_g_artist_group_by_album_artist">Grouper par artiste de l\'album</string>
     <string name="presentation_batch_g_artist_group_by_album_artist_sub">Afficher les albums de collaboration sous l\'artiste principal</string>
     <string name="presentation_batch_g_artist_info_title">À propos de l\'analyse multi-artistes</string>
-    <string name="presentation_batch_g_artist_info_body">PixelPlayer sépare les tags d\'artistes en utilisant des délimiteurs de caractères (/, ;, &amp;) et des délimiteurs de mots (feat., ft., vs., x). Les délimiteurs de mots sont reconnus sans distinction de casse.\n\n\"Extraire les artistes du titre\" détecte les motifs comme (feat. Artiste) dans les titres de chansons.\n\nL\'antislash (\\) peut être utilisé pour échapper les délimiteurs de caractères.</string>
+    <string name="presentation_batch_g_artist_info_body">Neuro Player sépare les tags d\'artistes en utilisant des délimiteurs de caractères (/, ;, &amp;) et des délimiteurs de mots (feat., ft., vs., x). Les délimiteurs de mots sont reconnus sans distinction de casse.\n\n\"Extraire les artistes du titre\" détecte les motifs comme (feat. Artiste) dans les titres de chansons.\n\nL\'antislash (\\) peut être utilisé pour échapper les délimiteurs de caractères.</string>
     <string name="presentation_batch_g_artist_example_arrow"> → </string>
     <string name="presentation_batch_g_artist_examples_title">Exemples</string>
     <string name="presentation_batch_g_artist_ex_1_in">\"Artiste1/Artiste2\"</string>
@@ -281,7 +281,7 @@
     <string name="presentation_batch_g_album_sel_queue_hint">File d\'attente + lecture respecte l\'ordre de votre sélection.</string>
     <string name="presentation_batch_g_album_sel_limit">Limite : %1$d albums par sélection.</string>
     <string name="presentation_batch_g_album_sel_add_queue_play">Ajouter à la file d\'attente &amp; Lire</string>
-    <string name="presentation_batch_g_app_name">PixelPlayer</string>
+    <string name="presentation_batch_g_app_name">Neuro Player</string>
     <string name="presentation_batch_g_app_tagline">Lecteur de musique</string>
     <string name="presentation_batch_g_brick_high">MEILLEUR %1$d</string>
     <string name="presentation_batch_g_brick_cd_close">Fermer</string>
@@ -331,7 +331,7 @@
     <string name="presentation_batch_g_cast_playing">En cours de lecture</string>
     <string name="presentation_batch_g_cast_paused">En pause</string>
     <string name="presentation_batch_g_cast_perm_title">Prêt à se connecter</string>
-    <string name="presentation_batch_g_cast_perm_body">Autorisez PixelPlayer à voir vos appareils proches et votre Wi-Fi actuel pour synchroniser votre diffusion, audio Bluetooth et haut-parleurs.</string>
+    <string name="presentation_batch_g_cast_perm_body">Autorisez Neuro Player à voir vos appareils proches et votre Wi-Fi actuel pour synchroniser votre diffusion, audio Bluetooth et haut-parleurs.</string>
     <string name="presentation_batch_g_cast_perm_nearby_title">Appareils proches</string>
     <string name="presentation_batch_g_cast_perm_nearby_desc">Nécessaire pour lire et contrôler votre équipement audio Bluetooth connecté.</string>
     <string name="presentation_batch_g_cast_perm_location_title">Localisation pour le Wi-Fi</string>

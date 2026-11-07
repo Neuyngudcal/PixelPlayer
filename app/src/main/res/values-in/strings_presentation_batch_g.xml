@@ -182,7 +182,7 @@
     <string name="presentation_batch_g_artist_group_by_album_artist">Kelompokkan berdasarkan Artis Album</string>
     <string name="presentation_batch_g_artist_group_by_album_artist_sub">Tampilkan album kolaborasi di bawah artis utama</string>
     <string name="presentation_batch_g_artist_info_title">Tentang Penguraian Multi-Artis</string>
-    <string name="presentation_batch_g_artist_info_body">PixelPlayer membagi tag artis menggunakan pemisah karakter (/, ;, &amp;) dan pemisah kata (feat., ft., vs., x). Pemisah kata dicocokkan tanpa membedakan huruf besar-kecil.
+    <string name="presentation_batch_g_artist_info_body">Neuro Player membagi tag artis menggunakan pemisah karakter (/, ;, &amp;) dan pemisah kata (feat., ft., vs., x). Pemisah kata dicocokkan tanpa membedakan huruf besar-kecil.
 \n\n"Ekstrak Artis dari Judul" mendeteksi pola seperti (feat. Artis) dalam judul lagu.
 \n\nBackslash (\\) dapat digunakan untuk mengabaikan pemisah karakter.</string>
     <string name="presentation_batch_g_artist_example_arrow"> → </string>
@@ -284,7 +284,7 @@
     <string name="presentation_batch_g_album_sel_queue_hint">Antrekan + putar menghormati urutan pilihan Anda.</string>
     <string name="presentation_batch_g_album_sel_limit">Batas: %1$d album per pilihan.</string>
     <string name="presentation_batch_g_album_sel_add_queue_play">Tambah ke Antrean &amp; Putar</string>
-    <string name="presentation_batch_g_app_name">PixelPlayer</string>
+    <string name="presentation_batch_g_app_name">Neuro Player</string>
     <string name="presentation_batch_g_app_tagline">Pemutar Musik</string>
     <string name="presentation_batch_g_brick_high">TERTINGGI %1$d</string>
     <string name="presentation_batch_g_brick_cd_close">Tutup</string>
@@ -334,7 +334,7 @@
     <string name="presentation_batch_g_cast_playing">Memutar</string>
     <string name="presentation_batch_g_cast_paused">Dijeda</string>
     <string name="presentation_batch_g_cast_perm_title">Bersiaplah untuk terhubung</string>
-    <string name="presentation_batch_g_cast_perm_body">Izinkan PixelPlayer untuk melihat perangkat terdekat dan Wi‑Fi saat ini agar kami dapat menjaga sinkronisasi cast, audio Bluetooth, dan speaker Anda.</string>
+    <string name="presentation_batch_g_cast_perm_body">Izinkan Neuro Player untuk melihat perangkat terdekat dan Wi‑Fi saat ini agar kami dapat menjaga sinkronisasi cast, audio Bluetooth, dan speaker Anda.</string>
     <string name="presentation_batch_g_cast_perm_nearby_title">Perangkat terdekat</string>
     <string name="presentation_batch_g_cast_perm_nearby_desc">Diperlukan untuk membaca dan mengontrol perangkat audio Bluetooth Anda yang terhubung.</string>
     <string name="presentation_batch_g_cast_perm_location_title">Lokasi untuk Wi‑Fi</string>

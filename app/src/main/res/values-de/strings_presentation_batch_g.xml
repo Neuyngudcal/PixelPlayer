@@ -182,7 +182,7 @@
     <string name="presentation_batch_g_artist_group_by_album_artist">Nach Album-Künstler gruppieren</string>
     <string name="presentation_batch_g_artist_group_by_album_artist_sub">Kollaborations-Alben unter dem Hauptkünstler anzeigen</string>
     <string name="presentation_batch_g_artist_info_title">Über Mehrkünstler-Parsing</string>
-    <string name="presentation_batch_g_artist_info_body">PixelPlayer trennt Künstler-Tags mit Zeichen- (/, ;, &amp;) und Wort-Trennzeichen (feat., ft., vs., x). Wort-Trennzeichen ignorieren Groß-/Kleinschreibung.\n\n\"Künstler aus Titel extrahieren\" erkennt Muster wie (feat. Künstler) in Songtiteln.\n\nBackslash (\\) kann verwendet werden, um Zeichen-Trennzeichen zu maskieren.</string>
+    <string name="presentation_batch_g_artist_info_body">Neuro Player trennt Künstler-Tags mit Zeichen- (/, ;, &amp;) und Wort-Trennzeichen (feat., ft., vs., x). Wort-Trennzeichen ignorieren Groß-/Kleinschreibung.\n\n\"Künstler aus Titel extrahieren\" erkennt Muster wie (feat. Künstler) in Songtiteln.\n\nBackslash (\\) kann verwendet werden, um Zeichen-Trennzeichen zu maskieren.</string>
     <string name="presentation_batch_g_artist_example_arrow"> → </string>
     <string name="presentation_batch_g_artist_examples_title">Beispiele</string>
     <string name="presentation_batch_g_artist_ex_1_in">\"Artist1/Artist2\"</string>
@@ -281,7 +281,7 @@
     <string name="presentation_batch_g_album_sel_queue_hint">Queue + Abspielen beachtet die Auswahlreihenfolge.</string>
     <string name="presentation_batch_g_album_sel_limit">Limit: %1$d Alben pro Auswahl.</string>
     <string name="presentation_batch_g_album_sel_add_queue_play">Zur Queue &amp; Abspielen</string>
-    <string name="presentation_batch_g_app_name">PixelPlayer</string>
+    <string name="presentation_batch_g_app_name">Neuro Player</string>
     <string name="presentation_batch_g_app_tagline">Musikplayer</string>
     <string name="presentation_batch_g_brick_high">HOCH %1$d</string>
     <string name="presentation_batch_g_brick_cd_close">Schließen</string>
@@ -331,7 +331,7 @@
     <string name="presentation_batch_g_cast_playing">Spielt</string>
     <string name="presentation_batch_g_cast_paused">Pausiert</string>
     <string name="presentation_batch_g_cast_perm_title">Bereit zum Verbinden</string>
-    <string name="presentation_batch_g_cast_perm_body">Damit Cast und Bluetooth-Audio funktionieren, braucht PixelPlayer Zugriff auf Geräte in der Nähe und dein WLAN.</string>
+    <string name="presentation_batch_g_cast_perm_body">Damit Cast und Bluetooth-Audio funktionieren, braucht Neuro Player Zugriff auf Geräte in der Nähe und dein WLAN.</string>
     <string name="presentation_batch_g_cast_perm_nearby_title">Geräte in der Nähe</string>
     <string name="presentation_batch_g_cast_perm_nearby_desc">Benötigt, um verbundene Bluetooth-Audiogeräte zu lesen und zu steuern.</string>
     <string name="presentation_batch_g_cast_perm_location_title">Standort für WLAN</string>

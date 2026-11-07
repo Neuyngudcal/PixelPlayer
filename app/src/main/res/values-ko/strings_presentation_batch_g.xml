@@ -182,7 +182,7 @@
     <string name="presentation_batch_g_artist_group_by_album_artist">앨범 아티스트별로 그룹화</string>
     <string name="presentation_batch_g_artist_group_by_album_artist_sub">주요 아티스트 아래에 협업 앨범 표시</string>
     <string name="presentation_batch_g_artist_info_title">멀티 아티스트 파싱 정보</string>
-    <string name="presentation_batch_g_artist_info_body">PixelPlayer는 문자 구분 기호(/, ;, &amp;) 및 단어 구분 기호(feat., ft., vs., x)를 사용하여 아티스트 태그를 나눕니다. 단어 구분 기호는 대소문자를 구분하지 않습니다.
+    <string name="presentation_batch_g_artist_info_body">Neuro Player는 문자 구분 기호(/, ;, &amp;) 및 단어 구분 기호(feat., ft., vs., x)를 사용하여 아티스트 태그를 나눕니다. 단어 구분 기호는 대소문자를 구분하지 않습니다.
 
 \"제목에서 아티스트 추출\"은 곡 제목에서 (feat. 아티스트)와 같은 패턴을 감지합니다.
 
@@ -286,7 +286,7 @@
     <string name="presentation_batch_g_album_sel_queue_hint">대기열 추가 및 재생은 선택한 순서를 존중합니다.</string>
     <string name="presentation_batch_g_album_sel_limit">제한: 한 번에 최대 %1$d개의 앨범을 선택할 수 있습니다.</string>
     <string name="presentation_batch_g_album_sel_add_queue_play">대기열에 추가 및 재생</string>
-    <string name="presentation_batch_g_app_name">PixelPlayer</string>
+    <string name="presentation_batch_g_app_name">Neuro Player</string>
     <string name="presentation_batch_g_app_tagline">뮤직 플레이어</string>
     <string name="presentation_batch_g_brick_high">최고 기록 %1$d</string>
     <string name="presentation_batch_g_brick_cd_close">닫기</string>
@@ -336,7 +336,7 @@
     <string name="presentation_batch_g_cast_playing">재생 중</string>
     <string name="presentation_batch_g_cast_paused">일시정지됨</string>
     <string name="presentation_batch_g_cast_perm_title">연결 준비</string>
-    <string name="presentation_batch_g_cast_perm_body">PixelPlayer가 주변 기기와 현재 Wi‑Fi를 감지할 수 있도록 허용해 주세요. 그래야 전송, 블루투스 오디오 및 스피커를 동기화할 수 있습니다.</string>
+    <string name="presentation_batch_g_cast_perm_body">Neuro Player가 주변 기기와 현재 Wi‑Fi를 감지할 수 있도록 허용해 주세요. 그래야 전송, 블루투스 오디오 및 스피커를 동기화할 수 있습니다.</string>
     <string name="presentation_batch_g_cast_nearby_title">주변 기기</string>
     <string name="presentation_batch_g_cast_nearby_desc">연결된 블루투스 오디오 기기를 감지하고 제어하는 데 필요합니다.</string>
     <string name="presentation_batch_g_cast_perm_location_title">Wi‑Fi 확인을 위한 위치 정보</string>

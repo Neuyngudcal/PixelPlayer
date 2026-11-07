@@ -182,7 +182,7 @@
     <string name="presentation_batch_g_artist_group_by_album_artist">Raggruppa per album artist</string>
     <string name="presentation_batch_g_artist_group_by_album_artist_sub">Mostra album di collaborazione sotto l\'artista principale</string>
     <string name="presentation_batch_g_artist_info_title">Informazioni parsing multi-artista</string>
-    <string name="presentation_batch_g_artist_info_body">PixelPlayer divide i tag artista usando delimitatori carattere (/, ;, &amp;) e delimitatori parola (feat., ft., vs., x). I delimitatori parola corrispondono senza distinzione tra maiuscole e minuscole.
+    <string name="presentation_batch_g_artist_info_body">Neuro Player divide i tag artista usando delimitatori carattere (/, ;, &amp;) e delimitatori parola (feat., ft., vs., x). I delimitatori parola corrispondono senza distinzione tra maiuscole e minuscole.
 
 "Estrai artisti dal titolo" rileva pattern come (feat. Artista) nei titoli dei brani.
 
@@ -285,7 +285,7 @@ La barra rovesciata (\) può essere usata per sfuggire ai delimitatori carattere
     <string name="presentation_batch_g_album_sel_queue_hint">Coda + riproduzione rispetta l\'ordine della tua selezione.</string>
     <string name="presentation_batch_g_album_sel_limit">Limite: %1$d album per selezione.</string>
     <string name="presentation_batch_g_album_sel_add_queue_play">Aggiungi alla coda e riproduci</string>
-    <string name="presentation_batch_g_app_name">PixelPlayer</string>
+    <string name="presentation_batch_g_app_name">Neuro Player</string>
     <string name="presentation_batch_g_app_tagline">Lettore musicale</string>
     <string name="presentation_batch_g_brick_high">HIGH %1$d</string>
     <string name="presentation_batch_g_brick_cd_close">Chiudi</string>
@@ -335,7 +335,7 @@ La barra rovesciata (\) può essere usata per sfuggire ai delimitatori carattere
     <string name="presentation_batch_g_cast_playing">In riproduzione</string>
     <string name="presentation_batch_g_cast_paused">In pausa</string>
     <string name="presentation_batch_g_cast_perm_title">Preparati a connetterti</string>
-    <string name="presentation_batch_g_cast_perm_body">Consenti a PixelPlayer di vedere i tuoi dispositivi nelle vicinanze e la Wi-Fi attuale per mantenere sincronizzati cast, audio Bluetooth e altoparlanti.</string>
+    <string name="presentation_batch_g_cast_perm_body">Consenti a Neuro Player di vedere i tuoi dispositivi nelle vicinanze e la Wi-Fi attuale per mantenere sincronizzati cast, audio Bluetooth e altoparlanti.</string>
     <string name="presentation_batch_g_cast_perm_nearby_title">Dispositivi nelle vicinanze</string>
     <string name="presentation_batch_g_cast_perm_nearby_desc">Necessario per leggere e controllare i tuoi dispositivi audio Bluetooth connessi.</string>
     <string name="presentation_batch_g_cast_perm_location_title">Posizione per Wi-Fi</string>

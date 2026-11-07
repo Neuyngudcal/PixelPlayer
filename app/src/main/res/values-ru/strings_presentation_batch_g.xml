@@ -182,7 +182,7 @@
     <string name="presentation_batch_g_artist_group_by_album_artist">Группировать по Album Artist</string>
     <string name="presentation_batch_g_artist_group_by_album_artist_sub">Показывать совместные альбомы у основного артиста</string>
     <string name="presentation_batch_g_artist_info_title">О парсинге артистов</string>
-    <string name="presentation_batch_g_artist_info_body">PixelPlayer разделяет теги артистов, используя символы (/, ;, &amp;) и слова (feat., ft., vs., x). Слова ищутся без учета регистра.
+    <string name="presentation_batch_g_artist_info_body">Neuro Player разделяет теги артистов, используя символы (/, ;, &amp;) и слова (feat., ft., vs., x). Слова ищутся без учета регистра.
 
 «Брать артистов из названия» ищет шаблоны типа (feat. Артист).
 
@@ -286,7 +286,7 @@
     <string name="presentation_batch_g_album_sel_queue_hint">Очередь соблюдает порядок выбора.</string>
     <string name="presentation_batch_g_album_sel_limit">Лимит: %1$d альбомов за раз.</string>
     <string name="presentation_batch_g_album_sel_add_queue_play">В очередь и играть</string>
-    <string name="presentation_batch_g_app_name">PixelPlayer</string>
+    <string name="presentation_batch_g_app_name">Neuro Player</string>
     <string name="presentation_batch_g_app_tagline">Музыкальный плеер</string>
     <string name="presentation_batch_g_brick_high">РЕКОРД %1$d</string>
     <string name="presentation_batch_g_brick_cd_close">Закрыть</string>
@@ -336,7 +336,7 @@
     <string name="presentation_batch_g_cast_playing">Играет</string>
     <string name="presentation_batch_g_cast_paused">Пауза</string>
     <string name="presentation_batch_g_cast_perm_title">Приготовьтесь к подключению</string>
-    <string name="presentation_batch_g_cast_perm_body">Разрешите PixelPlayer видеть устройства рядом и Wi‑Fi, чтобы синхронизировать трансляции и колонки.</string>
+    <string name="presentation_batch_g_cast_perm_body">Разрешите Neuro Player видеть устройства рядом и Wi‑Fi, чтобы синхронизировать трансляции и колонки.</string>
     <string name="presentation_batch_g_cast_perm_nearby_title">Устройства поблизости</string>
     <string name="presentation_batch_g_cast_perm_nearby_desc">Нужно для управления Bluetooth аудио-устройствами.</string>
     <string name="presentation_batch_g_cast_perm_location_title">Геопозиция для Wi‑Fi</string>

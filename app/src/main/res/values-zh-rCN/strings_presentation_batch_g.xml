@@ -182,7 +182,7 @@
     <string name="presentation_batch_g_artist_group_by_album_artist">按专辑艺术家分组</string>
     <string name="presentation_batch_g_artist_group_by_album_artist_sub">将合作专辑显示在主艺术家名下</string>
     <string name="presentation_batch_g_artist_info_title">关于多艺术家解析</string>
-    <string name="presentation_batch_g_artist_info_body">PixelPlayer 会使用字符分隔符（/、;、&amp;）和单词分隔符（feat.、ft.、vs.、x）拆分艺术家标签。单词分隔符匹配时不区分大小写。
+    <string name="presentation_batch_g_artist_info_body">Neuro Player 会使用字符分隔符（/、;、&amp;）和单词分隔符（feat.、ft.、vs.、x）拆分艺术家标签。单词分隔符匹配时不区分大小写。
 
 “从标题提取艺术家”会检测歌曲标题中类似（feat. Artist）的模式。
 
@@ -286,7 +286,7 @@
     <string name="presentation_batch_g_album_sel_queue_hint">加入队列并播放会遵循你的选择顺序。</string>
     <string name="presentation_batch_g_album_sel_limit">限制：每次最多选择 %1$d 张专辑。</string>
     <string name="presentation_batch_g_album_sel_add_queue_play">加入队列并播放</string>
-    <string name="presentation_batch_g_app_name">PixelPlayer</string>
+    <string name="presentation_batch_g_app_name">Neuro Player</string>
     <string name="presentation_batch_g_app_tagline">音乐播放器</string>
     <string name="presentation_batch_g_brick_high">最高 %1$d</string>
     <string name="presentation_batch_g_brick_cd_close">关闭</string>
@@ -336,7 +336,7 @@
     <string name="presentation_batch_g_cast_playing">播放中</string>
     <string name="presentation_batch_g_cast_paused">已暂停</string>
     <string name="presentation_batch_g_cast_perm_title">准备连接</string>
-    <string name="presentation_batch_g_cast_perm_body">允许 PixelPlayer 查看附近设备和当前 Wi‑Fi，以便让投放、蓝牙音频和扬声器保持同步。</string>
+    <string name="presentation_batch_g_cast_perm_body">允许 Neuro Player 查看附近设备和当前 Wi‑Fi，以便让投放、蓝牙音频和扬声器保持同步。</string>
     <string name="presentation_batch_g_cast_perm_nearby_title">附近设备</string>
     <string name="presentation_batch_g_cast_perm_nearby_desc">用于读取并控制已连接的蓝牙音频设备。</string>
     <string name="presentation_batch_g_cast_perm_location_title">用于 Wi‑Fi 的位置信息</string>

@@ -11,7 +11,7 @@ android {
     compileSdk = 37
 
     defaultConfig {
-        applicationId = "com.theveloper.pixelplay"
+        applicationId = "com.neuyngudcal.neuroplayer"
         minSdk = 30
         targetSdk = 37
         versionCode = (project.findProperty("APP_VERSION_CODE") as String).toInt()

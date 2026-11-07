@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Rebranded the app as Neuro Player (`com.neuyngudcal.neuroplayer`), based on the last MIT-licensed PixelPlayer revision (`39030156`).
+
+### Removed
+- Remote announcement popup, live GitHub contributor list, beta-info and changelog sheets that contacted or linked to the upstream repository.
+
 ## [0.6.0-beta] - 2026-03-05
 
 ### Added

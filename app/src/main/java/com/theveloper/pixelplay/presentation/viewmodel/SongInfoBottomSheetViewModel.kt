@@ -141,7 +141,7 @@ class SongInfoBottomSheetViewModel @Inject constructor(
                 return@launch
             }
             if (!_isPixelPlayWatchAvailable.value) {
-                onComplete("No reachable watch with PixelPlay")
+                onComplete("No reachable watch with Neuro Player")
                 refreshWatchAvailability()
                 return@launch
             }
