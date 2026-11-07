@@ -22,7 +22,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.layout.layout
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
@@ -63,8 +62,6 @@ internal fun BoxScope.UnifiedPlayerMiniAndFullLayers(
     currentPositionProvider: () -> Long,
     isFavorite: Boolean,
     shouldRenderFullPlayer: Boolean = true,
-    currentHorizontalPaddingStartPxProvider: () -> Float,
-    currentHorizontalPaddingEndPxProvider: () -> Float,
     onShowQueueClicked: () -> Unit,
     onQueueDragStart: () -> Unit,
     onQueueDrag: (Float) -> Unit,
@@ -84,49 +81,28 @@ internal fun BoxScope.UnifiedPlayerMiniAndFullLayers(
                 Box(
                     modifier = Modifier
                         .align(Alignment.TopCenter)
-                        .fillMaxWidth()
-                        .height(MiniPlayerHeight)
                         .graphicsLayer {
                             // Compute miniAlpha in the draw phase from the Animatable,
                             // avoiding per-frame recomposition during gestures.
                             alpha = (1f - playerContentExpansionFraction.value * 2f)
                                 .coerceIn(0f, 1f)
                         }
-                        .layout { measurable, constraints ->
-                            val fraction = playerContentExpansionFraction.value
-                            val startPaddingPx = currentHorizontalPaddingStartPxProvider().toInt().coerceAtLeast(0)
-                            val endPaddingPx = currentHorizontalPaddingEndPxProvider().toInt().coerceAtLeast(0)
-                            
-                            val targetWidth = if (fraction > 0f) {
-                                (constraints.maxWidth - startPaddingPx - endPaddingPx).coerceAtLeast(0)
-                            } else {
-                                constraints.maxWidth
-                            }
-                            val placeable = measurable.measure(
-                                constraints.copy(
-                                    minWidth = targetWidth,
-                                    maxWidth = targetWidth
-                                )
-                            )
-                            layout(constraints.maxWidth, constraints.maxHeight) {
-                                val xOffset = if (fraction > 0f) startPaddingPx else 0
-                                placeable.placeRelative(xOffset, 0)
-                            }
-                        }
                         .zIndex(miniPlayerZIndex)
                 ) {
-                    val isMiniPlayerVisible by remember {
-                        derivedStateOf { playerContentExpansionFraction.value < 0.01f }
+                    val miniAlbumCornerRadius by remember(overallSheetTopCornerRadiusProvider) {
+                        derivedStateOf {
+                            (overallSheetTopCornerRadiusProvider().value * 0.5f).dp
+                        }
                     }
                     MiniPlayerContentInternal(
                         song = currentSongNonNull,
+                        cornerRadiusAlb = miniAlbumCornerRadius,
                         isPlaying = infrequentPlayerState.isPlaying,
                         isCastConnecting = isCastConnecting,
                         isPreparingPlayback = isPreparingPlayback,
                         onPlayPause = { playerViewModel.playPause() },
                         onPrevious = { playerViewModel.previousSong() },
                         onNext = { playerViewModel.nextSong() },
-                        canScroll = isMiniPlayerVisible && infrequentPlayerState.isPlaying,
                         modifier = Modifier.fillMaxSize()
                     )
                 }

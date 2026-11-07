@@ -67,7 +67,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
-import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -113,7 +113,7 @@ fun NavidromeLoginScreen(
             is NavidromeLoginState.Success -> {
                 Toast.makeText(
                     context,
-                    context.getString(R.string.auth_welcome_toast, state.username),
+                    context.getString(R.string.toast_welcome_user, state.username),
                     Toast.LENGTH_SHORT
                 ).show()
                 onClose()
@@ -135,7 +135,7 @@ fun NavidromeLoginScreen(
             TopAppBar(
                 title = {
                     Text(
-                        text = stringResource(R.string.auth_subsonic_navidrome_title),
+                        text = stringResource(R.string.auth_navidrome_title),
                         fontFamily = GoogleSansRounded,
                         fontWeight = FontWeight.SemiBold
                     )
@@ -152,7 +152,7 @@ fun NavidromeLoginScreen(
                     ) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
-                            contentDescription = stringResource(R.string.common_back)
+                            contentDescription = stringResource(R.string.auth_cd_back)
                         )
                     }
                 },
@@ -180,7 +180,7 @@ fun NavidromeLoginScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 // Navidrome Icon
-                 androidx.compose.material3.Surface(
+                androidx.compose.material3.Surface(
                     shape = CircleShape,
                     color = androidx.compose.ui.graphics.Color.White,
                     modifier = Modifier.size(64.dp),
@@ -190,7 +190,7 @@ fun NavidromeLoginScreen(
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
                             imageVector = androidx.compose.ui.graphics.vector.ImageVector.vectorResource(id = R.drawable.ic_navidrome),
-                            contentDescription = stringResource(R.string.auth_navidrome_title),
+                            contentDescription = stringResource(R.string.cd_navidrome_logo),
                             tint = androidx.compose.ui.graphics.Color.Unspecified,
                             modifier = Modifier.size(42.dp)
                         )
@@ -210,7 +210,7 @@ fun NavidromeLoginScreen(
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
                             imageVector = androidx.compose.ui.graphics.vector.ImageVector.vectorResource(id = R.drawable.ic_subsonic),
-                            contentDescription = stringResource(R.string.auth_subsonic_title),
+                            contentDescription = stringResource(R.string.cd_subsonic_logo),
                             tint = androidx.compose.ui.graphics.Color.Unspecified,
                             modifier = Modifier.size(42.dp)
                         )
@@ -221,7 +221,7 @@ fun NavidromeLoginScreen(
             Spacer(modifier = Modifier.height(16.dp))
 
             Text(
-                text = stringResource(R.string.auth_subsonic_navidrome_title),
+                text = stringResource(R.string.auth_navidrome_title),
                 style = MaterialTheme.typography.headlineSmall,
                 fontFamily = GoogleSansRounded,
                 fontWeight = FontWeight.Bold,
@@ -245,7 +245,7 @@ fun NavidromeLoginScreen(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text(
-                    text = stringResource(R.string.auth_navidrome_info_msg),
+                    text = stringResource(R.string.auth_navidrome_info_card),
                     modifier = Modifier.padding(16.dp),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -266,7 +266,7 @@ fun NavidromeLoginScreen(
                     modifier = Modifier.padding(18.dp)
                 ) {
                     Text(
-                        text = stringResource(R.string.auth_details_title),
+                        text = stringResource(R.string.auth_connection_details),
                         style = MaterialTheme.typography.titleMedium,
                         fontFamily = GoogleSansRounded,
                         fontWeight = FontWeight.Bold
@@ -275,7 +275,7 @@ fun NavidromeLoginScreen(
                     Spacer(modifier = Modifier.height(4.dp))
 
                     Text(
-                        text = stringResource(R.string.auth_details_subtitle),
+                        text = stringResource(R.string.auth_connection_details_subtitle),
                         style = MaterialTheme.typography.bodySmall,
                         fontFamily = GoogleSansRounded,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -286,9 +286,9 @@ fun NavidromeLoginScreen(
                     ExpressiveLoginField(
                         value = serverUrl,
                         onValueChange = { serverUrl = it },
-                        label = stringResource(R.string.auth_server_url_label),
-                        placeholder = stringResource(R.string.auth_navidrome_url_placeholder),
-                        supportingText = stringResource(R.string.auth_navidrome_url_hint),
+                        label = stringResource(R.string.auth_server_url),
+                        placeholder = stringResource(R.string.auth_server_url_placeholder_https),
+                        supportingText = stringResource(R.string.auth_navidrome_server_url_hint),
                         leadingIcon = Icons.Rounded.CloudQueue,
                         enabled = !isLoading,
                         keyboardOptions = KeyboardOptions(
@@ -303,11 +303,11 @@ fun NavidromeLoginScreen(
 
                     Spacer(modifier = Modifier.height(14.dp))
 
-                     ExpressiveLoginField(
+                    ExpressiveLoginField(
                         value = username,
                         onValueChange = { username = it },
-                        label = stringResource(R.string.auth_username_label),
-                        placeholder = stringResource(R.string.auth_username_placeholder),
+                        label = stringResource(R.string.auth_username),
+                        placeholder = stringResource(R.string.auth_username_placeholder_admin),
                         supportingText = stringResource(R.string.auth_navidrome_username_hint),
                         leadingIcon = Icons.Rounded.Person,
                         enabled = !isLoading,
@@ -326,7 +326,7 @@ fun NavidromeLoginScreen(
                     ExpressiveLoginField(
                         value = password,
                         onValueChange = { password = it },
-                        label = stringResource(R.string.auth_password_label),
+                        label = stringResource(R.string.auth_password),
                         placeholder = stringResource(R.string.auth_password_placeholder),
                         supportingText = stringResource(R.string.auth_navidrome_password_hint),
                         leadingIcon = Icons.Rounded.Lock,
@@ -356,7 +356,7 @@ fun NavidromeLoginScreen(
                                 Icon(
                                     imageVector = if (passwordVisible) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility,
                                     contentDescription = stringResource(
-                                        if (passwordVisible) R.string.auth_hide_pwd_action else R.string.auth_show_pwd_action
+                                        if (passwordVisible) R.string.auth_hide_password else R.string.auth_show_password
                                     )
                                 )
                             }
@@ -377,7 +377,7 @@ fun NavidromeLoginScreen(
                         contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp)
                     ) {
                         Text(
-                            text = stringResource(R.string.auth_navidrome_prefill_https_action),
+                            text = stringResource(R.string.auth_prefill_https),
                             fontFamily = GoogleSansRounded,
                             fontWeight = FontWeight.Medium
                         )
@@ -406,9 +406,9 @@ fun NavidromeLoginScreen(
                         color = MaterialTheme.colorScheme.onPrimary
                     )
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text(stringResource(R.string.auth_connecting_msg), fontFamily = GoogleSansRounded)
+                    Text(stringResource(R.string.auth_connecting), fontFamily = GoogleSansRounded)
                 } else {
-                    Text(stringResource(R.string.auth_connect_action), fontFamily = GoogleSansRounded, fontWeight = FontWeight.SemiBold)
+                    Text(stringResource(R.string.auth_connect), fontFamily = GoogleSansRounded, fontWeight = FontWeight.SemiBold)
                 }
             }
 
@@ -416,7 +416,7 @@ fun NavidromeLoginScreen(
 
             // Help text
             Text(
-                text = stringResource(R.string.auth_navidrome_footer_msg),
+                text = stringResource(R.string.auth_navidrome_footer),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontFamily = GoogleSansRounded

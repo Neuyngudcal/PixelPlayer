@@ -15,9 +15,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
@@ -62,7 +60,6 @@ import com.theveloper.pixelplay.data.model.Song
 import com.theveloper.pixelplay.data.model.SortOption
 import com.theveloper.pixelplay.data.model.StorageFilter
 import com.theveloper.pixelplay.presentation.components.ExpressiveScrollBar
-import com.theveloper.pixelplay.ui.theme.LocalShowScrollbar
 import com.theveloper.pixelplay.presentation.components.MiniPlayerHeight
 import com.theveloper.pixelplay.presentation.components.PlaylistContainer
 import com.theveloper.pixelplay.presentation.components.albumFastScrollLabel
@@ -74,8 +71,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.map
-import androidx.compose.ui.text.style.TextOverflow
 
 @androidx.annotation.OptIn(UnstableApi::class)
 @Composable
@@ -94,18 +89,10 @@ fun LibraryAlbumsTab(
     onAlbumLongPress: (Album) -> Unit = {},
     onAlbumSelectionToggle: (Album) -> Unit = {},
     getSelectionIndex: (Long) -> Int? = { null },
-    storageFilter: StorageFilter = StorageFilter.ALL,
-    gridState: LazyGridState = rememberLazyGridState(),
-    listState: LazyListState = rememberLazyListState()
+    storageFilter: StorageFilter = StorageFilter.ALL
 ) {
-    val hasCurrentSong by remember(playerViewModel) {
-        playerViewModel.stablePlayerState
-            .map { it.currentSong != null && it.currentSong != Song.emptySong() }
-            .distinctUntilChanged()
-    }.collectAsStateWithLifecycle(initialValue = false)
-
-    val dummyListState = rememberLazyListState()
-    val dummyGridState = rememberLazyGridState()
+    val gridState = rememberLazyGridState()
+    val listState = rememberLazyListState()
     val context = LocalContext.current
     val imageLoader = context.imageLoader
 
@@ -218,7 +205,11 @@ fun LibraryAlbumsTab(
 
     val refreshState = albums.loadState.refresh
     val reachedEndOfPagination = albums.loadState.append.endOfPaginationReached
-    val shouldShowInitialLoading = albums.itemCount == 0 && isLoading
+    val shouldShowInitialLoading = albums.itemCount == 0 && (
+        isLoading ||
+            refreshState is LoadState.Loading ||
+            (refreshState is LoadState.NotLoading && !reachedEndOfPagination)
+    )
 
     when {
         refreshState is LoadState.Error && albums.itemCount == 0 -> {
@@ -230,15 +221,15 @@ fun LibraryAlbumsTab(
                 contentAlignment = Alignment.Center
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(stringResource(R.string.library_album_detail_error_loading_albums), style = MaterialTheme.typography.titleMedium)
+                    Text(stringResource(R.string.library_error_loading_albums), style = MaterialTheme.typography.titleMedium)
                     Text(
-                        error.localizedMessage ?: stringResource(R.string.common_error_unknown),
+                        error.localizedMessage ?: stringResource(R.string.error_unknown),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     Button(onClick = { albums.retry() }) {
-                        Text(stringResource(R.string.library_action_retry), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(stringResource(R.string.library_retry))
                     }
                 }
             }
@@ -258,13 +249,14 @@ fun LibraryAlbumsTab(
                             )
                         )
                         .fillMaxSize(),
+                    state = listState,
                     contentPadding = PaddingValues(bottom = bottomBarHeight + MiniPlayerHeight + ListExtraBottomGap + 4.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     items(8, key = { "skeleton_album_list_$it" }) {
                         AlbumListItem(
                             album = Album.empty(),
-                            albumColorSchemePairFlow = playerViewModel.themeStateHolder.emptyAlbumColorSchemeFlow,
+                            albumColorSchemePairFlow = MutableStateFlow<ColorSchemePair?>(null),
                             onClick = {},
                             isLoading = true
                         )
@@ -283,6 +275,7 @@ fun LibraryAlbumsTab(
                             )
                         )
                         .fillMaxSize(),
+                    state = gridState,
                     columns = GridCells.Fixed(2),
                     contentPadding = PaddingValues(bottom = bottomBarHeight + MiniPlayerHeight + ListExtraBottomGap + 4.dp),
                     verticalArrangement = Arrangement.spacedBy(14.dp),
@@ -291,7 +284,7 @@ fun LibraryAlbumsTab(
                     items(8, key = { "skeleton_album_grid_$it" }) {
                         AlbumGridItemRedesigned(
                             album = Album.empty(),
-                            albumColorSchemePairFlow = playerViewModel.themeStateHolder.emptyAlbumColorSchemeFlow,
+                            albumColorSchemePairFlow = MutableStateFlow<ColorSchemePair?>(null),
                             onClick = {},
                             isLoading = true
                         )
@@ -326,10 +319,9 @@ fun LibraryAlbumsTab(
                 ) {
                     Box(modifier = Modifier.fillMaxSize()) {
                         if (isListView) {
-                            val activeListState = if (albums.itemCount > 0) listState else dummyListState
                             LazyColumn(
                                 modifier = Modifier
-                                    .padding(start = 14.dp, end = if (LocalShowScrollbar.current && (activeListState.canScrollForward || activeListState.canScrollBackward)) 24.dp else 14.dp, bottom = 6.dp)
+                                    .padding(start = 14.dp, end = if (listState.canScrollForward || listState.canScrollBackward) 24.dp else 14.dp, bottom = 6.dp)
                                     .clip(
                                         RoundedCornerShape(
                                             topStart = 16.dp,
@@ -338,7 +330,7 @@ fun LibraryAlbumsTab(
                                             bottomEnd = PlayerSheetCollapsedCornerRadius
                                         )
                                     ),
-                                state = activeListState,
+                                state = listState,
                                 contentPadding = PaddingValues(bottom = bottomBarHeight + MiniPlayerHeight + ListExtraBottomGap + 4.dp),
                                 verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
@@ -349,9 +341,8 @@ fun LibraryAlbumsTab(
                                 ) { index ->
                                     val album = albums[index]
                                     if (album != null) {
-                                        val albumSpecificColorSchemeFlow = remember(album.albumArtUriString) {
+                                        val albumSpecificColorSchemeFlow =
                                             playerViewModel.themeStateHolder.getAlbumColorSchemeFlow(album.albumArtUriString ?: "")
-                                        }
                                         val rememberedOnClick = remember(album.id, onAlbumClick) {
                                             { onAlbumClick(album.id) }
                                         }
@@ -375,14 +366,15 @@ fun LibraryAlbumsTab(
                                     } else {
                                         AlbumListItem(
                                             album = Album.empty(),
-                                            albumColorSchemePairFlow = playerViewModel.themeStateHolder.emptyAlbumColorSchemeFlow,
+                                            albumColorSchemePairFlow = MutableStateFlow<ColorSchemePair?>(null),
                                             onClick = {},
                                             isLoading = true
                                         )
                                     }
                                 }
                             }
-                            val bottomPadding = if (hasCurrentSong)
+                            val stablePlayerState by playerViewModel.stablePlayerState.collectAsStateWithLifecycle()
+                            val bottomPadding = if (stablePlayerState.currentSong != null && stablePlayerState.currentSong != Song.emptySong())
                                 bottomBarHeight + MiniPlayerHeight + 16.dp
                             else
                                 bottomBarHeight + 16.dp
@@ -391,14 +383,13 @@ fun LibraryAlbumsTab(
                                 modifier = Modifier
                                     .align(Alignment.CenterEnd)
                                     .padding(end = 4.dp, top = 16.dp, bottom = bottomPadding),
-                                listState = activeListState,
+                                listState = listState,
                                 dragLabelProvider = albumFastScrollLabelProvider
                             )
                         } else {
-                            val activeGridState = if (albums.itemCount > 0) gridState else dummyGridState
                             LazyVerticalGrid(
                                 modifier = Modifier
-                                    .padding(start = 14.dp, end = if (LocalShowScrollbar.current && (activeGridState.canScrollForward || activeGridState.canScrollBackward)) 24.dp else 14.dp, bottom = 6.dp)
+                                    .padding(start = 14.dp, end = if (gridState.canScrollForward || gridState.canScrollBackward) 24.dp else 14.dp, bottom = 6.dp)
                                     .clip(
                                         RoundedCornerShape(
                                             topStart = 16.dp,
@@ -407,7 +398,7 @@ fun LibraryAlbumsTab(
                                             bottomEnd = PlayerSheetCollapsedCornerRadius
                                         )
                                     ),
-                                state = activeGridState,
+                                state = gridState,
                                 columns = GridCells.Fixed(2),
                                 contentPadding = PaddingValues(bottom = bottomBarHeight + MiniPlayerHeight + ListExtraBottomGap + 4.dp),
                                 verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -420,9 +411,8 @@ fun LibraryAlbumsTab(
                                 ) { index ->
                                     val album = albums[index]
                                     if (album != null) {
-                                        val albumSpecificColorSchemeFlow = remember(album.albumArtUriString) {
+                                        val albumSpecificColorSchemeFlow =
                                             playerViewModel.themeStateHolder.getAlbumColorSchemeFlow(album.albumArtUriString ?: "")
-                                        }
                                         val rememberedOnClick = remember(album.id, onAlbumClick) {
                                             { onAlbumClick(album.id) }
                                         }
@@ -446,7 +436,7 @@ fun LibraryAlbumsTab(
                                     } else {
                                         AlbumGridItemRedesigned(
                                             album = Album.empty(),
-                                            albumColorSchemePairFlow = playerViewModel.themeStateHolder.emptyAlbumColorSchemeFlow,
+                                            albumColorSchemePairFlow = MutableStateFlow<ColorSchemePair?>(null),
                                             onClick = {},
                                             isLoading = true
                                         )
@@ -454,7 +444,8 @@ fun LibraryAlbumsTab(
                                 }
                             }
 
-                            val bottomPadding = if (hasCurrentSong)
+                            val stablePlayerState by playerViewModel.stablePlayerState.collectAsStateWithLifecycle()
+                            val bottomPadding = if (stablePlayerState.currentSong != null && stablePlayerState.currentSong != Song.emptySong())
                                 bottomBarHeight + MiniPlayerHeight + 16.dp
                             else
                                 bottomBarHeight + 16.dp
@@ -463,7 +454,7 @@ fun LibraryAlbumsTab(
                                 modifier = Modifier
                                     .align(Alignment.CenterEnd)
                                     .padding(end = 4.dp, top = 16.dp, bottom = bottomPadding),
-                                gridState = activeGridState,
+                                gridState = gridState,
                                 dragLabelProvider = albumFastScrollLabelProvider
                             )
                         }
@@ -485,16 +476,9 @@ fun LibraryArtistsTab(
     onArtistClick: (Long) -> Unit,
     isRefreshing: Boolean,
     onRefresh: () -> Unit,
-    storageFilter: StorageFilter = StorageFilter.ALL,
-    listState: LazyListState = rememberLazyListState()
+    storageFilter: StorageFilter = StorageFilter.ALL
 ) {
-    val hasCurrentSong by remember(playerViewModel) {
-        playerViewModel.stablePlayerState
-            .map { it.currentSong != null && it.currentSong != Song.emptySong() }
-            .distinctUntilChanged()
-    }.collectAsStateWithLifecycle(initialValue = false)
-
-    val dummyListState = rememberLazyListState()
+    val listState = rememberLazyListState()
     val artistFastScrollLabelProvider = remember(artists, currentArtistSortOption) {
         { index: Int ->
             artistFastScrollLabel(
@@ -531,7 +515,11 @@ fun LibraryArtistsTab(
 
     val refreshState = artists.loadState.refresh
     val reachedEndOfPagination = artists.loadState.append.endOfPaginationReached
-    val shouldShowInitialLoading = artists.itemCount == 0 && isLoading
+    val shouldShowInitialLoading = artists.itemCount == 0 && (
+        isLoading ||
+            refreshState is LoadState.Loading ||
+            (refreshState is LoadState.NotLoading && !reachedEndOfPagination)
+    )
 
     when {
         refreshState is LoadState.Error && artists.itemCount == 0 -> {
@@ -543,15 +531,15 @@ fun LibraryArtistsTab(
                 contentAlignment = Alignment.Center
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(stringResource(R.string.library_artist_error_loading_artists), style = MaterialTheme.typography.titleMedium)
+                    Text(stringResource(R.string.library_error_loading_artists), style = MaterialTheme.typography.titleMedium)
                     Text(
-                        error.localizedMessage ?: stringResource(R.string.common_error_unknown),
+                        error.localizedMessage ?: stringResource(R.string.error_unknown),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     Button(onClick = { artists.retry() }) {
-                        Text(stringResource(R.string.library_action_retry), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(stringResource(R.string.library_retry))
                     }
                 }
             }
@@ -570,6 +558,7 @@ fun LibraryArtistsTab(
                         )
                     )
                     .fillMaxSize(),
+                state = listState,
                 verticalArrangement = Arrangement.spacedBy(8.dp),
                 contentPadding = PaddingValues(bottom = bottomBarHeight + MiniPlayerHeight + ListExtraBottomGap)
             ) {
@@ -611,10 +600,9 @@ fun LibraryArtistsTab(
                     }
                 ) {
                     Box(modifier = Modifier.fillMaxSize()) {
-                        val activeListState = if (artists.itemCount > 0) listState else dummyListState
                         LazyColumn(
                             modifier = Modifier
-                                .padding(start = 12.dp, end = if (LocalShowScrollbar.current && (activeListState.canScrollForward || activeListState.canScrollBackward)) 22.dp else 12.dp, bottom = 6.dp)
+                                .padding(start = 12.dp, end = if (listState.canScrollForward || listState.canScrollBackward) 22.dp else 12.dp, bottom = 6.dp)
                                 .clip(
                                     RoundedCornerShape(
                                         topStart = 26.dp,
@@ -623,7 +611,7 @@ fun LibraryArtistsTab(
                                         bottomEnd = PlayerSheetCollapsedCornerRadius
                                     )
                                 ),
-                            state = activeListState,
+                            state = listState,
                             verticalArrangement = Arrangement.spacedBy(8.dp),
                             contentPadding = PaddingValues(bottom = bottomBarHeight + MiniPlayerHeight + ListExtraBottomGap)
                         ) {
@@ -648,7 +636,8 @@ fun LibraryArtistsTab(
                             }
                         }
 
-                        val bottomPadding = if (hasCurrentSong)
+                        val stablePlayerState by playerViewModel.stablePlayerState.collectAsStateWithLifecycle()
+                        val bottomPadding = if (stablePlayerState.currentSong != null && stablePlayerState.currentSong != Song.emptySong())
                             bottomBarHeight + MiniPlayerHeight + 16.dp
                         else
                             bottomBarHeight + 16.dp
@@ -657,7 +646,7 @@ fun LibraryArtistsTab(
                             modifier = Modifier
                                 .align(Alignment.CenterEnd)
                                 .padding(end = 4.dp, top = 16.dp, bottom = bottomPadding),
-                            listState = activeListState,
+                            listState = listState,
                             dragLabelProvider = artistFastScrollLabelProvider
                         )
                     }

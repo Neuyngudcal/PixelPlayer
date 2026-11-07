@@ -33,7 +33,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -49,7 +51,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.lerp as lerpDp
 import coil.size.Size
 import com.theveloper.pixelplay.data.model.Song
-import com.theveloper.pixelplay.presentation.components.AutoScrollingText
+import com.theveloper.pixelplay.presentation.components.AutoScrollingTextOnDemand
 import com.theveloper.pixelplay.presentation.components.ShimmerBox
 import androidx.compose.ui.res.stringResource
 import com.theveloper.pixelplay.R
@@ -238,6 +240,8 @@ fun EnhancedSongListItem(
         }
     } else {
         // Actual Song Item Layout
+        var applyTextMarquee by remember { mutableStateOf(false) }
+
         Surface(
             modifier = modifier
                 .fillMaxWidth()
@@ -264,9 +268,18 @@ fun EnhancedSongListItem(
                                 onClick() 
                             }
                         },
-                        onLongPress = {
+                        onLongPress = { 
                             // Long press always activates/toggles selection
                             onLongPress()
+                        },
+                        onPress = {
+                            if (!isSelectionMode) {
+                                try {
+                                    awaitRelease()
+                                } finally {
+                                    applyTextMarquee = false
+                                }
+                            }
                         }
                     )
                 },
@@ -314,7 +327,7 @@ fun EnhancedSongListItem(
                                 } else {
                                     Icon(
                                         imageVector = Icons.Rounded.CheckCircle,
-                                        contentDescription = stringResource(R.string.common_selected),
+                                        contentDescription = stringResource(R.string.presentation_batch_g_list_cd_selected),
                                         tint = selectionOverlayContentColor,
                                         modifier = Modifier.size(28.dp)
                                     )
@@ -332,10 +345,11 @@ fun EnhancedSongListItem(
                         .weight(1f)
                 ) {
                     if (isHighlighted && !isSelectionMode) {
-                        AutoScrollingText(
+                        AutoScrollingTextOnDemand(
                             text = song.title,
-                            style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold),
+                            style = MaterialTheme.typography.bodyLarge,
                             gradientEdgeColor = containerColor,
+                            expansionFractionProvider = { 1f },
                         )
 
                     } else {
@@ -388,7 +402,7 @@ fun EnhancedSongListItem(
                     ) {
                         Icon(
                             imageVector = Icons.Rounded.MoreVert,
-                            contentDescription = stringResource(R.string.common_more_options_for, song.title),
+                            contentDescription = stringResource(R.string.presentation_batch_g_list_cd_more_for_title, song.title),
                             modifier = Modifier.size(24.dp)
                         )
                     }

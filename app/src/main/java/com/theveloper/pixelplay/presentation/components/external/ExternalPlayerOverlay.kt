@@ -28,14 +28,14 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.MotionScheme
-import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -46,6 +46,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -56,14 +57,14 @@ import coil.size.Size
 import com.theveloper.pixelplay.R
 import com.theveloper.pixelplay.data.preferences.sanitizeNavBarCornerRadius
 import com.theveloper.pixelplay.presentation.components.OptimizedAlbumArt
-import com.theveloper.pixelplay.presentation.components.WavySliderExpressive
+import com.theveloper.pixelplay.presentation.components.WavyMusicSlider
 import com.theveloper.pixelplay.presentation.components.player.AnimatedPlaybackControls
 import com.theveloper.pixelplay.presentation.viewmodel.PlayerViewModel
 import com.theveloper.pixelplay.utils.formatDuration
 import kotlin.math.roundToLong
 import racra.compose.smooth_corner_rect_library.AbsoluteSmoothCornerShape
 
-@OptIn(UnstableApi::class, ExperimentalMaterial3ExpressiveApi::class)
+@OptIn(UnstableApi::class)
 @Composable
 fun ExternalPlayerOverlay(
     playerViewModel: PlayerViewModel,
@@ -80,8 +81,6 @@ fun ExternalPlayerOverlay(
 
     var sheetVisible by remember { mutableStateOf(true) }
     var awaitingSong by remember { mutableStateOf(true) }
-    val motionScheme = remember { MotionScheme.expressive() }
-    val controlSpatialSpec = remember { motionScheme.fastSpatialSpec<Float>() }
 
     val sheetShape = remember(navBarCornerRadius) {
         val radiusDp = navBarCornerRadius.dp
@@ -94,6 +93,13 @@ fun ExternalPlayerOverlay(
             smoothnessAsPercentBR = 60,
             cornerRadiusBR = radiusDp,
             smoothnessAsPercentBL = 60
+        )
+    }
+
+    val controlAnimationSpec = remember {
+        spring<Float>(
+            dampingRatio = Spring.DampingRatioNoBouncy,
+            stiffness = Spring.StiffnessMedium
         )
     }
 
@@ -142,8 +148,6 @@ fun ExternalPlayerOverlay(
                 tonalElevation = 12.dp,
                 shadowElevation = 20.dp,
                 shape = sheetShape,
-                color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                contentColor = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 20.dp, vertical = 16.dp)
@@ -162,12 +166,6 @@ fun ExternalPlayerOverlay(
                     val rawPosition = if (isRemotePlaybackActive) remotePosition else playbackPosition
                     val position = rawPosition.coerceIn(0L, totalDuration)
                     val progressFraction = if (totalDuration > 0) position.toFloat() / totalDuration else 0f
-                    val colorScheme = MaterialTheme.colorScheme
-                    val skipContainer = colorScheme.secondaryFixedDim
-                    val skipContent = colorScheme.onSecondaryFixed
-                    val playPauseContainer = colorScheme.tertiaryFixedDim
-                    val playPauseContent = colorScheme.onTertiaryFixed
-                    val progressColor = colorScheme.primary
 
                     var sliderPosition by remember(currentSong.id) { mutableStateOf(progressFraction) }
                     var isUserScrubbing by remember { mutableStateOf(false) }
@@ -197,6 +195,18 @@ fun ExternalPlayerOverlay(
                                     .clip(CircleShape)
                                     .background(MaterialTheme.colorScheme.surfaceVariant)
                             )
+//                            IconButton(
+//                                onClick = onDismiss,
+//                                modifier = Modifier
+//                                    .align(Alignment.TopEnd)
+//                                    .size(32.dp)
+//                            ) {
+//                                Icon(
+//                                    painter = painterResource(id = R.drawable.rounded_close_24),
+//                                    contentDescription = stringResource(id = R.string.close_external_player),
+//                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+//                                )
+//                            }
                         }
 
                         Row(
@@ -252,25 +262,20 @@ fun ExternalPlayerOverlay(
 
                         Spacer(modifier = Modifier.height(24.dp))
 
-                        WavySliderExpressive(
-                            value = { sliderPosition },
-                            enabled = totalDuration > 0,
+                        WavyMusicSlider(
+                            value = sliderPosition,
                             onValueChange = { newValue ->
                                 isUserScrubbing = true
                                 sliderPosition = newValue.coerceIn(0f, 1f)
                             },
-                            onValueCommit = { finalValue ->
-                                val finalFraction = finalValue.coerceIn(0f, 1f)
-                                sliderPosition = finalFraction
-                                val targetPosition = (finalFraction * totalDuration).roundToLong()
+                            onValueChangeFinished = {
+                                val targetPosition = (sliderPosition * totalDuration).roundToLong()
                                 playerViewModel.seekTo(targetPosition)
                                 isUserScrubbing = false
                             },
-                            activeTrackColor = progressColor,
-                            inactiveTrackColor = progressColor.copy(alpha = 0.2f),
-                            thumbColor = progressColor,
-                            wavelength = 30.dp,
+                            waveLength = 30.dp,
                             isPlaying = stablePlayerState.isPlaying,
+                            isWaveEligible = true,
                             semanticsLabel = "Playback position"
                         )
 
@@ -303,20 +308,16 @@ fun ExternalPlayerOverlay(
                             onPlayPause = playerViewModel::playPause,
                             onNext = playerViewModel::nextSong,
                             height = 76.dp,
-                            pressAnimationSpec = controlSpatialSpec,
-                            colorOtherButtons = skipContainer,
-                            colorPlayPause = playPauseContainer,
-                            tintPlayPauseIcon = playPauseContent,
-                            tintOtherIcons = skipContent,
-                            colorPreviousButton = skipContainer,
-                            colorNextButton = skipContainer,
-                            tintPreviousIcon = skipContent,
-                            tintNextIcon = skipContent
+                            pressAnimationSpec = controlAnimationSpec,
+                            colorOtherButtons = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                            colorPlayPause = MaterialTheme.colorScheme.primary,
+                            tintPlayPauseIcon = MaterialTheme.colorScheme.onPrimary,
+                            tintOtherIcons = MaterialTheme.colorScheme.primary
                         )
 
                         Spacer(modifier = Modifier.height(24.dp))
 
-                        FilledTonalButton(
+                        Button(
                             onClick = onOpenFullPlayer,
                             modifier = Modifier.fillMaxWidth(),
                             shape = AbsoluteSmoothCornerShape(
@@ -329,15 +330,13 @@ fun ExternalPlayerOverlay(
                                 cornerRadiusBR = 16.dp,
                                 smoothnessAsPercentBR = 60
                             ),
-                            colors = ButtonDefaults.filledTonalButtonColors(
-                                containerColor = colorScheme.primaryContainer,
-                                contentColor = colorScheme.onPrimaryContainer
-                            )
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary)
                         ) {
                             Text(
                                 modifier = Modifier.padding(vertical = 10.dp),
-                                text = stringResource(id = R.string.external_action_open_full_player),
-                                style = MaterialTheme.typography.labelLarge
+                                text = stringResource(id = R.string.open_full_player),
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.onPrimary
                             )
                         }
                     }

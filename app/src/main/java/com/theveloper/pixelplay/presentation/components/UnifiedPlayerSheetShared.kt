@@ -33,7 +33,6 @@ import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -48,7 +47,7 @@ import coil.size.Size
 import com.theveloper.pixelplay.data.model.Song
 import com.theveloper.pixelplay.ui.theme.GoogleSansRounded
 
-internal val LocalMaterialTheme = compositionLocalOf<ColorScheme> { error("No ColorScheme provided") }
+internal val LocalMaterialTheme = staticCompositionLocalOf<ColorScheme> { error("No ColorScheme provided") }
 
 val MiniPlayerHeight = 64.dp
 const val ANIMATION_DURATION_MS = 255
@@ -68,9 +67,9 @@ internal fun MiniPlayerContentInternal(
     isPreparingPlayback: Boolean,
     onPlayPause: () -> Unit,
     onPrevious: () -> Unit,
+    cornerRadiusAlb: Dp,
     onNext: () -> Unit,
-    modifier: Modifier = Modifier,
-    canScroll: Boolean = true
+    modifier: Modifier = Modifier
 ) {
     val hapticFeedback = LocalHapticFeedback.current
     val controlsEnabled = !isCastConnecting && !isPreparingPlayback
@@ -137,14 +136,12 @@ internal fun MiniPlayerContentInternal(
                     else -> song.title
                 },
                 style = titleStyle,
-                gradientEdgeColor = LocalMaterialTheme.current.primaryContainer,
-                canScroll = canScroll
+                gradientEdgeColor = LocalMaterialTheme.current.primaryContainer
             )
             AutoScrollingText(
                 text = if (isPreparingPlayback) "Loading audio…" else song.displayArtist,
                 style = artistStyle,
-                gradientEdgeColor = LocalMaterialTheme.current.primaryContainer,
-                canScroll = canScroll
+                gradientEdgeColor = LocalMaterialTheme.current.primaryContainer
             )
         }
         Spacer(modifier = Modifier.width(8.dp))

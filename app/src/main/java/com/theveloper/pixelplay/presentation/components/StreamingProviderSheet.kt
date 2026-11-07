@@ -72,7 +72,7 @@ fun StreamingProviderSheet(
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Text(
-                text = stringResource(R.string.topbar_cloud_streaming_title),
+                text = stringResource(R.string.presentation_batch_g_streaming_title),
                 style = MaterialTheme.typography.headlineSmall,
                 fontFamily = GoogleSansRounded,
                 fontWeight = FontWeight.Bold,
@@ -82,7 +82,7 @@ fun StreamingProviderSheet(
             Spacer(Modifier.height(6.dp))
 
             Text(
-                text = stringResource(R.string.topbar_cloud_streaming_subtitle),
+                text = stringResource(R.string.presentation_batch_g_streaming_subtitle),
                 style = MaterialTheme.typography.bodyMedium,
                 fontFamily = GoogleSansRounded,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -163,7 +163,7 @@ fun StreamingProviderSheet(
                     ProviderRow(
                         iconPainter = painterResource(R.drawable.netease_cloud_music_logo_icon_206716__1_),
                         iconTint = Color(0xFFE85959),
-                        title = "Netease Music",
+                        title = "Netease Cloud Music",
                         subtitle = if (isNeteaseLoggedIn) "Connected" else "Sign in to stream",
                         shape = providerSegmentItemShape,
                         isConnected = isNeteaseLoggedIn,

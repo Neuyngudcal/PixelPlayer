@@ -1,6 +1,5 @@
 package com.theveloper.pixelplay.data.ai.provider
 
-import com.theveloper.pixelplay.data.ai.offline.OfflineAiClient
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -8,9 +7,7 @@ import javax.inject.Singleton
  * Factory for creating AI client instances based on provider type
  */
 @Singleton
-class AiClientFactory @Inject constructor(
-    private val offlineAiClient: dagger.Lazy<OfflineAiClient>
-) {
+class AiClientFactory @Inject constructor() {
     
     /**
      * Create an AI client for the specified provider
@@ -19,31 +16,15 @@ class AiClientFactory @Inject constructor(
      * @return AiClient instance
      */
     fun createClient(provider: AiProvider, apiKey: String): AiClient {
-        if (provider.requiresApiKey && apiKey.isBlank()) {
+        if (apiKey.isBlank()) {
             throw IllegalArgumentException("API Key cannot be blank for ${provider.displayName}")
         }
         
         return when (provider) {
-            AiProvider.OFFLINE_GGUF -> offlineAiClient.get()
             AiProvider.GEMINI -> GeminiAiClient(apiKey)
-            AiProvider.DEEPSEEK -> GenericOpenAiClient(
-                apiKey = apiKey,
-                baseUrl = "https://api.deepseek.com",
-                defaultModelId = "deepseek-chat",
-                providerName = "DeepSeek"
-            )
-            AiProvider.GROQ -> GenericOpenAiClient(
-                apiKey = apiKey,
-                baseUrl = "https://api.groq.com/openai/v1",
-                defaultModelId = "llama-3.1-8b-instant",
-                providerName = "Groq"
-            )
-            AiProvider.MISTRAL -> GenericOpenAiClient(
-                apiKey = apiKey,
-                baseUrl = "https://api.mistral.ai/v1",
-                defaultModelId = "mistral-large-latest",
-                providerName = "Mistral"
-            )
+            AiProvider.DEEPSEEK -> DeepSeekAiClient(apiKey)
+            AiProvider.GROQ -> GroqAiClient(apiKey)
+            AiProvider.MISTRAL -> MistralAiClient(apiKey)
             AiProvider.NVIDIA -> GenericOpenAiClient(
                 apiKey = apiKey,
                 baseUrl = "https://integrate.api.nvidia.com/v1",
@@ -74,23 +55,6 @@ class AiClientFactory @Inject constructor(
                 defaultModelId = "google/gemini-2.0-flash-lite-preview-02-05:free",
                 providerName = "OpenRouter"
             )
-            AiProvider.OLLAMA -> GenericOpenAiClient(
-                apiKey = apiKey,
-                baseUrl = "https://api.ollama.ai/v1",
-                defaultModelId = "llama3",
-                providerName = "Ollama"
-            )
-            AiProvider.CUSTOM -> GenericOpenAiClient(
-                apiKey = apiKey,
-                baseUrl = "",
-                defaultModelId = "",
-                providerName = "Custom Provider"
-            )
         }
-    }
-
-    fun createClientWithUrl(provider: AiProvider, apiKey: String, baseUrl: String): AiClient {
-        val displayName = provider.displayName
-        return GenericOpenAiClient(apiKey, baseUrl.trimEnd('/'), "", displayName)
     }
 }

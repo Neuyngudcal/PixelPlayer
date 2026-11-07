@@ -1,7 +1,6 @@
 package com.theveloper.pixelplay.utils
 
 import java.io.StringReader
-import java.util.Base64
 import javax.xml.XMLConstants
 import javax.xml.parsers.DocumentBuilderFactory
 import kotlin.math.roundToInt
@@ -13,14 +12,7 @@ import org.xml.sax.InputSource
 internal object TtmlLyricsParser {
     private const val MAX_TTML_PARAGRAPHS = 5_000
 
-    private data class SpanPiece(
-        val text: String,
-        val beginMs: Int?,
-        val endMs: Int?,
-        val isPart: Boolean
-    )
-
-    fun parseToEnhancedLrc(ttmlText: String, includeWordEndTags: Boolean = true): String? {
+    fun parseToEnhancedLrc(ttmlText: String): String? {
         return runCatching {
             val normalizedTtml = normalizeTtmlDocument(ttmlText)
             if (normalizedTtml.isBlank()) {
@@ -48,326 +40,18 @@ internal object TtmlLyricsParser {
                 return null
             }
 
-            // Parse <ttm:agent xml:id="..." type="person|group"> in <head>
-            val agentRoles = mutableMapOf<String, String>()
-            var personCount = 0
-            val agentNodes = document.getElementsByTagNameNS("*", "agent")
-            for (i in 0 until agentNodes.length) {
-                val agentEl = agentNodes.item(i) as? Element ?: continue
-                val id = findAttributeByLocalName(agentEl, "id")?.trim().orEmpty()
-                val type = findAttributeByLocalName(agentEl, "type")?.trim()?.lowercase().orEmpty()
-                if (id.isEmpty()) continue
-                val role = when {
-                    id.equals("v1", ignoreCase = true) -> {
-                        personCount = maxOf(personCount, 1)
-                        "v1"
-                    }
-                    id.equals("v2", ignoreCase = true) -> {
-                        personCount = maxOf(personCount, 2)
-                        "v2"
-                    }
-                    id.equals("v3", ignoreCase = true) || type == "group" -> "v3"
-                    type == "person" -> {
-                        personCount++
-                        if (personCount == 2) "v2" else "v1"
-                    }
-                    else -> "v1"
+            buildList<Pair<Int, String>> {
+                for (index in 0 until paragraphNodes.length) {
+                    val paragraph = paragraphNodes.item(index) as? Element ?: continue
+                    val beginMs = resolveParagraphStartMs(paragraph) ?: continue
+                    val serializedBody = normalizeParagraphBody(serializeChildren(paragraph))
+                    if (serializedBody.isBlank()) continue
+                    add(beginMs to "[${formatLrcTimestamp(beginMs)}]$serializedBody")
                 }
-                agentRoles[id] = role
-            }
-
-            val hasMultipleVoices = agentRoles.values.distinct().size > 1
-            val keyToStartMs = mutableMapOf<String, Int>()
-            val timedLines = mutableListOf<Pair<Int, String>>()
-
-            for (index in 0 until paragraphNodes.length) {
-                val paragraph = paragraphNodes.item(index) as? Element ?: continue
-                val leadPieces = mutableListOf<SpanPiece>()
-                val bgPieces = mutableListOf<SpanPiece>()
-                collectParagraphPieces(paragraph, leadPieces, bgPieces, inBackground = false)
-
-                val pBeginMs = parseTimeExpression(paragraph.getAttribute("begin"))
-                    ?: leadPieces.firstNotNullOfOrNull { it.beginMs }
-                    ?: bgPieces.firstNotNullOfOrNull { it.beginMs }
-                    ?: continue
-                val pEndMs = parseTimeExpression(paragraph.getAttribute("end"))
-                    ?: leadPieces.asReversed().firstNotNullOfOrNull { it.endMs }
-
-                val lineKey = findAttributeByLocalName(paragraph, "key")?.trim()
-                if (!lineKey.isNullOrEmpty()) {
-                    keyToStartMs[lineKey] = pBeginMs
-                }
-
-                val rawAgent = findAttributeByLocalName(paragraph, "agent")?.trim().orEmpty()
-                val resolvedRole = when {
-                    rawAgent.isEmpty() -> null
-                    agentRoles.containsKey(rawAgent) -> agentRoles[rawAgent]
-                    rawAgent.equals("v2", ignoreCase = true) -> "v2"
-                    rawAgent.equals("v3", ignoreCase = true) -> "v3"
-                    rawAgent.equals("v1", ignoreCase = true) -> "v1"
-                    else -> null
-                }
-                val voicePrefix = when {
-                    resolvedRole == "v2" || resolvedRole == "v3" -> "$resolvedRole:"
-                    resolvedRole == "v1" && hasMultipleVoices -> "v1:"
-                    else -> ""
-                }
-
-                val leadBody = formatPiecesToEnhancedLrc(leadPieces, pEndMs, includeWordEndTags)
-                if (leadBody.isNotBlank()) {
-                    timedLines += pBeginMs to "[${formatLrcTimestamp(pBeginMs)}]$voicePrefix$leadBody"
-                }
-
-                if (bgPieces.isNotEmpty()) {
-                    val bgStartMs = bgPieces.firstNotNullOfOrNull { it.beginMs } ?: pBeginMs
-                    val bgEndMs = bgPieces.asReversed().firstNotNullOfOrNull { it.endMs } ?: pEndMs
-                    val bgBody = stripWrappingParens(formatPiecesToEnhancedLrc(bgPieces, bgEndMs, includeWordEndTags))
-                    if (bgBody.isNotBlank()) {
-                        timedLines += bgStartMs to "[${formatLrcTimestamp(bgStartMs)}][bg:$bgBody]"
-                    }
-                }
-            }
-
-            if (timedLines.isEmpty()) return null
-
-            // Extract translations and transliterations from <head><metadata><iTunesMetadata>
-            val deviceLang = java.util.Locale.getDefault().language.lowercase(java.util.Locale.ROOT)
-            val translations = extractSupplements(document, keyToStartMs, "translation") { lang ->
-                val normalized = lang.trim().lowercase(java.util.Locale.ROOT)
-                when {
-                    deviceLang.isNotEmpty() && normalized.startsWith(deviceLang) -> 2
-                    normalized.startsWith("en") -> 1
-                    else -> 0
-                }
-            }
-            val transliterations = extractSupplements(document, keyToStartMs, "transliteration") { lang ->
-                if (lang.contains("latn", ignoreCase = true)) 2 else 0
-            }
-
-            val headers = mutableListOf<String>()
-            transliterations.forEach { (startMs, text) ->
-                val encoded = Base64.getEncoder().encodeToString(text.toByteArray(Charsets.UTF_8))
-                headers += "[x-romaji:$startMs:$encoded]"
-            }
-            translations.forEach { (startMs, text) ->
-                val encoded = Base64.getEncoder().encodeToString(text.toByteArray(Charsets.UTF_8))
-                headers += "[x-translation:$startMs:$encoded]"
-            }
-
-            val bodyText = timedLines
-                .sortedBy { it.first }
+            }.sortedBy { it.first }
                 .joinToString("\n") { it.second }
-
-            if (headers.isEmpty()) {
-                bodyText
-            } else {
-                headers.joinToString("\n") + "\n" + bodyText
-            }
+                .takeIf { it.isNotBlank() }
         }.getOrNull()
-    }
-
-    private fun collectParagraphPieces(
-        node: Node,
-        lead: MutableList<SpanPiece>,
-        background: MutableList<SpanPiece>,
-        inBackground: Boolean
-    ) {
-        var child = node.firstChild
-        while (child != null) {
-            val target = if (inBackground) background else lead
-            when (child.nodeType) {
-                Node.TEXT_NODE, Node.CDATA_SECTION_NODE -> {
-                    pushPiece(target, child.nodeValue.orEmpty(), null, null)
-                }
-                Node.ELEMENT_NODE -> {
-                    val el = child as Element
-                    val localName = localNameOf(el)
-                    val role = findAttributeByLocalName(el, "role")?.trim()?.lowercase()
-                    when {
-                        localName == "br" -> {
-                            pushPiece(target, " ", null, null)
-                        }
-                        role == "x-bg" -> {
-                            collectParagraphPieces(el, lead, background, inBackground = true)
-                        }
-                        role != null && role != "x-bg" -> {
-                            // Skip non-sung inline metadata spans (e.g. x-roman, x-translation)
-                        }
-                        hasElementChildren(el) -> {
-                            collectParagraphPieces(el, lead, background, inBackground = inBackground)
-                        }
-                        else -> {
-                            val text = collectPlainText(el)
-                            val beginMs = parseTimeExpression(el.getAttribute("begin"))
-                            val endMs = parseTimeExpression(el.getAttribute("end"))
-                            pushPiece(target, text, beginMs, endMs)
-                        }
-                    }
-                }
-            }
-            child = child.nextSibling
-        }
-    }
-
-    private fun pushPiece(
-        target: MutableList<SpanPiece>,
-        rawText: String,
-        beginMs: Int?,
-        endMs: Int?
-    ) {
-        val cleaned = sanitizeTextFragment(rawText)
-        if (cleaned.isEmpty()) return
-
-        if (cleaned.first().isWhitespace() && target.isNotEmpty()) {
-            val lastIndex = target.lastIndex
-            target[lastIndex] = target[lastIndex].copy(isPart = false)
-        }
-
-        val normalizedWords = cleaned.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }.joinToString(" ")
-        if (normalizedWords.isEmpty()) return
-
-        val endsWithSpace = cleaned.last().isWhitespace()
-        target += SpanPiece(
-            text = normalizedWords,
-            beginMs = beginMs,
-            endMs = endMs,
-            isPart = !endsWithSpace
-        )
-    }
-
-    private fun formatPiecesToEnhancedLrc(
-        pieces: List<SpanPiece>,
-        fallbackLineEndMs: Int?,
-        includeWordEndTags: Boolean = true
-    ): String {
-        if (pieces.isEmpty()) return ""
-        val hasWordTiming = pieces.any { it.beginMs != null }
-        if (!hasWordTiming) {
-            return buildString {
-                pieces.forEachIndexed { idx, piece ->
-                    append(piece.text)
-                    if (!piece.isPart && idx < pieces.lastIndex) append(' ')
-                }
-            }.trim()
-        }
-
-        val sb = StringBuilder()
-        var lastEmittedTimestamp: Int? = null
-        pieces.forEachIndexed { index, piece ->
-            val start = piece.beginMs
-            if (start != null && start != lastEmittedTimestamp) {
-                sb.append("<${formatLrcTimestamp(start)}>")
-                lastEmittedTimestamp = start
-            }
-            sb.append(piece.text)
-            if (!piece.isPart && index < pieces.lastIndex) {
-                sb.append(' ')
-            }
-            if (includeWordEndTags) {
-                val end = piece.endMs ?: if (index == pieces.lastIndex) fallbackLineEndMs else null
-                if (end != null) {
-                    sb.append("<${formatLrcTimestamp(end)}>")
-                    lastEmittedTimestamp = end
-                }
-            }
-        }
-        return sb.toString().trim()
-    }
-
-    private fun stripWrappingParens(value: String): String {
-        val trimmed = value.trim()
-        val plain = trimmed.replace(Regex("<\\d{1,2}:\\d{2}(?:[.:]\\d{1,3})?>"), "").trim()
-        if (plain.startsWith("(") && plain.endsWith(")")) {
-            return trimmed
-                .replaceFirst("(", "")
-                .let { s ->
-                    val lastParen = s.lastIndexOf(')')
-                    if (lastParen >= 0) s.removeRange(lastParen, lastParen + 1) else s
-                }
-                .trim()
-        }
-        return trimmed
-    }
-
-    private fun extractSupplements(
-        document: org.w3c.dom.Document,
-        keyToStartMs: Map<String, Int>,
-        tagName: String,
-        languageRanker: (String) -> Int
-    ): Map<Int, String> {
-        if (keyToStartMs.isEmpty()) return emptyMap()
-        val nodes = document.getElementsByTagNameNS("*", tagName)
-        var bestMap = emptyMap<Int, String>()
-        var bestRank = -1
-
-        for (i in 0 until nodes.length) {
-            val groupEl = nodes.item(i) as? Element ?: continue
-            val lang = findAttributeByLocalName(groupEl, "lang").orEmpty()
-            val rank = languageRanker(lang)
-            val currentMap = mutableMapOf<Int, String>()
-
-            val textNodes = groupEl.getElementsByTagNameNS("*", "text")
-            for (j in 0 until textNodes.length) {
-                val textEl = textNodes.item(j) as? Element ?: continue
-                val forKey = findAttributeByLocalName(textEl, "for")?.trim() ?: continue
-                val startMs = keyToStartMs[forKey] ?: continue
-                val textVal = collectPlainText(textEl).trim().replace(Regex("\\s+"), " ")
-                if (textVal.isNotEmpty()) {
-                    currentMap[startMs] = textVal
-                }
-            }
-
-            if (currentMap.isNotEmpty()) {
-                val isBetter = bestMap.isEmpty() ||
-                    (rank > bestRank) ||
-                    (rank == bestRank && currentMap.size > bestMap.size)
-                if (isBetter) {
-                    bestMap = currentMap
-                    bestRank = rank
-                }
-            }
-        }
-        return bestMap
-    }
-
-    private fun findAttributeByLocalName(element: Element, localName: String): String? {
-        val attrs = element.attributes ?: return null
-        for (i in 0 until attrs.length) {
-            val attr = attrs.item(i) ?: continue
-            val name = attr.localName ?: attr.nodeName.substringAfterLast(':')
-            if (name.equals(localName, ignoreCase = true)) {
-                return attr.nodeValue
-            }
-        }
-        return null
-    }
-
-    private fun hasElementChildren(element: Element): Boolean {
-        var child = element.firstChild
-        while (child != null) {
-            if (child.nodeType == Node.ELEMENT_NODE) return true
-            child = child.nextSibling
-        }
-        return false
-    }
-
-    private fun collectPlainText(node: Node): String {
-        val sb = StringBuilder()
-        var child = node.firstChild
-        while (child != null) {
-            when (child.nodeType) {
-                Node.TEXT_NODE, Node.CDATA_SECTION_NODE -> sb.append(child.nodeValue.orEmpty())
-                Node.ELEMENT_NODE -> {
-                    val el = child as Element
-                    val role = findAttributeByLocalName(el, "role")?.trim()?.lowercase()
-                    if (role != "x-bg") {
-                        sb.append(collectPlainText(el))
-                    }
-                }
-            }
-            child = child.nextSibling
-        }
-        return sb.toString()
     }
 
     private fun normalizeTtmlDocument(raw: String): String {
@@ -381,6 +65,51 @@ internal object TtmlLyricsParser {
             withoutLeadingNoise.substringAfter("?>", missingDelimiterValue = withoutLeadingNoise).trimStart()
         } else {
             withoutLeadingNoise
+        }
+    }
+
+    private fun resolveParagraphStartMs(paragraph: Element): Int? {
+        parseTimeExpression(paragraph.getAttribute("begin"))?.let { return it }
+
+        val spans = paragraph.getElementsByTagNameNS("*", "span")
+        for (index in 0 until spans.length) {
+            val span = spans.item(index) as? Element ?: continue
+            parseTimeExpression(span.getAttribute("begin"))?.let { return it }
+        }
+        return null
+    }
+
+    private fun serializeChildren(node: Node): String {
+        val builder = StringBuilder()
+        var child = node.firstChild
+        while (child != null) {
+            builder.append(serializeNode(child))
+            child = child.nextSibling
+        }
+        return builder.toString()
+    }
+
+    private fun serializeNode(node: Node): String {
+        return when (node.nodeType) {
+            Node.TEXT_NODE, Node.CDATA_SECTION_NODE -> sanitizeTextFragment(node.nodeValue.orEmpty())
+            Node.ELEMENT_NODE -> serializeElement(node as Element)
+            else -> ""
+        }
+    }
+
+    private fun serializeElement(element: Element): String {
+        return when (localNameOf(element)) {
+            "br" -> "\n"
+            "span" -> {
+                val content = normalizeInlineText(serializeChildren(element))
+                if (content.isBlank()) {
+                    ""
+                } else {
+                    val beginMs = parseTimeExpression(element.getAttribute("begin"))
+                    if (beginMs != null) "<${formatLrcTimestamp(beginMs)}>$content" else content
+                }
+            }
+            else -> serializeChildren(element)
         }
     }
 
@@ -408,17 +137,28 @@ internal object TtmlLyricsParser {
         return cleaned.replace(Regex("\\s+"), " ")
     }
 
+    private fun normalizeInlineText(value: String): String {
+        return value
+            .replace(Regex("[ ]{2,}"), " ")
+            .replace(Regex(" *\n *"), "\n")
+            .trim('\n')
+    }
+
+    private fun normalizeParagraphBody(value: String): String {
+        return value
+            .lineSequence()
+            .map { line -> line.replace(Regex("[ ]{2,}"), " ").trim() }
+            .filter { it.isNotEmpty() }
+            .joinToString("\n")
+            .trim()
+    }
+
     private fun parseTimeExpression(value: String?): Int? {
         val normalized = value?.trim().orEmpty()
         if (normalized.isEmpty()) return null
 
-        if (normalized.endsWith("ms", ignoreCase = true)) {
-            val ms = normalized.removeSuffix("ms").removeSuffix("MS").trim().toDoubleOrNull() ?: return null
-            return ms.roundToInt()
-        }
-
         if (normalized.endsWith("s", ignoreCase = true)) {
-            val seconds = normalized.removeSuffix("s").removeSuffix("S").toDoubleOrNull() ?: return null
+            val seconds = normalized.removeSuffix("s").toDoubleOrNull() ?: return null
             return (seconds * 1000).roundToInt()
         }
 

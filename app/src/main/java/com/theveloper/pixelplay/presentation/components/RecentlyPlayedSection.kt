@@ -5,7 +5,6 @@ import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -44,11 +43,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.res.stringResource
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.theveloper.pixelplay.R
 import com.theveloper.pixelplay.data.model.Song
 import com.theveloper.pixelplay.presentation.model.RecentlyPlayedSongUiModel
-import com.theveloper.pixelplay.presentation.viewmodel.ThemeStateHolder
 
 private val HomeRecentlyPlayedPillHeight = 58.dp
 private val HomeRecentlyPlayedPillSpacing = 8.dp
@@ -74,7 +71,6 @@ fun RecentlyPlayedSection(
     songs: List<RecentlyPlayedSongUiModel>,
     onSongClick: (Song) -> Unit,
     onOpenAllClick: () -> Unit,
-    themeStateHolder: ThemeStateHolder,
     currentSongId: String? = null,
     contentPadding: PaddingValues = HomeRecentlyPlayedDefaultContentPadding,
     modifier: Modifier = Modifier
@@ -118,7 +114,7 @@ fun RecentlyPlayedSection(
         ) {
             Text(
                 modifier = Modifier.padding(start = 6.dp),
-                text = stringResource(R.string.home_recently_played_title),
+                text = stringResource(R.string.presentation_batch_g_recently_played_title),
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.SemiBold
             )
@@ -174,7 +170,6 @@ fun RecentlyPlayedSection(
                                     RecentlyPlayedPill(
                                         item = cell.item,
                                         isCurrentSong = currentSongId == cell.item.song.id,
-                                        themeStateHolder = themeStateHolder,
                                         modifier = Modifier.width(cell.width),
                                         onClick = { onSongClick(cell.item.song) }
                                     )
@@ -244,40 +239,27 @@ private fun resolveRecentlyPlayedRowTargets(totalItems: Int): IntArray {
 private fun RecentlyPlayedPill(
     item: RecentlyPlayedSongUiModel,
     isCurrentSong: Boolean,
-    themeStateHolder: ThemeStateHolder,
     modifier: Modifier = Modifier,
     onClick: () -> Unit
 ) {
-    val isDark = isSystemInDarkTheme()
-    val albumColorSchemeState by remember(item.song.albumArtUriString, themeStateHolder) {
-        themeStateHolder.getAlbumColorSchemeFlow(item.song.albumArtUriString.orEmpty())
-    }.collectAsStateWithLifecycle()
-
-    val albumColorScheme = remember(albumColorSchemeState, isDark) {
-        albumColorSchemeState?.let { if (isDark) it.dark else it.light }
-    }
-
-    val targetContainerColor = albumColorScheme?.primaryContainer ?: MaterialTheme.colorScheme.primaryContainer
-    val targetTitleColor = albumColorScheme?.onPrimaryContainer ?: MaterialTheme.colorScheme.onPrimaryContainer
-    val targetArtistColor = targetTitleColor.copy(alpha = 0.80f)
-
     val animatedCorner by animateDpAsState(
         targetValue = if (isCurrentSong) 14.dp else (HomeRecentlyPlayedPillHeight / 2),
         animationSpec = tween(durationMillis = 280),
         label = "pillCorner"
     )
     val animatedContainer by animateColorAsState(
-        targetValue = targetContainerColor,
+        targetValue = if (isCurrentSong) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainer,
         animationSpec = tween(durationMillis = 280),
         label = "pillContainer"
     )
     val titleColor by animateColorAsState(
-        targetValue = targetTitleColor,
+        targetValue = if (isCurrentSong) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
         animationSpec = tween(durationMillis = 280),
         label = "pillTitleColor"
     )
     val artistColor by animateColorAsState(
-        targetValue = targetArtistColor,
+        targetValue = if (isCurrentSong) MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.80f)
+        else MaterialTheme.colorScheme.onSurfaceVariant,
         animationSpec = tween(durationMillis = 280),
         label = "pillArtistColor"
     )

@@ -168,9 +168,6 @@ class LibraryStateHolder @Inject constructor(
                 )
             }
         }
-        // First distinctUntilChanged: skip the theme-color map entirely when the
-        // set of genre seeds hasn't changed (e.g. Room re-emitting after an
-        // unrelated songs table write).
         .distinctUntilChanged()
         .map { seeds ->
             seeds.map { seed ->
@@ -188,9 +185,6 @@ class LibraryStateHolder @Inject constructor(
             }
                 .toImmutableList()
         }
-        // Second distinctUntilChanged: suppress downstream recomposition when the
-        // fully-resolved Genre list is structurally identical (theme colors unchanged).
-        .distinctUntilChanged()
         .flowOn(Dispatchers.Default)
 
 
@@ -201,38 +195,27 @@ class LibraryStateHolder @Inject constructor(
 
     fun initialize(scope: CoroutineScope) {
         this.scope = scope
-        // Initial load of sort preferences and storage filter in a single combined read
+        // Initial load of sort preferences
         scope.launch {
-            val (songSortKey, albumSortKey, artistSortKey, folderSortKey, likedAndFilter) =
-                kotlinx.coroutines.flow.combine(
-                    userPreferencesRepository.songsSortOptionFlow,
-                    userPreferencesRepository.albumsSortOptionFlow,
-                    userPreferencesRepository.artistsSortOptionFlow,
-                    userPreferencesRepository.foldersSortOptionFlow,
-                    kotlinx.coroutines.flow.combine(
-                        userPreferencesRepository.likedSongsSortOptionFlow,
-                        userPreferencesRepository.lastStorageFilterFlow
-                    ) { liked, filter -> liked to filter }
-                ) { song, album, artist, folder, likedFilter ->
-                     InitialLibraryPrefs(song, album, artist, folder, likedFilter)
-                }.first()
-
+            val songSortKey = userPreferencesRepository.songsSortOptionFlow.first()
             _currentSongSortOption.value = SortOption.SONGS.find { it.storageKey == songSortKey } ?: SortOption.SongDefaultOrder
+
+            val albumSortKey = userPreferencesRepository.albumsSortOptionFlow.first()
             _currentAlbumSortOption.value = SortOption.ALBUMS.find { it.storageKey == albumSortKey } ?: SortOption.AlbumTitleAZ
+
+            val artistSortKey = userPreferencesRepository.artistsSortOptionFlow.first()
             _currentArtistSortOption.value = SortOption.ARTISTS.find { it.storageKey == artistSortKey } ?: SortOption.ArtistNameAZ
+
+            val folderSortKey = userPreferencesRepository.foldersSortOptionFlow.first()
             _currentFolderSortOption.value = SortOption.FOLDERS.find { it.storageKey == folderSortKey } ?: SortOption.FolderNameAZ
-            _currentFavoriteSortOption.value = SortOption.LIKED.find { it.storageKey == likedAndFilter.first } ?: SortOption.LikedSongDateLiked
-            _currentStorageFilter.value = likedAndFilter.second
+
+            val likedSortKey = userPreferencesRepository.likedSongsSortOptionFlow.first()
+            _currentFavoriteSortOption.value = SortOption.LIKED.find { it.storageKey == likedSortKey } ?: SortOption.LikedSongDateLiked
+
+            // Restore last storage filter (All / Cloud / Local)
+            _currentStorageFilter.value = userPreferencesRepository.lastStorageFilterFlow.first()
         }
     }
-
-    private data class InitialLibraryPrefs(
-        val songSortKey: String,
-        val albumSortKey: String,
-        val artistSortKey: String,
-        val folderSortKey: String,
-        val likedAndFilter: Pair<String, com.theveloper.pixelplay.data.model.StorageFilter>
-    )
 
     fun onCleared() {
         scope = null
@@ -240,49 +223,49 @@ class LibraryStateHolder @Inject constructor(
 
     // --- Data Loading ---
 
+    // We observe the repository flows permanently in initialize(), or we start collecting here?
+    // Better to start collecting in initialize() or have these functions just be "ensure active".
+    // Actually, explicit "load" functions are legacy imperative style.
+    // We should launch collectors in initialize() that update the state.
+
     private var songsJob: Job? = null
     private var albumsJob: Job? = null
     private var artistsJob: Job? = null
     private var foldersJob: Job? = null
     @Volatile
     private var needsReloadAfterTrim: Boolean = false
-    @Volatile
-    private var hadSongsObserverBeforeTrim: Boolean = false
-    @Volatile
-    private var hadAlbumsObserverBeforeTrim: Boolean = false
-    @Volatile
-    private var hadArtistsObserverBeforeTrim: Boolean = false
-    @Volatile
-    private var hadFoldersObserverBeforeTrim: Boolean = false
 
     fun startObservingLibraryData() {
-        startObservingSongs()
-        startObservingAlbums()
-        startObservingArtists()
-        startObservingFolders()
-    }
+        if (
+            songsJob?.isActive == true &&
+            albumsJob?.isActive == true &&
+            artistsJob?.isActive == true &&
+            foldersJob?.isActive == true
+        ) {
+            return
+        }
 
-    private fun startObservingSongs() {
-        if (songsJob?.isActive == true) return
+        Log.d("LibraryStateHolder", "startObservingLibraryData called.")
         needsReloadAfterTrim = false
+
         songsJob = scope?.launch {
             _isLoadingLibrary.value = true
             musicRepository.getAudioFiles().conflate().collect { songs ->
-                // Process heavy list conversions in a single Default dispatcher switch
-                val (immutableSongs, songsMap) = withContext(Dispatchers.Default) {
-                    songs.toImmutableList() to songs.associateBy { it.id }
-                }
+                // Process heavy list conversions on Default dispatcher to avoid blocking UI
+                val immutableSongs = withContext(Dispatchers.Default) { songs.toImmutableList() }
+                val songsMap = withContext(Dispatchers.Default) { songs.associateBy { it.id } }
 
                 _allSongs.value = immutableSongs
                 _allSongsById.value = songsMap
+
+                // When the repository emits a new list (triggered by directory changes),
+                // we update our state and re-apply current sorting.
+                // Apply sort to the new data
+                sortSongs(_currentSongSortOption.value, persist = false)
                 _isLoadingLibrary.value = false
             }
         }
-    }
 
-    private fun startObservingAlbums() {
-        if (albumsJob?.isActive == true) return
-        needsReloadAfterTrim = false
         albumsJob = scope?.launch {
             _isLoadingCategories.value = true
             @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
@@ -301,11 +284,7 @@ class LibraryStateHolder @Inject constructor(
                 _isLoadingCategories.value = false
             }
         }
-    }
 
-    private fun startObservingArtists() {
-        if (artistsJob?.isActive == true) return
-        needsReloadAfterTrim = false
         artistsJob = scope?.launch {
             _isLoadingCategories.value = true
             @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
@@ -319,11 +298,7 @@ class LibraryStateHolder @Inject constructor(
                 _isLoadingCategories.value = false
             }
         }
-    }
 
-    private fun startObservingFolders() {
-        if (foldersJob?.isActive == true) return
-        needsReloadAfterTrim = false
         foldersJob = scope?.launch {
             @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
             effectiveStorageFilter.flatMapLatest { filter ->
@@ -337,35 +312,40 @@ class LibraryStateHolder @Inject constructor(
         }
     }
 
-    // Lazily start only the requested category observer
+    // Deprecated imperative loaders - redirected to observer start
     fun loadSongsFromRepository() {
-        startObservingSongs()
+        startObservingLibraryData()
     }
 
     fun loadAlbumsFromRepository() {
-        startObservingAlbums()
+        startObservingLibraryData()
     }
 
     fun loadArtistsFromRepository() {
-        startObservingArtists()
+        startObservingLibraryData()
     }
 
     fun loadFoldersFromRepository() {
-        startObservingFolders()
+        startObservingLibraryData()
     }
 
     // --- Lazy Loading Checks ---
 
+    // --- Lazy Loading Checks ---
+    // We replace conditional "check if empty" with "ensure observing".
+    // If we are already observing, startObservingLibraryData returns early.
+    // If we are not (e.g. process death recovery?), it restarts.
+
     fun loadSongsIfNeeded() {
-        startObservingSongs()
+        startObservingLibraryData()
     }
 
     fun loadAlbumsIfNeeded() {
-        startObservingAlbums()
+        startObservingLibraryData()
     }
 
     fun loadArtistsIfNeeded() {
-        startObservingArtists()
+        startObservingLibraryData()
     }
 
     // --- Sorting ---
@@ -495,13 +475,8 @@ class LibraryStateHolder @Inject constructor(
                 compareByDescending<Artist> { it.name.lowercase() }
                     .thenBy { it.id }
             )
-            SortOption.ArtistNumSongsDesc -> artists.sortedWith(
+            SortOption.ArtistNumSongs -> artists.sortedWith(
                 compareByDescending<Artist> { it.songCount }
-                    .thenBy { it.name.lowercase() }
-                    .thenBy { it.id }
-            )
-            SortOption.ArtistNumSongsAsc -> artists.sortedWith(
-                compareBy<Artist> { it.songCount }
                     .thenBy { it.name.lowercase() }
                     .thenBy { it.id }
             )
@@ -564,17 +539,11 @@ class LibraryStateHolder @Inject constructor(
         _allSongs.update { currentList ->
             currentList.map { if (it.id == updatedSong.id) updatedSong else it }.toImmutableList()
         }
-        _allSongsById.update { currentMap ->
-            if (currentMap.containsKey(updatedSong.id)) currentMap + (updatedSong.id to updatedSong) else currentMap
-        }
     }
 
     fun removeSong(songId: String) {
         _allSongs.update { currentList ->
             currentList.filter { it.id != songId }.toImmutableList()
-        }
-        _allSongsById.update { currentMap ->
-            if (currentMap.containsKey(songId)) currentMap - songId else currentMap
         }
     }
 
@@ -604,11 +573,6 @@ class LibraryStateHolder @Inject constructor(
                 foldersJob?.isActive == true
         if (!hasLoadedData && !hasActiveCollectors) return
 
-        hadSongsObserverBeforeTrim = songsJob?.isActive == true || _allSongs.value.isNotEmpty()
-        hadAlbumsObserverBeforeTrim = albumsJob?.isActive == true || _albums.value.isNotEmpty()
-        hadArtistsObserverBeforeTrim = artistsJob?.isActive == true || _artists.value.isNotEmpty()
-        hadFoldersObserverBeforeTrim = foldersJob?.isActive == true || _musicFolders.value.isNotEmpty()
-
         songsJob?.cancel()
         albumsJob?.cancel()
         artistsJob?.cancel()
@@ -630,11 +594,7 @@ class LibraryStateHolder @Inject constructor(
 
     fun restoreAfterTrimIfNeeded() {
         if (!needsReloadAfterTrim || scope == null) return
-        needsReloadAfterTrim = false
-        if (hadSongsObserverBeforeTrim) startObservingSongs()
-        if (hadAlbumsObserverBeforeTrim) startObservingAlbums()
-        if (hadArtistsObserverBeforeTrim) startObservingArtists()
-        if (hadFoldersObserverBeforeTrim) startObservingFolders()
+        startObservingLibraryData()
     }
 }
 

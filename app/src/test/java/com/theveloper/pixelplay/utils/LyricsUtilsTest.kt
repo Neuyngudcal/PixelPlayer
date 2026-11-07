@@ -224,14 +224,11 @@ class LyricsUtilsTest {
 
         assertEquals(
             listOf(
-                12_570 to "Sinking under",
-                26_420 to "Three in the morning, I ain't slept all weekend",
-                41_710 to "My heart keeps breaking",
-                52_960 to "My heart keeps breaking",
-                72_340 to "Three in the morning, I ain't slept all weekend",
-                87_420 to "My heart keeps breaking"
+                "Sinking under",
+                "Three in the morning, I ain't slept all weekend",
+                "My heart keeps breaking"
             ),
-            synced.map { it.time to it.line }
+            synced.map { it.line }
         )
     }
 
@@ -420,50 +417,5 @@ class LyricsUtilsTest {
             "[00:10.00]Hello world\n[00:10.00]你好世界\n[00:10.00]by: translator",
             lrc
         )
-    }
-
-    @Test
-    fun parseLyrics_doesNotSwallowBackgroundVocalLineAsTranslation() {
-        val lrc = "[00:10.00]Lead vocal line\n[00:10.00][bg:Backing vocal line]\n[00:20.00]Next line"
-
-        val lyrics = LyricsUtils.parseLyrics(lrc)
-        val synced = requireNotNull(lyrics.synced)
-
-        assertEquals(3, synced.size)
-        assertEquals("Lead vocal line", synced[0].line)
-        assertNull(synced[0].translation)
-        assertEquals("Backing vocal line", synced[1].line)
-        assertTrue(synced[1].isBackground)
-    }
-
-    @Test
-    fun toLrcString_preservesWordTimestampsBackgroundAndSourceHeader() {
-        val lyrics = com.theveloper.pixelplay.data.model.Lyrics(
-            provider = "Apple Music",
-            synced = listOf(
-                com.theveloper.pixelplay.data.model.SyncedLine(
-                    time = 10_000,
-                    line = "Hello world",
-                    voice = "v2",
-                    isBackground = true,
-                    translation = "Xin chào thế giới",
-                    words = listOf(
-                        com.theveloper.pixelplay.data.model.SyncedWord(time = 10_000, word = "Hello", endTime = 10_400, startsNewWord = true),
-                        com.theveloper.pixelplay.data.model.SyncedWord(time = 10_400, word = "world", endTime = 10_900, startsNewWord = true)
-                    )
-                )
-            )
-        )
-
-        val serialized = LyricsUtils.toLrcString(lyrics)
-        val reparsed = LyricsUtils.parseLyrics(serialized)
-        val synced = requireNotNull(reparsed.synced)
-
-        assertEquals("Apple Music", reparsed.provider)
-        assertEquals(1, synced.size)
-        assertTrue(synced[0].isBackground)
-        assertEquals("v2", synced[0].voice)
-        assertEquals("Xin chào thế giới", synced[0].translation)
-        assertEquals(listOf("Hello", "world"), requireNotNull(synced[0].words).map { it.word })
     }
 }

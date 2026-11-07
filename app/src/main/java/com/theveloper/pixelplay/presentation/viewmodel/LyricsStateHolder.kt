@@ -41,21 +41,6 @@ interface LyricsLoadCallback {
 }
 
 /**
- * Callbacks supplied by [PlayerViewModel] so the AI-translation flow can reach the AI layer and
- * resolve localized strings without [LyricsStateHolder] depending on AiStateHolder or a Context.
- * Mirrors the callback-lambda pattern used elsewhere (e.g. [LyricsStateHolder.fetchLyricsForSong]).
- *
- * @param translate Delegates the raw lyrics to the AI translator (AiStateHolder.translateLyrics).
- * @param getString Resolves a no-arg string resource.
- * @param getErrorString Resolves the generic AI error string (R.string.ai_error_generic) with a detail.
- */
-class LyricsTranslationCallbacks(
-    val translate: suspend (String) -> Result<String>,
-    val getString: (Int) -> String,
-    val getErrorString: (String) -> String
-)
-
-/**
  * Manages lyrics loading, search state, and sync offset.
  * Extracted from PlayerViewModel to improve modularity.
  */
@@ -196,7 +181,9 @@ class LyricsStateHolder @Inject constructor(
             _searchUiState.value = LyricsSearchUiState.Loading
 
             if (!forcePickResults) {
-                val storedLyrics = musicRepository.getStoredLyrics(song)
+                val storedLyrics = withContext(Dispatchers.IO) {
+                    musicRepository.getStoredLyrics(song)
+                }
                 if (storedLyrics != null) {
                     val (lyrics, rawLyrics) = storedLyrics
                     _searchUiState.value = LyricsSearchUiState.Success(lyrics)
@@ -214,10 +201,10 @@ class LyricsStateHolder @Inject constructor(
                 LyricsSourcePreference.API_FIRST -> emptyList()
                 LyricsSourcePreference.EMBEDDED_FIRST -> listOf(
                     { readEmbeddedLyricsFromFile(song)?.let { it to R.string.lyrics_embedded_already_available } },
-                    { readLocalLyricsFile(song)?.let { it to R.string.lyrics_local_lrc_already_available } }
+                    { readLocalLyricsFile(song)?.let { it to R.string.local_lrc_already_available } }
                 )
                 LyricsSourcePreference.LOCAL_FIRST -> listOf(
-                    { readLocalLyricsFile(song)?.let { it to R.string.lyrics_local_lrc_already_available } },
+                    { readLocalLyricsFile(song)?.let { it to R.string.local_lrc_already_available } },
                     { readEmbeddedLyricsFromFile(song)?.let { it to R.string.lyrics_embedded_already_available } }
                 )
             }
@@ -231,6 +218,12 @@ class LyricsStateHolder @Inject constructor(
                     if (hasValidLyrics(parsed)) {
                         val lyrics = parsed.copy(areFromRemote = false)
                         _searchUiState.value = LyricsSearchUiState.Success(lyrics)
+
+                        val songId = song.id.toLongOrNull()
+                        if (songId != null) {
+                            musicRepository.updateLyrics(songId, rawLyrics)
+                        }
+
                         _songUpdates.emit(song.copy(lyrics = rawLyrics) to lyrics)
                         _messageEvents.emit(contextHelper(messageResId))
                         return@launch
@@ -251,7 +244,8 @@ class LyricsStateHolder @Inject constructor(
                 musicRepository.getLyricsFromRemote(song)
                     .onSuccess { (lyrics, rawLyrics) ->
                         _searchUiState.value = LyricsSearchUiState.Success(lyrics)
-                        val updatedSong = song.withPersistedLyrics(rawLyrics, refreshedAlbumArtUri = null)
+                        val refreshedAlbumArtUri = persistLyricsToFileMetadataIfPossible(song, rawLyrics)
+                        val updatedSong = song.withPersistedLyrics(rawLyrics, refreshedAlbumArtUri)
                         _songUpdates.emit(updatedSong to lyrics)
                     }
                     .onFailure { error ->
@@ -324,103 +318,6 @@ class LyricsStateHolder @Inject constructor(
             }
 
             _messageEvents.emit("Lyrics imported successfully!")
-        }
-    }
-
-    /**
-     * Translate the current song's lyrics via AI and import the result.
-     * The actual inference is delegated through [LyricsTranslationCallbacks.translate] so this holder
-     * stays decoupled from the AI layer. Toasts are surfaced through [messageEvents] as usual.
-     */
-    fun translateLyricsViaAi(currentSong: Song, lyricsObj: Lyrics?, cb: LyricsTranslationCallbacks) {
-        val songId = currentSong.id.toLongOrNull() ?: return
-
-        if (lyricsObj?.synced != null) {
-            val hasValidTranslation = lyricsObj.synced.any { !it.translation.isNullOrBlank() }
-            if (hasValidTranslation) {
-                _messageEvents.tryEmit(cb.getString(R.string.lyrics_translate_already_translated))
-                return
-            }
-        }
-
-        scope?.launch {
-            _messageEvents.emit(cb.getString(R.string.lyrics_translate_progress))
-
-            val originalSynced = lyricsObj?.synced?.takeIf { it.isNotEmpty() }
-            val promptLyrics = if (originalSynced != null) {
-                originalSynced.joinToString("\n") { line ->
-                    "[${LyricsUtils.formatMsAsLrcTag(line.time)}]${line.line}"
-                }
-            } else {
-                withContext(Dispatchers.IO) {
-                    currentSong.lyrics?.takeIf { it.isNotBlank() }
-                        ?: readLocalLyricsFile(currentSong)
-                        ?: readEmbeddedLyricsFromFile(currentSong)
-                        ?: musicRepository.getStoredLyrics(currentSong)?.second
-                        ?: lyricsObj?.plain?.takeIf { it.isNotEmpty() }?.let { LyricsUtils.plainToString(it) }
-                }
-            }
-
-            if (promptLyrics.isNullOrBlank()) {
-                _messageEvents.emit(cb.getString(R.string.lyrics_not_found))
-                return@launch
-            }
-
-            val result = cb.translate(promptLyrics)
-            result.onSuccess { translatedText ->
-                if (translatedText.trim() == "ALREADY_IN_TARGET_LANGUAGE") {
-                    _messageEvents.emit(cb.getString(R.string.lyrics_translate_already_in_target_language))
-                    return@onSuccess
-                }
-
-                if (translatedText.isNotBlank()) {
-                    val finalContentToValidate = if (originalSynced != null) {
-                        val parsedAi = LyricsUtils.parseLyrics(translatedText)
-                        val aiSynced = parsedAi.synced.orEmpty()
-                        val translationsByTime = aiSynced
-                            .mapNotNull { line -> line.translation?.takeIf { it.isNotBlank() }?.let { line.time to it } }
-                            .toMap()
-
-                        val mergedSynced = originalSynced.mapIndexed { index, origLine ->
-                            val matchedTranslation = translationsByTime[origLine.time]
-                                ?: aiSynced.firstOrNull { kotlin.math.abs(it.time - origLine.time) <= 250 && !it.translation.isNullOrBlank() }?.translation
-                                ?: aiSynced.getOrNull(index)?.translation?.takeIf { aiSynced.size == originalSynced.size && it.isNotBlank() }
-                                ?: origLine.translation
-                            origLine.copy(translation = matchedTranslation)
-                        }
-
-                        if (mergedSynced.any { !it.translation.isNullOrBlank() }) {
-                            LyricsUtils.toLrcString(
-                                (lyricsObj ?: Lyrics()).copy(synced = mergedSynced)
-                            )
-                        } else {
-                            translatedText
-                        }
-                    } else {
-                        translatedText
-                    }
-
-                    val validation = LyricsImportSecurity.validateImportedLrcContent(finalContentToValidate)
-                    if (validation is LyricsImportValidationResult.Valid) {
-                        importLyricsFromFile(songId, validation.value, currentSong)
-                        _messageEvents.emit(cb.getString(R.string.lyrics_translate_success))
-                    } else {
-                        val reason = (validation as LyricsImportValidationResult.Invalid).reason
-                        val errorMsg = LyricsImportSecurity.messageFor(reason)
-                        _messageEvents.emit(cb.getErrorString(errorMsg))
-                    }
-                } else {
-                    _messageEvents.emit(cb.getErrorString("Empty response"))
-                }
-            }.onFailure {
-                if (it.message?.contains("key", ignoreCase = true) == true ||
-                    it.message?.contains("config", ignoreCase = true) == true
-                ) {
-                    _messageEvents.emit(cb.getString(R.string.ai_state_error_api_key))
-                } else {
-                    _messageEvents.emit(cb.getErrorString(it.message ?: ""))
-                }
-            }
         }
     }
 

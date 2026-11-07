@@ -45,8 +45,6 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AutoAwesome
-import androidx.compose.material.icons.rounded.ChevronRight
-import androidx.compose.material.icons.rounded.Gavel
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material3.CircularProgressIndicator
@@ -69,6 +67,7 @@ import androidx.compose.ui.BiasAlignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
@@ -85,9 +84,6 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.clearAndSetSemantics
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -135,6 +131,7 @@ private val CoreMaintainer = Contributor(
     avatarUrl = "https://avatars.githubusercontent.com/u/26845343?v=4",
     iconRes = R.drawable.round_developer_board_24,
     githubUrl = "https://github.com/theovilardo",
+    telegramUrl = "https://t.me/thevelopersupport",
 )
 
 private val PinnedCommunityMembers = listOf(
@@ -422,25 +419,6 @@ fun AboutScreen(
                 )
             }
 
-            item(key = "licenses_title") {
-                AboutSectionHeader(
-                    title = stringResource(R.string.about_licenses_title),
-                    subtitle = stringResource(R.string.about_licenses_subtitle),
-                    modifier = Modifier.padding(top = 24.dp),
-                )
-            }
-
-            item(key = "open_source_licenses") {
-                OpenSourceLicensesCard(
-                    onClick = {
-                        navController.navigateSafely(Screen.OpenSourceLicenses.route)
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp),
-                )
-            }
-
             item(key = "contributors_title") {
                 AboutSectionHeader(
                     title = stringResource(R.string.about_contributors_section_title),
@@ -502,62 +480,13 @@ fun AboutScreen(
         }
 
         CollapsibleCommonTopBar(
-            title = stringResource(R.string.about_screen_title),
+            title = stringResource(R.string.screen_about),
             collapseFraction = collapseFraction,
             headerHeight = currentTopBarHeightDp,
             onBackClick = onNavigationIconClick,
             expandedTitleStartPadding = 20.dp,
             collapsedTitleStartPadding = 68.dp
         )
-    }
-}
-
-@Composable
-private fun OpenSourceLicensesCard(
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Surface(
-        onClick = onClick,
-        modifier = modifier,
-        shape = expressiveListShape(index = 0, count = 1),
-        color = MaterialTheme.colorScheme.surfaceContainer,
-        tonalElevation = 2.dp,
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Surface(
-                shape = CircleShape,
-                color = MaterialTheme.colorScheme.secondaryContainer,
-            ) {
-                Icon(
-                    imageVector = Icons.Rounded.Gavel,
-                    contentDescription = null,
-                    modifier = Modifier.padding(10.dp).size(22.dp),
-                    tint = MaterialTheme.colorScheme.onSecondaryContainer,
-                )
-            }
-            Spacer(modifier = Modifier.width(14.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = stringResource(R.string.about_open_source_licenses),
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                Text(
-                    text = stringResource(R.string.about_open_source_licenses_subtitle),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            Icon(
-                imageVector = Icons.Rounded.ChevronRight,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
     }
 }
 
@@ -569,7 +498,6 @@ private fun AboutHeroCard(
 ) {
     val heroShape = AbsoluteSmoothCornerShape(30.dp, 60)
     val haptic = LocalHapticFeedback.current
-    val context = LocalContext.current
 
     Surface(
         modifier = modifier,
@@ -578,7 +506,17 @@ private fun AboutHeroCard(
         tonalElevation = 2.dp,
     ) {
         Box(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(
+                    brush = Brush.linearGradient(
+                        listOf(
+                            MaterialTheme.colorScheme.primary.copy(alpha = 0.18f),
+                            MaterialTheme.colorScheme.tertiary.copy(alpha = 0.14f),
+                            MaterialTheme.colorScheme.surfaceContainerLow,
+                        ),
+                    ),
+                ),
         ) {
             Column(
                 modifier = Modifier
@@ -651,82 +589,6 @@ private fun AboutHeroCard(
                 Spacer(modifier = Modifier.height(12.dp))
 
                 CommunitySignalsRow()
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    SocialChip(
-                        label = stringResource(R.string.about_github_label),
-                        subtitle = stringResource(R.string.about_github_subtitle),
-                        iconRes = R.drawable.github,
-                        contentDescription = stringResource(R.string.about_cd_open_github_repo),
-                        onClick = { openUrl(context, "https://github.com/theovilardo/PixelPlayer") },
-                        modifier = Modifier.weight(1f),
-                    )
-                    SocialChip(
-                        label = stringResource(R.string.about_telegram_label),
-                        subtitle = stringResource(R.string.about_telegram_subtitle),
-                        iconRes = R.drawable.telegram,
-                        contentDescription = stringResource(R.string.about_cd_join_telegram),
-                        onClick = { openUrl(context, "https://t.me/thevelopersupport") },
-                        modifier = Modifier.weight(1f),
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun SocialChip(
-    label: String,
-    subtitle: String,
-    @DrawableRes iconRes: Int,
-    contentDescription: String,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Surface(
-        onClick = onClick,
-        modifier = modifier
-            .height(52.dp)
-            .clearAndSetSemantics {
-                this.contentDescription = contentDescription
-                this.role = Role.Button
-            },
-        shape = AbsoluteSmoothCornerShape(14.dp, 60),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.92f),
-        tonalElevation = 1.dp,
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 12.dp),
-            horizontalArrangement = Arrangement.Start,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(
-                painter = painterResource(iconRes),
-                contentDescription = null,
-                modifier = Modifier.size(20.dp),
-                tint = MaterialTheme.colorScheme.primary,
-            )
-            Spacer(modifier = Modifier.width(10.dp))
-            Column(
-                verticalArrangement = Arrangement.Center
-            ) {
-                Text(
-                    text = label,
-                    style = MaterialTheme.typography.labelLarge,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
-                Text(
-                    text = subtitle,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
             }
         }
     }
@@ -898,12 +760,12 @@ private fun ContributorCard(
             ) {
                 SocialIconButton(
                     painterRes = R.drawable.github,
-                    contentDescription = stringResource(R.string.about_cd_open_github_profile),
+                    contentDescription = stringResource(R.string.cd_open_github_profile),
                     url = contributor.githubUrl,
                 )
                 SocialIconButton(
                     painterRes = R.drawable.telegram,
-                    contentDescription = stringResource(R.string.about_cd_open_telegram),
+                    contentDescription = stringResource(R.string.cd_open_telegram),
                     url = contributor.telegramUrl,
                 )
             }
@@ -952,7 +814,7 @@ private fun ContributorAvatar(
             cachedBitmap != null -> {
                 Image(
                     bitmap = cachedBitmap!!,
-                    contentDescription = stringResource(R.string.about_cd_contributor_avatar, name),
+                    contentDescription = stringResource(R.string.cd_contributor_avatar, name),
                     modifier = Modifier.fillMaxSize(),
                     contentScale = ContentScale.Crop,
                 )
@@ -963,7 +825,7 @@ private fun ContributorAvatar(
                         .data(avatarUrl)
                         .crossfade(true)
                         .build(),
-                    contentDescription = stringResource(R.string.about_cd_contributor_avatar, name),
+                    contentDescription = stringResource(R.string.cd_contributor_avatar, name),
                     modifier = Modifier.fillMaxSize(),
                     shape = CircleShape,
                     contentScale = ContentScale.Crop,
@@ -972,7 +834,11 @@ private fun ContributorAvatar(
                     targetSize = Size(96, 96),
                     onState = { state ->
                         if (state is AsyncImagePainter.State.Success) {
-                            cachedBitmap = state.result.drawable.toBitmap().asImageBitmap()
+                            val drawable = state.result.drawable
+                            val bitmap = drawable?.toBitmap()?.asImageBitmap()
+                            if (bitmap != null) {
+                                cachedBitmap = bitmap
+                            }
                         }
                     },
                 )
@@ -986,7 +852,7 @@ private fun ContributorAvatar(
                 ) {
                     Icon(
                         painter = painterResource(iconRes),
-                        contentDescription = stringResource(R.string.about_cd_contributor_icon, name),
+                        contentDescription = stringResource(R.string.cd_contributor_icon, name),
                         tint = iconTint,
                         modifier = Modifier.size(28.dp),
                     )
@@ -1000,7 +866,7 @@ private fun ContributorAvatar(
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
-                        text = initial,
+                        text = initial.toString(),
                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                         color = letterTint,
                     )

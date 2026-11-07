@@ -43,7 +43,6 @@ sealed class Screen(val route: String) {
     }
 
     object About : Screen("about")
-    object OpenSourceLicenses : Screen("open_source_licenses")
     object EasterEgg : Screen("easter_egg")
 
     object ArtistSettings : Screen("artist_settings")
@@ -51,7 +50,6 @@ sealed class Screen(val route: String) {
     object WordDelimiterConfig : Screen("word_delimiter_config")
     object Equalizer : Screen("equalizer")
     object DeviceCapabilities : Screen("device_capabilities")
-    object OfflineModelHub : Screen("offline_model_hub")
     object NeteaseDashboard : Screen("netease_dashboard")
     object QqMusicDashboard : Screen("qqmusic_dashboard")
     object NavidromeDashboard : Screen("navidrome_dashboard")

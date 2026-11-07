@@ -72,7 +72,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.lerp
-import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavController
 import com.theveloper.pixelplay.R
 import com.theveloper.pixelplay.data.preferences.UserPreferencesRepository
@@ -81,7 +81,6 @@ import com.theveloper.pixelplay.presentation.components.ExpressiveTopBarContent
 import com.theveloper.pixelplay.presentation.viewmodel.ArtistSettingsViewModel
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
-import androidx.compose.ui.text.style.TextOverflow
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -181,7 +180,7 @@ fun DelimiterConfigScreen(
                         modifier = Modifier.padding(16.dp)
                     ) {
                         Text(
-                            text = stringResource(R.string.delimiter_current_title),
+                            text = stringResource(R.string.delimiter_section_title),
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.onSurface
@@ -190,7 +189,7 @@ fun DelimiterConfigScreen(
                         Spacer(modifier = Modifier.height(8.dp))
 
                         Text(
-                            text = stringResource(R.string.delimiter_current_subtitle),
+                            text = stringResource(R.string.delimiter_section_subtitle),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -251,7 +250,7 @@ fun DelimiterConfigScreen(
                                 onValueChange = { newDelimiter = it },
                                 placeholder = {
                                     Text(
-                                        text = stringResource(R.string.delimiter_add_hint),
+                                        text = stringResource(R.string.delimiter_hint),
                                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
                                     )
                                 },
@@ -318,7 +317,7 @@ fun DelimiterConfigScreen(
                             ) {
                                 Icon(
                                     imageVector = Icons.Rounded.Add,
-                                    contentDescription = stringResource(R.string.delimiter_cd_add)
+                                    contentDescription = stringResource(R.string.cd_add_path_delimiter)
                                 )
                             }
                         }
@@ -356,7 +355,7 @@ fun DelimiterConfigScreen(
         }
 
         CollapsibleCommonTopBar(
-            title = stringResource(R.string.delimiters_screen_title),
+            title = stringResource(R.string.path_delimiters_toolbar_title),
             collapseFraction = collapseFraction,
             headerHeight = currentTopBarHeightDp,
             onBackClick = { navController.popBackStack() },
@@ -380,7 +379,7 @@ fun DelimiterConfigScreen(
                     ) {
                         Icon(
                             imageVector = Icons.Rounded.RestartAlt,
-                            contentDescription = stringResource(R.string.common_reset_defaults),
+                            contentDescription = stringResource(R.string.cd_reset_defaults),
                             modifier = Modifier.size(20.dp)
                         )
                     }
@@ -424,14 +423,14 @@ fun DelimiterConfigScreen(
                             contentColor = MaterialTheme.colorScheme.onError
                         )
                     ) {
-                        Text(stringResource(R.string.common_reset))
+                        Text(stringResource(R.string.action_reset))
                     }
                 },
                 dismissButton = {
                     TextButton(
                         onClick = { showResetDialog = false }
                     ) {
-                        Text(stringResource(R.string.common_cancel), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(stringResource(R.string.cancel))
                     }
                 },
                 containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -462,7 +461,7 @@ private fun DelimiterChip(
             {
                 Icon(
                     imageVector = Icons.Rounded.Close,
-                    contentDescription = stringResource(R.string.common_remove),
+                    contentDescription = stringResource(R.string.cd_remove),
                     modifier = Modifier.size(18.dp)
                 )
             }

@@ -6,7 +6,6 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.MarqueeSpacing
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -37,15 +36,14 @@ fun AutoScrollingTextOnDemand(
     style: TextStyle,
     gradientEdgeColor: Color,
     expansionFractionProvider: () -> Float,
-    modifier: Modifier = Modifier,
-    canScroll: Boolean = true
+    modifier: Modifier = Modifier
 ) {
-    var overflow by remember(text, style) { mutableStateOf(false) }
-    val canStart by remember(text, style) { derivedStateOf { expansionFractionProvider() > 0.99f && overflow } }
+    var overflow by remember { mutableStateOf(false) }
+    val canStart by remember { derivedStateOf { expansionFractionProvider() > 0.99f && overflow } }
 
 
 // Usamos un Text "medidor" sólo la primera composición para detectar overflow.
-    if (!overflow) {
+    if (!canStart) {
         Text(
             text = text,
             style = style,
@@ -60,8 +58,7 @@ fun AutoScrollingTextOnDemand(
             style = style,
             textAlign = TextAlign.Start,
             gradientEdgeColor = gradientEdgeColor,
-            modifier = modifier,
-            canScroll = canScroll && canStart
+            modifier = modifier
         )
     }
 }
@@ -74,8 +71,7 @@ fun AutoScrollingText(
     style: TextStyle,
     textAlign: TextAlign? = null,
     gradientEdgeColor: Color,
-    gradientWidth: Dp = 24.dp,
-    canScroll: Boolean = true
+    gradientWidth: Dp = 24.dp
 ) {
     SubcomposeLayout(modifier = modifier.clipToBounds()) { constraints ->
         val textPlaceable = subcompose("text") {
@@ -85,12 +81,12 @@ fun AutoScrollingText(
         val isOverflowing = textPlaceable.width > constraints.maxWidth
 
         val content = @Composable {
-            if (isOverflowing && canScroll) {
-                val initialDelayMillis = 2000
+            if (isOverflowing) {
+                val initialDelayMillis = 1500
                 val fadeAnimationDuration = 500
 
-                var isScrolling by remember(text, canScroll) { mutableStateOf(false) }
-                LaunchedEffect(text, canScroll) {
+                var isScrolling by remember { mutableStateOf(false) }
+                LaunchedEffect(Unit) {
                     isScrolling = false // Ensure initial state
                     kotlinx.coroutines.delay(initialDelayMillis.toLong())
                     isScrolling = true
@@ -142,41 +138,12 @@ fun AutoScrollingText(
                         )
                     )
                 }
-            } else if (isOverflowing) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
-                        .drawWithContent {
-                            drawContent()
-                            val gradientWidthPx = gradientWidth.toPx()
-                            // Right fade-out: Always visible for overflow
-                            drawRect(
-                                brush = Brush.horizontalGradient(
-                                    colors = listOf(gradientEdgeColor, Color.Transparent),
-                                    startX = size.width - gradientWidthPx,
-                                    endX = size.width
-                                ),
-                                blendMode = BlendMode.DstIn
-                            )
-                        }
-                ) {
-                    Text(
-                        text = text,
-                        style = style,
-                        textAlign = textAlign,
-                        maxLines = 1,
-                        softWrap = false,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
             } else {
                 Text(
                     text = text,
                     style = style,
                     textAlign = textAlign,
                     maxLines = 1,
-                    softWrap = false
                 )
             }
         }

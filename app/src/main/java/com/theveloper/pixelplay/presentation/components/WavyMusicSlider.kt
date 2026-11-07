@@ -109,6 +109,7 @@ fun WavyMusicSlider(
 
     // FASE CONDICIONAL: si la onda no se muestra, no hay transición infinita ni invalidaciones.
     val phaseShiftAnim = remember { Animatable(0f) }
+    val phaseShift = phaseShiftAnim.value
 
     LaunchedEffect(shouldShowWave, waveAnimationDuration) {
         if (shouldShowWave && waveAnimationDuration > 0) {
@@ -267,9 +268,8 @@ fun WavyMusicSlider(
                                         .coerceAtLeast(1.2f)
                                         .coerceAtMost(trackHeightPx)
 
-                                    val currentPhaseShift = phaseShiftAnim.value
                                     fun yAt(x: Float): Float {
-                                        val s = sin(waveFrequency * x + currentPhaseShift)
+                                        val s = sin(waveFrequency * x + phaseShift)
                                         return (localCenterY + waveAmplitudePxInternal * s)
                                             .coerceIn(
                                                 localCenterY - waveAmplitudePxInternal - trackHeightPx / 2f,

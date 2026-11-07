@@ -79,7 +79,7 @@ import com.theveloper.pixelplay.ui.theme.PixelPlayStatusBarStyle
 import androidx.compose.ui.unit.lerp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.util.lerp
-import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.media3.common.util.UnstableApi
 import androidx.navigation.NavController
 import coil.compose.AsyncImagePainter
@@ -88,7 +88,6 @@ import com.theveloper.pixelplay.R
 import com.theveloper.pixelplay.data.model.Album
 import com.theveloper.pixelplay.presentation.components.CollapsibleCommonTopBar
 import com.theveloper.pixelplay.presentation.components.ExpressiveScrollBar
-import com.theveloper.pixelplay.ui.theme.LocalShowScrollbar
 import com.theveloper.pixelplay.presentation.components.MiniPlayerHeight
 import com.theveloper.pixelplay.presentation.components.PlaylistBottomSheet
 import com.theveloper.pixelplay.presentation.components.SmartImage
@@ -290,7 +289,6 @@ fun AlbumDetailScreen(
                 ) {
                     val currentTopBarHeightDp = with(density) { topBarHeight.value.toDp() }
                     val showScrollBar =
-                        LocalShowScrollbar.current &&
                         collapseFraction > 0.95f &&
                             (lazyListState.canScrollForward || lazyListState.canScrollBackward)
 
@@ -315,7 +313,7 @@ fun AlbumDetailScreen(
                             if (songsByDisc.size > 1) {
                                 item(key = "disc_header_$discNumber") {
                                     Text(
-                                        text = stringResource(R.string.album_disc_number_header, discNumber),
+                                        text = stringResource(R.string.disc_number_header, discNumber),
                                         style = MaterialTheme.typography.labelLarge,
                                         color = MaterialTheme.colorScheme.primary,
                                         fontWeight = FontWeight.Bold,
@@ -421,12 +419,15 @@ fun AlbumDetailScreen(
                     onDismiss = { showSongInfoBottomSheet = false },
                     onPlaySong = {
                         playerViewModel.showAndPlaySong(currentSong)
+                        showSongInfoBottomSheet = false
                     },
                     onAddToQueue = {
                         playerViewModel.addSongToQueue(currentSong)
+                        showSongInfoBottomSheet = false
                     },
                     onAddNextToQueue = {
                         playerViewModel.addSongNextToQueue(currentSong)
+                        showSongInfoBottomSheet = false
                     },
                     onAddToPlayList = {
                         showPlaylistBottomSheet = true;
@@ -446,13 +447,6 @@ fun AlbumDetailScreen(
                         )
                         showSongInfoBottomSheet = false
                     },
-                    onNavigateToArtistById = { artistId ->
-                        navController.navigateSafelyReplacing(
-                            route = Screen.ArtistDetail.createRoute(artistId),
-                            patternToPop = Screen.ArtistDetail.route
-                        )
-                        showSongInfoBottomSheet = false
-                    },
                     onNavigateToGenre = {
                         currentSong.genre?.let {
                             navController.navigateSafelyReplacing(
@@ -462,14 +456,12 @@ fun AlbumDetailScreen(
                         }
                         showSongInfoBottomSheet = false
                     },
-                    onEditSong = { newTitle, newArtist, newAlbum, newAlbumArtist, newComposer, newGenre, newLyrics, newTrackNumber, newDiscNumber, replayGainTrackGainDb, replayGainAlbumGainDb, coverArtUpdate ->
+                    onEditSong = { newTitle, newArtist, newAlbum, newGenre, newLyrics, newTrackNumber, newDiscNumber, replayGainTrackGainDb, replayGainAlbumGainDb, coverArtUpdate ->
                         playerViewModel.editSongMetadata(
                             currentSong,
                             newTitle,
                             newArtist,
                             newAlbum,
-                            newAlbumArtist,
-                            newComposer,
                             newGenre,
                             newLyrics,
                             newTrackNumber,
@@ -478,6 +470,9 @@ fun AlbumDetailScreen(
                             replayGainAlbumGainDb,
                             coverArtUpdate
                         )
+                    },
+                    generateAiMetadata = { fields ->
+                        playerViewModel.generateAiMetadata(currentSong, fields)
                     },
                     removeFromListTrigger = removeFromListTrigger
                 )
@@ -612,7 +607,7 @@ private fun SharedAlbumTopBarProbe(
                     alpha = expandedContentAlpha
                 }
         ) {
-            Icon(Icons.Rounded.Shuffle, contentDescription = stringResource(R.string.common_shuffle_play_album))
+            Icon(Icons.Rounded.Shuffle, contentDescription = stringResource(R.string.cd_shuffle_play_album))
         }
     }
 }
@@ -729,7 +724,7 @@ private fun CollapsingAlbumTopBar(
                     onClick = onBackPressed,
                     colors = IconButtonDefaults.filledIconButtonColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
                 ) {
-                    Icon(imageVector = Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.common_back))
+                    Icon(imageVector = Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.auth_cd_back))
                 }
 
                 Box(
@@ -786,7 +781,7 @@ private fun CollapsingAlbumTopBar(
                             alpha = fabScale
                         }
                 ) {
-                    Icon(Icons.Rounded.Shuffle, contentDescription = stringResource(R.string.common_shuffle_play_album))
+                    Icon(Icons.Rounded.Shuffle, contentDescription = stringResource(R.string.cd_shuffle_play_album))
                 }
             }
         }

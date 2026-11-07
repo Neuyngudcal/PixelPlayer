@@ -1,11 +1,9 @@
 # PixelPlayer 🎵
 
 <p align="center">
-  <img src="assets/PixelPlayer.svg" alt="App Icon" height="250"/>
+  <img src="assets/icon.png" alt="App Icon" width="128"/>
 </p>
-<p align="center">
-<a href="https://trendshift.io/repositories/15551" target="_blank"><img src="https://trendshift.io/api/badge/repositories/15551" alt="PixelPlayerHQ%2FPixelPlayer | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/></a>
-</p>
+
 <p align="center">
   <strong>A beautiful, feature-rich music player for Android</strong><br>
   Built with Jetpack Compose and Material Design 3
@@ -25,7 +23,7 @@
     <a href="https://github.com/theovilardo/PixelPlayer/releases">
         <img src="https://img.shields.io/github/downloads/theovilardo/PixelPlayer/total?logo=github&style=for-the-badge" alt="Total Downloads">
     </a>
-    <img src="https://img.shields.io/badge/Android-11%2B-green?style=for-the-badge&logo=android" alt="Android 11+">
+    <img src="https://img.shields.io/badge/Android-10%2B-green?style=for-the-badge&logo=android" alt="Android 11+">
     <img src="https://img.shields.io/badge/Kotlin-100%25-purple?style=for-the-badge&logo=kotlin" alt="Kotlin">
 </p>
 
@@ -200,16 +198,10 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## 📄 License
 
-This project is licensed under a Proprietary License - see the [LICENSE](LICENSE) file for details.
-
-Portions contributed before 2026-05-12 remain available under the MIT License; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ---
 
 <p align="center">
   Made with ❤️ by <a href="https://github.com/theovilardo">theovilardo</a>
 </p>
-<p align="center">
-  Logo designed by <a href="https://github.com/NPSummers">Aureal</a>.
-</p>
-

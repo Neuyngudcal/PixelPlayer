@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -59,18 +58,14 @@ import com.theveloper.pixelplay.data.model.Song
 import com.theveloper.pixelplay.data.model.SortOption
 import com.theveloper.pixelplay.data.model.StorageFilter
 import com.theveloper.pixelplay.presentation.components.ExpressiveScrollBar
-import com.theveloper.pixelplay.ui.theme.LocalShowScrollbar
 import com.theveloper.pixelplay.presentation.components.MiniPlayerHeight
 import com.theveloper.pixelplay.presentation.components.songFastScrollLabel
 import com.theveloper.pixelplay.presentation.components.subcomps.EnhancedSongListItem
 import com.theveloper.pixelplay.presentation.viewmodel.PlayerViewModel
 import com.theveloper.pixelplay.presentation.viewmodel.StablePlayerState
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import androidx.compose.ui.text.style.TextOverflow
 
 @androidx.annotation.OptIn(UnstableApi::class)
 @Composable
@@ -90,9 +85,9 @@ fun LibraryFavoritesTab(
     onLocateCurrentSongVisibilityChanged: (Boolean) -> Unit = {},
     onRegisterLocateCurrentSongAction: ((() -> Unit)?) -> Unit = {},
     storageFilter: StorageFilter = StorageFilter.ALL,
-    hasCurrentSong: Boolean = false,
-    listState: LazyListState = rememberLazyListState()
+    hasCurrentSong: Boolean = false
 ) {
+    val listState = rememberLazyListState()
     val coroutineScope = rememberCoroutineScope()
     val visibilityCallback by rememberUpdatedState(onLocateCurrentSongVisibilityChanged)
     val registerActionCallback by rememberUpdatedState(onRegisterLocateCurrentSongAction)
@@ -112,12 +107,14 @@ fun LibraryFavoritesTab(
             .map { it.currentSong?.id }
             .distinctUntilChanged()
     }.collectAsStateWithLifecycle(initialValue = null)
-    val isPlaying by remember(playerViewModel) {
-        playerViewModel.stablePlayerState
-            .map { it.isPlaying }
-            .distinctUntilChanged()
-    }.collectAsStateWithLifecycle(initialValue = false)
 
+    val currentSongListIndex = remember(favoriteSongs.itemCount, currentSongId) {
+        if (currentSongId == null) -1
+        else {
+            val items = favoriteSongs.itemSnapshotList
+            items.indexOfFirst { it?.id == currentSongId }
+        }
+    }
     // New action just triggers the ViewModel request
     val locateCurrentSongAction: (() -> Unit)? = remember(currentSongId) {
         if (currentSongId == null) {
@@ -166,20 +163,10 @@ fun LibraryFavoritesTab(
         pendingFavoriteSortScrollReset = false
     }
 
-    LaunchedEffect(favoriteSongs.itemCount, listState, currentSongId) {
+    LaunchedEffect(currentSongListIndex, favoriteSongs.itemCount, listState, currentSongId) {
         if (currentSongId == null || favoriteSongs.itemCount == 0) {
             visibilityCallback(false)
             return@LaunchedEffect
-        }
-
-        val snapshot = favoriteSongs.itemSnapshotList
-        val currentSongListIndex = withContext(Dispatchers.Default) {
-            val indexInSnapshot = snapshot.items.indexOfFirst { it.id == currentSongId }
-            if (indexInSnapshot != -1) {
-                indexInSnapshot + snapshot.placeholdersBefore
-            } else {
-                -1
-            }
         }
 
         if (currentSongListIndex == -1) {
@@ -237,7 +224,7 @@ fun LibraryFavoritesTab(
                     LazyColumn(
                         modifier = Modifier
                             .align(Alignment.TopCenter)
-                            .padding(start = 12.dp, end = if (LocalShowScrollbar.current && (listState.canScrollForward || listState.canScrollBackward)) 22.dp else 12.dp, bottom = 6.dp)
+                            .padding(start = 12.dp, end = if (listState.canScrollForward || listState.canScrollBackward) 22.dp else 12.dp, bottom = 6.dp)
                             .clip(
                                 RoundedCornerShape(
                                     topStart = 26.dp,
@@ -264,9 +251,6 @@ fun LibraryFavoritesTab(
                                     isSelected = selectedSongIds.contains(song.id),
                                     selectionIndex = if (isSelectionMode) getSelectionIndex(song.id) else null,
                                     isSelectionMode = isSelectionMode,
-                                    useExternalPlaybackState = true,
-                                    currentSongId = currentSongId,
-                                    isPlaying = isPlaying,
                                     onLongPress = { onSongLongPress(song) },
                                     onClick = {
                                         if (isSelectionMode) {
@@ -319,14 +303,13 @@ fun LibrarySongsTabPaginated(
     onRefresh: () -> Unit
 ) {
     val listState = rememberLazyListState()
-    val dummyListState = rememberLazyListState()
     val pullToRefreshState = rememberPullToRefreshState()
 
     when {
         paginatedSongs.loadState.refresh is LoadState.Loading && paginatedSongs.itemCount == 0 -> {
             LazyColumn(
                 modifier = Modifier
-                    .padding(start = 12.dp, end = if (LocalShowScrollbar.current && (listState.canScrollForward || listState.canScrollBackward)) 22.dp else 12.dp, bottom = 6.dp)
+                    .padding(start = 12.dp, end = if (listState.canScrollForward || listState.canScrollBackward) 22.dp else 12.dp, bottom = 6.dp)
                     .clip(
                         RoundedCornerShape(
                             topStart = 26.dp,
@@ -336,6 +319,7 @@ fun LibrarySongsTabPaginated(
                         )
                     )
                     .fillMaxSize(),
+                state = listState,
                 verticalArrangement = Arrangement.spacedBy(8.dp),
                 contentPadding = PaddingValues(bottom = bottomBarHeight + MiniPlayerHeight + ListExtraBottomGap)
             ) {
@@ -363,13 +347,13 @@ fun LibrarySongsTabPaginated(
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(stringResource(R.string.library_error_loading_songs), style = MaterialTheme.typography.titleMedium)
                     Text(
-                        error.localizedMessage ?: stringResource(R.string.common_error_unknown),
+                        error.localizedMessage ?: stringResource(R.string.error_unknown),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     Button(onClick = { paginatedSongs.retry() }) {
-                        Text(stringResource(R.string.library_action_retry), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(stringResource(R.string.library_retry))
                     }
                 }
             }
@@ -385,7 +369,7 @@ fun LibrarySongsTabPaginated(
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Icon(
                         painter = painterResource(id = R.drawable.rounded_music_off_24),
-                        contentDescription = stringResource(R.string.library_cd_no_songs_in_library),
+                        contentDescription = stringResource(R.string.cd_no_songs_in_library),
                         modifier = Modifier.size(48.dp),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -420,10 +404,9 @@ fun LibrarySongsTabPaginated(
                     }
                 ) {
                     Box(modifier = Modifier.fillMaxSize()) {
-                        val activeListState = if (paginatedSongs.itemCount > 0) listState else dummyListState
                         LazyColumn(
                             modifier = Modifier
-                                .padding(start = 12.dp, end = if (LocalShowScrollbar.current && (activeListState.canScrollForward || activeListState.canScrollBackward)) 22.dp else 12.dp, bottom = 6.dp)
+                                .padding(start = 12.dp, end = if (listState.canScrollForward || listState.canScrollBackward) 22.dp else 12.dp, bottom = 6.dp)
                                 .clip(
                                     RoundedCornerShape(
                                         topStart = 26.dp,
@@ -432,7 +415,7 @@ fun LibrarySongsTabPaginated(
                                         bottomEnd = PlayerSheetCollapsedCornerRadius
                                     )
                                 ),
-                            state = activeListState,
+                            state = listState,
                             verticalArrangement = Arrangement.spacedBy(8.dp),
                             contentPadding = PaddingValues(bottom = bottomBarHeight + MiniPlayerHeight + 30.dp)
                         ) {
@@ -500,7 +483,7 @@ fun LibrarySongsTabPaginated(
                             modifier = Modifier
                                 .align(Alignment.CenterEnd)
                                 .padding(end = 4.dp, top = 16.dp, bottom = bottomPadding),
-                            listState = activeListState
+                            listState = listState
                         )
                     }
                 }

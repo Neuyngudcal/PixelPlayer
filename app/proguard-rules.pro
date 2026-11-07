@@ -160,10 +160,6 @@
 -keep class org.drinkless.tdlib.** { *; }
 -keep interface org.drinkless.tdlib.** { *; }
 
-# Llama.cpp Android JNI bindings (Offline AI)
--keep class org.nehuatl.llamacpp.** { *; }
--keep class com.theveloper.pixelplay.data.ai.offline.** { *; }
-
 # Ktor & Netty Rules (Crucial for StreamProxy)
 -keep class org.slf4j.** { *; }
 
@@ -187,9 +183,6 @@
 -keep class net.sourceforge.pinyin4j.** { *; }
 -keepclassmembers class net.sourceforge.pinyin4j.** { *; }
 -dontwarn net.sourceforge.pinyin4j.**
-
-# Glance Widget
--keep class * extends androidx.glance.appwidget.action.ActionCallback { <init>(); }
 
 # =============================================================================
 # TIMBER LOGGING OPTIMIZATION FOR RELEASE BUILDS

@@ -2,7 +2,6 @@ package com.theveloper.pixelplay.data.navidrome.model
 
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
-import com.theveloper.pixelplay.data.stream.CloudStreamSecurity
 
 /**
  * Represents authentication credentials for a Navidrome/Subsonic server.
@@ -49,18 +48,7 @@ data class NavidromeCredentials(
      * Returns the parsed and normalized server URL, or null if it is invalid.
      */
     val normalizedHttpUrlOrNull: HttpUrl?
-        get() {
-            val trimmed = serverUrl.trim().trimEnd('/')
-            // Auto-prepend https:// if no scheme is provided
-            val withScheme = if (!trimmed.startsWith("http://", ignoreCase = true) &&
-                !trimmed.startsWith("https://", ignoreCase = true)
-            ) {
-                "https://$trimmed"
-            } else {
-                trimmed
-            }
-            return withScheme.toHttpUrlOrNull()
-        }
+        get() = serverUrl.trim().trimEnd('/').toHttpUrlOrNull()
 
     /**
      * Returns the normalized server URL (without trailing slash).
@@ -76,10 +64,8 @@ data class NavidromeCredentials(
         if (httpUrl.username.isNotEmpty() || httpUrl.password.isNotEmpty()) {
             return "Server URL must not include embedded credentials."
         }
-        if (requireHttps && !httpUrl.isHttps &&
-            !CloudStreamSecurity.isLocalOrPrivateHost(httpUrl.host)
-        ) {
-            return "Use an https:// server URL for remote Navidrome/Subsonic servers. HTTP is only allowed for local network addresses."
+        if (requireHttps && !httpUrl.isHttps) {
+            return "Use an https:// server URL for Navidrome/Subsonic."
         }
         return null
     }

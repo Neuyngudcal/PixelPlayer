@@ -13,8 +13,7 @@ import kotlinx.serialization.Serializable
 data class Lyrics(
     val plain: List<String>? = null,
     val synced: List<SyncedLine>? = null,
-    val areFromRemote: Boolean = false,
-    val provider: String? = null
+    val areFromRemote: Boolean = false
 )
 
 @Serializable
@@ -23,16 +22,12 @@ data class SyncedLine(
     val line: String,
     val words: List<SyncedWord>? = null, // Null if not a word-by-word synced lyric
     val translation: String? = null, // Translation text paired by identical timestamp
-    val romanization: String? = null, // Romanization text paired by identical timestamp
-    val endTime: Int? = null, // Optional line end timestamp in ms
-    val voice: String? = null, // Optional singer role ("v1", "v2", "v3")
-    val isBackground: Boolean = false // True for [bg:...] or ttm:role="x-bg" backing vocals
+    val romanization: String? = null // Romanization text paired by identical timestamp
 )
 
 @Serializable
 data class SyncedWord(
     val time: Int,
     val word: String,
-    val startsNewWord: Boolean = true,
-    val endTime: Int? = null // Optional word end timestamp in ms
+    val startsNewWord: Boolean = true
 )

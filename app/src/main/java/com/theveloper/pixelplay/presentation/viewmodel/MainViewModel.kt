@@ -10,7 +10,6 @@ import com.theveloper.pixelplay.utils.LogUtils
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -25,14 +24,6 @@ class MainViewModel @Inject constructor(
 
     val isSetupComplete: StateFlow<Boolean?> = userPreferencesRepository.initialSetupDoneFlow
         .map { it as Boolean? }
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.Eagerly,
-            initialValue = null
-        )
-
-    val launchTab: StateFlow<String?> = userPreferencesRepository.launchTabFlow
-        .map { it as String? }
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.Eagerly,
@@ -73,9 +64,8 @@ class MainViewModel @Inject constructor(
      * Nos ayuda a saber si es la primera vez que se abre la app.
      */
     val isLibraryEmpty: StateFlow<Boolean> = musicRepository
-        .getSongCountFlow()
-        .map { it == 0 }
-        .distinctUntilChanged()
+        .getAudioFiles()
+        .map { it.isEmpty() }
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5000),

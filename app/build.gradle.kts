@@ -1,17 +1,7 @@
-import java.io.File
 import java.util.Properties
-import javax.inject.Inject
-import org.gradle.api.DefaultTask
-import org.gradle.api.file.DirectoryProperty
-import org.gradle.api.file.FileSystemOperations
-import org.gradle.api.file.RegularFileProperty
-import org.gradle.api.tasks.InputFile
-import org.gradle.api.tasks.OutputDirectory
-import org.gradle.api.tasks.TaskAction
 
 plugins {
     alias(libs.plugins.android.application)
-    alias(libs.plugins.aboutlibraries)
     alias(libs.plugins.ksp)
     alias(libs.plugins.compose.compiler)
     alias(libs.plugins.dagger.hilt.android)
@@ -20,35 +10,9 @@ plugins {
     id("kotlin-parcelize")
 }
 
-abstract class CopyThirdPartyNotices : DefaultTask() {
-    @get:InputFile
-    abstract val sourceFile: RegularFileProperty
-
-    @get:OutputDirectory
-    abstract val outputDirectory: DirectoryProperty
-
-    @get:Inject
-    abstract val fileSystemOperations: FileSystemOperations
-
-    @TaskAction
-    fun copyNotice() {
-        fileSystemOperations.copy {
-            from(sourceFile)
-            into(outputDirectory)
-        }
-    }
-}
-
 // Load keystore properties early to avoid unresolved references inside the android block
 val keystoreProperties = Properties().apply {
     val propFile = rootProject.file("keystore.properties")
-    if (propFile.exists()) {
-        propFile.inputStream().use { load(it) }
-    }
-}
-
-val localProperties = Properties().apply {
-    val propFile = rootProject.file("local.properties")
     if (propFile.exists()) {
         propFile.inputStream().use { load(it) }
     }
@@ -61,12 +25,6 @@ val enableAbiSplits = providers.gradleProperty("pixelplay.enableAbiSplits")
 val enableComposeCompilerReports = providers.gradleProperty("pixelplay.enableComposeCompilerReports")
     .getOrElse("false")
     .toBoolean()
-
-val generatedNoticesAssets = layout.buildDirectory.dir("generated/assets/thirdPartyNotices")
-val copyThirdPartyNotices = tasks.register<CopyThirdPartyNotices>("copyThirdPartyNotices") {
-    sourceFile.set(rootProject.layout.projectDirectory.file("THIRD_PARTY_NOTICES.md"))
-    outputDirectory.set(generatedNoticesAssets)
-}
 
 @Suppress("DEPRECATION")
 android {
@@ -81,7 +39,6 @@ android {
 
     androidResources {
         noCompress.add("tflite")
-        noCompress.add("gguf")
     }
 
     packaging {
@@ -109,13 +66,6 @@ android {
         versionName = (project.findProperty("APP_VERSION_NAME") as? String) ?: "1.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-
-        val telegramApiId = localProperties.getProperty("TELEGRAM_API_ID")?.ifEmpty { null }
-            ?: "2040"
-        val telegramApiHash = localProperties.getProperty("TELEGRAM_API_HASH")?.ifEmpty { null }
-            ?: "b18441a1ff607e10a989891a5462e627"
-        buildConfigField("int", "TELEGRAM_API_ID", telegramApiId)
-        buildConfigField("String", "TELEGRAM_API_HASH", "\"$telegramApiHash\"")
     }
 
     signingConfigs {
@@ -133,12 +83,7 @@ android {
         }
 
         release {
-            val keystoreFile = file("$rootDir/vz-pixelplay.jks")
-            signingConfig = if (keystoreFile.exists()) {
-                signingConfigs.getByName("release")
-            } else {
-                signingConfigs.getByName("debug")
-            }
+            signingConfig = signingConfigs.getByName("release")
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(
@@ -179,7 +124,7 @@ android {
             isEnable = enableAbiSplits
             reset()
             if (enableAbiSplits) {
-                include("arm64-v8a")
+                include("arm64-v8a", "armeabi-v7a")
                 isUniversalApk = false
             }
         }
@@ -192,17 +137,13 @@ android {
     }
 }
 
-androidComponents {
-    onVariants(selector().all()) { variant ->
-        variant.sources.assets?.addGeneratedSourceDirectory(
-            copyThirdPartyNotices,
-            CopyThirdPartyNotices::outputDirectory,
-        )
-    }
-}
-
 composeCompiler {
-    // StrongSkipping is now enabled by default.
+    // Applies Compose's strong skipping optimization (skip composables whose parameters
+    // haven't changed) in Debug builds as well, making dev-mode performance more
+    // representative of Release and reducing unnecessary recompositions during development.
+    featureFlags = setOf(
+        org.jetbrains.kotlin.compose.compiler.gradle.ComposeFeatureFlag.StrongSkipping
+    )
 }
 
 baselineProfile {
@@ -264,8 +205,6 @@ dependencies {
     implementation(libs.androidx.ui.text.google.fonts)
     implementation(libs.material)
     implementation(libs.androidx.appcompat)
-    implementation(libs.aboutlibraries.core)
-    implementation(libs.aboutlibraries.compose.m3)
 
     // DI & Navigation
     implementation(libs.hilt.android)
@@ -327,7 +266,6 @@ dependencies {
     // UI Utilities & Extra
     implementation(libs.timber)
     implementation(libs.generativeai)
-    implementation(libs.llamacpp.kotlin)
     implementation(libs.smooth.corner.rect.android.compose)
     implementation(libs.reorderables)
     implementation(libs.codeview)
@@ -353,9 +291,6 @@ dependencies {
     testImplementation(libs.junit.jupiter.api)
     testImplementation(libs.junit.jupiter.params)
     testRuntimeOnly(libs.junit.jupiter.engine)
-    // JUnit 4 (Vintage) — required for legacy JUnit 4 tests under useJUnitPlatform()
-    testImplementation(libs.junit)
-    testRuntimeOnly(libs.junit.vintage.engine)
     testRuntimeOnly(libs.junitplatformlauncher)
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.mockk)

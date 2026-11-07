@@ -23,7 +23,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.theveloper.pixelplay.R
-import androidx.compose.ui.text.style.TextOverflow
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -49,7 +48,7 @@ fun AppRebrandDialog(
                         onCheckedChange = { doNotShowAgain = it }
                     )
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text(text = stringResource(id = R.string.app_name_change_do_not_show_again))
+                    Text(text = stringResource(id = R.string.do_not_show_again))
                 }
             }
         },
@@ -60,7 +59,7 @@ fun AppRebrandDialog(
                     onDismiss()
                 }
             ) {
-                Text(text = stringResource(id = R.string.common_dismiss), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(text = stringResource(id = R.string.dismiss))
             }
         }
     )

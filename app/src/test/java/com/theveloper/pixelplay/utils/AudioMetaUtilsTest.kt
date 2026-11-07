@@ -11,7 +11,13 @@ class AudioMetaUtilsTest {
         assertEquals("m4a", AudioMetaUtils.mimeTypeToFormat("audio/m4a"))
         assertEquals("m4a", AudioMetaUtils.mimeTypeToFormat("audio/x-m4a"))
         assertEquals("m4a", AudioMetaUtils.mimeTypeToFormat("audio/mp4a-latm"))
+        @Test
+    fun mimeTypeToFormat_mapsUniversalFormats() {
+        assertEquals("aiff", AudioMetaUtils.mimeTypeToFormat("audio/x-aiff"))
+        assertEquals("ac3", AudioMetaUtils.mimeTypeToFormat("audio/ac3"))
+        assertEquals("dts", AudioMetaUtils.mimeTypeToFormat("audio/vnd.dts"))
     }
+}
 
     @Test
     fun mimeTypeToFormat_mapsSamsungFormats() {
@@ -24,8 +30,13 @@ class AudioMetaUtilsTest {
         assertEquals("qcelp", AudioMetaUtils.mimeTypeToFormat("audio/x-qcelp"))
         assertEquals("ima", AudioMetaUtils.mimeTypeToFormat("audio/x-ima-adpcm"))
         assertEquals("ima", AudioMetaUtils.mimeTypeToFormat("audio/ima-adpcm"))
+        @Test
+    fun mimeTypeToFormat_mapsUniversalFormats() {
+        assertEquals("aiff", AudioMetaUtils.mimeTypeToFormat("audio/x-aiff"))
+        assertEquals("ac3", AudioMetaUtils.mimeTypeToFormat("audio/ac3"))
+        assertEquals("dts", AudioMetaUtils.mimeTypeToFormat("audio/vnd.dts"))
     }
-
+}
     @Test
     fun mimeTypeToFormat_mapsUniversalFormats() {
         assertEquals("aiff", AudioMetaUtils.mimeTypeToFormat("audio/x-aiff"))
@@ -33,3 +44,4 @@ class AudioMetaUtilsTest {
         assertEquals("dts", AudioMetaUtils.mimeTypeToFormat("audio/vnd.dts"))
     }
 }
+

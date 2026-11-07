@@ -1,9 +1,8 @@
 package com.theveloper.pixelplay.presentation.components.scoped
 
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.AnimationVector1D
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.ime
 import androidx.compose.runtime.Composable
@@ -34,17 +33,14 @@ internal fun rememberSheetOverlayState(
     showPlayerContentArea: Boolean,
     hideMiniPlayer: Boolean,
     showQueueSheet: Boolean,
-    isQueueCollapsing: Boolean,
     queueHiddenOffsetPx: Float,
     screenHeightPx: Float,
-    castSheetOpenFraction: Float,
-    queueSheetOffset: Animatable<Float, AnimationVector1D>,
-    queuePredictiveBackProgress: Animatable<Float, AnimationVector1D>
+    castSheetOpenFraction: Float
 ): SheetOverlayState {
     var internalIsKeyboardVisible by remember { mutableStateOf(false) }
 
     val imeInsets = WindowInsets.ime
-    LaunchedEffect(imeInsets) {
+    LaunchedEffect(imeInsets, density) {
         snapshotFlow { imeInsets.getBottom(density) > 0 }
             .distinctUntilChanged()
             .collectLatest { isVisible ->
@@ -72,36 +68,19 @@ internal fun rememberSheetOverlayState(
         }
     }
 
-    val queueVisualOpenFractionState = remember(
-        showQueueSheet,
-        isQueueCollapsing,
-        queueSheetOffset,
-        queueHiddenOffsetPx,
-        queuePredictiveBackProgress
-    ) {
-        derivedStateOf {
-            if ((showQueueSheet || isQueueCollapsing) && queueHiddenOffsetPx > 0f) {
-                val dragFraction = (1f - (queueSheetOffset.value / queueHiddenOffsetPx)).coerceIn(0f, 1f)
-                val backFraction = 1f - queuePredictiveBackProgress.value
-                dragFraction * backFraction
-            } else {
-                0f
-            }
-        }
+    val queueVisualOpenFraction by animateFloatAsState(
+        targetValue = if (showQueueSheet && screenHeightPx > 0f) 1f else 0f,
+        animationSpec = tween(durationMillis = 240, easing = FastOutSlowInEasing),
+        label = "queueVisualOpenFraction"
+    )
+
+    val bottomSheetOpenFraction by remember(queueVisualOpenFraction, castSheetOpenFraction) {
+        derivedStateOf { max(queueVisualOpenFraction, castSheetOpenFraction) }
     }
-    val queueVisualOpenFraction by queueVisualOpenFractionState
- 
-    val bottomSheetOpenFractionState = remember(queueVisualOpenFractionState, castSheetOpenFraction) {
-        derivedStateOf { max(queueVisualOpenFractionState.value, castSheetOpenFraction) }
+
+    val queueScrimAlpha by remember(queueVisualOpenFraction) {
+        derivedStateOf { (queueVisualOpenFraction * 0.45f).coerceIn(0f, 0.45f) }
     }
-    val bottomSheetOpenFraction by bottomSheetOpenFractionState
- 
-    val queueScrimAlphaState = remember(queueVisualOpenFractionState) {
-        derivedStateOf {
-            (queueVisualOpenFractionState.value * 0.45f).coerceIn(0f, 0.45f)
-        }
-    }
-    val queueScrimAlpha by queueScrimAlphaState
 
     return SheetOverlayState(
         internalIsKeyboardVisible = internalIsKeyboardVisible,

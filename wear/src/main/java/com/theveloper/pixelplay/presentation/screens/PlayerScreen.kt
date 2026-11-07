@@ -8,7 +8,6 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
@@ -19,7 +18,6 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -75,9 +73,6 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.draw.blur
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.util.VelocityTracker
@@ -127,7 +122,6 @@ import com.theveloper.pixelplay.presentation.theme.radialBackgroundBrush
 import com.theveloper.pixelplay.presentation.theme.surfaceContainerColor
 import com.theveloper.pixelplay.presentation.viewmodel.WearPlayerViewModel
 import com.theveloper.pixelplay.shared.WearPlayerState
-import com.theveloper.pixelplay.shared.WearSyncedLyricLine
 import com.theveloper.pixelplay.shared.WearVolumeState
 import androidx.core.graphics.ColorUtils
 import kotlinx.coroutines.delay
@@ -194,16 +188,15 @@ private fun PlayerContent(
     onQueueClick: () -> Unit,
 ) {
     val palette = LocalWearPalette.current
-    val isAmbient by WearLifecycleState.isAmbient.collectAsState()
     // Memoize: radialGradient allocates Shader inputs on every call. PlayerContent
     // recomposes whenever the play-button ring animation ticks, so without this
     // we'd churn the GC for nothing.
     val background = remember(palette) { palette.radialBackgroundBrush() }
 
-    val pagerState = rememberPagerState(initialPage = 1, pageCount = { 3 })
+    val pagerState = rememberPagerState(initialPage = 0, pageCount = { 2 })
     var mainPageQueueReveal by remember { mutableFloatStateOf(0f) }
     var albumRevealProgress by remember { mutableFloatStateOf(0f) }
-    val isMainPlayerPage = pagerState.currentPage == 1
+    val isMainPlayerPage = pagerState.currentPage == 0
     val isMainPlayerOverlayVisible =
         mainPageQueueReveal > 0.05f || albumRevealProgress > 0.05f
     val showPageIndicator =
@@ -212,42 +205,8 @@ private fun PlayerContent(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .then(
-                if (isAmbient) {
-                    Modifier.background(Color.Black)
-                } else {
-                    Modifier.background(background)
-                }
-            ),
+            .background(background),
     ) {
-
-        if (!isAmbient && albumArt != null) {
-            Image(
-                bitmap = albumArt.asImageBitmap(),
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .alpha(0.45f),
-                    //.blur(12.dp),
-            )
-
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(
-                        Brush.radialGradient(
-                            colorStops = arrayOf(
-                                0f to Color.Transparent,
-                                0.55f to Color.Transparent,
-                                0.80f to palette.gradientTop.copy(alpha = 0.45f),
-                                1f to palette.gradientBottom.copy(alpha = 0.85f),
-                            ),
-                        ),
-                    ),
-            )
-        }
-
         HorizontalPager(
             state = pagerState,
             modifier = Modifier.fillMaxSize(),
@@ -255,20 +214,10 @@ private fun PlayerContent(
         ) { page ->
             when (page) {
                 0 -> {
-                    WearLyricsPage(
-                        state = state,
-                        isPhoneConnected = isPhoneConnected,
-                        isWatchOutputSelected = isWatchOutputSelected,
-                        isAmbient = isAmbient,
-                    )
-                }
-
-                1 -> {
                     PlayerMainPageHost(
                         state = state,
                         albumArt = albumArt,
-                        isCurrentPage = pagerState.currentPage == 1,
-                        isAmbient = isAmbient,
+                        isCurrentPage = pagerState.currentPage == 0,
                         isPhoneConnected = isPhoneConnected,
                         isWatchOutputSelected = isWatchOutputSelected,
                         activeVolumeState = activeVolumeState,
@@ -319,7 +268,6 @@ private fun PlayerMainPageHost(
     state: WearPlayerState,
     albumArt: Bitmap?,
     isCurrentPage: Boolean,
-    isAmbient: Boolean,
     isPhoneConnected: Boolean,
     isWatchOutputSelected: Boolean,
     activeVolumeState: WearVolumeState,
@@ -388,7 +336,6 @@ private fun PlayerMainPageHost(
                 state = state,
                 isPhoneConnected = isPhoneConnected,
                 isWatchOutputSelected = isWatchOutputSelected,
-                isAmbient = isAmbient,
                 activeVolumeState = activeVolumeState,
                 onTogglePlayPause = onTogglePlayPause,
                 onNext = onNext,
@@ -442,7 +389,7 @@ private fun PlayerMainPageHost(
                 color = palette.textPrimary,
             )
 
-            if (!isAmbient && (canShowAlbumArt || albumRevealProgress > 0.01f)) {
+            if (canShowAlbumArt || albumRevealProgress > 0.01f) {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -1050,7 +997,6 @@ private fun MainPlayerPage(
     state: WearPlayerState,
     isPhoneConnected: Boolean,
     isWatchOutputSelected: Boolean = false,
-    isAmbient: Boolean,
     activeVolumeState: WearVolumeState,
     onTogglePlayPause: () -> Unit,
     onNext: () -> Unit,
@@ -1192,7 +1138,6 @@ private fun MainPlayerPage(
                     isPlaying = state.isPlaying,
                     isEmpty = state.isEmpty,
                     enabled = if (isWatchOutputSelected) !state.isEmpty else isPhoneConnected,
-                    outlined = isAmbient,
                     trackProgress = trackProgress,
                     onTogglePlayPause = onTogglePlayPause,
                     onNext = onNext,
@@ -1204,7 +1149,6 @@ private fun MainPlayerPage(
                 SecondaryControlsRow(
                     volumeEnabled = volumeEnabled,
                     deviceEnabled = volumeEnabled,
-                    outlined = isAmbient,
                     deviceRouteType = if (isWatchOutputSelected) {
                         com.theveloper.pixelplay.shared.WearVolumeState.ROUTE_TYPE_WATCH
                     } else {
@@ -1237,13 +1181,11 @@ private fun MainPlayerPage(
                 .align(Alignment.BottomCenter),
         )
 
-        if (!isAmbient) {
-            AlwaysOnScalingPositionIndicator(
-                listState = columnState.state,
-                modifier = Modifier.align(Alignment.CenterEnd),
-                color = palette.textPrimary,
-            )
-        }
+        AlwaysOnScalingPositionIndicator(
+            listState = columnState.state,
+            modifier = Modifier.align(Alignment.CenterEnd),
+            color = palette.textPrimary,
+        )
     }
 }
 
@@ -1256,282 +1198,25 @@ private fun rememberLivePositionMs(state: WearPlayerState): androidx.compose.run
         safeAnchorPosition,
         safeDuration,
         state.isPlaying,
-        state.positionUpdatedElapsedRealtimeMs,
     ) {
-        "${state.songId}|$safeAnchorPosition|$safeDuration|${state.isPlaying}|${state.positionUpdatedElapsedRealtimeMs}"
+        "${state.songId}|$safeAnchorPosition|$safeDuration|${state.isPlaying}"
     }
     return produceState(
-        initialValue = state.livePositionFromAnchor(safeAnchorPosition, safeDuration),
+        initialValue = safeAnchorPosition,
         key1 = positionKey,
     ) {
-        value = state.livePositionFromAnchor(safeAnchorPosition, safeDuration)
+        value = safeAnchorPosition
         if (!state.isPlaying || safeDuration <= 0L) {
             return@produceState
         }
 
+        val startElapsedRealtime = SystemClock.elapsedRealtime()
         while (true) {
-            val next = state.livePositionFromAnchor(safeAnchorPosition, safeDuration)
+            val elapsed = SystemClock.elapsedRealtime() - startElapsedRealtime
+            val next = (safeAnchorPosition + elapsed).coerceIn(0L, safeDuration)
             value = next
             if (next >= safeDuration) break
             delay(250L)
-        }
-    }
-}
-
-private fun WearPlayerState.livePositionFromAnchor(
-    safeAnchorPosition: Long,
-    safeDuration: Long,
-): Long {
-    if (!isPlaying || safeDuration <= 0L) return safeAnchorPosition
-    val anchorElapsedRealtime = positionUpdatedElapsedRealtimeMs
-    if (anchorElapsedRealtime <= 0L) return safeAnchorPosition
-    val elapsed = (SystemClock.elapsedRealtime() - anchorElapsedRealtime).coerceAtLeast(0L)
-    return (safeAnchorPosition + elapsed).coerceIn(0L, safeDuration)
-}
-
-@Composable
-private fun WearLyricsPage(
-    state: WearPlayerState,
-    isPhoneConnected: Boolean,
-    isWatchOutputSelected: Boolean,
-    isAmbient: Boolean,
-) {
-    val palette = LocalWearPalette.current
-    val columnState = rememberResponsiveColumnState()
-    val lyrics = state.lyrics
-    val syncedLines = lyrics?.synced.orEmpty()
-    val activeLineIndex by rememberActiveLyricLineIndex(
-        state = state,
-        lines = syncedLines,
-    )
-
-    LaunchedEffect(state.songId, activeLineIndex, isAmbient) {
-        if (activeLineIndex >= 0) {
-            val targetItem = (activeLineIndex + 2).coerceAtLeast(0)
-            if (isAmbient) {
-                columnState.state.scrollToItem(targetItem)
-            } else {
-                columnState.state.animateScrollToItem(targetItem)
-            }
-        }
-    }
-
-    Box(modifier = Modifier.fillMaxSize()) {
-        ScalingLazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 12.dp),
-            columnState = columnState,
-        ) {
-            item { Spacer(modifier = Modifier.height(28.dp)) }
-
-            item {
-                Text(
-                    text = "Lyrics",
-                    style = MaterialTheme.typography.caption2,
-                    fontWeight = FontWeight.SemiBold,
-                    color = palette.textSecondary,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
-
-            if (lyrics?.hasLyrics == true) {
-                if (syncedLines.isNotEmpty()) {
-                    syncedLines.forEachIndexed { index, line ->
-                        item(key = "${line.timeMs}-$index") {
-                            WearSyncedLyricLineItem(
-                                line = line,
-                                active = index == activeLineIndex,
-                                isAmbient = isAmbient,
-                            )
-                        }
-                    }
-                } else {
-                    lyrics.plain.forEachIndexed { index, line ->
-                        item(key = "plain-$index") {
-                            WearPlainLyricLineItem(line = line)
-                        }
-                    }
-                }
-            } else {
-                item {
-                    WearLyricsEmptyState(
-                        isPhoneConnected = isPhoneConnected,
-                        isWatchOutputSelected = isWatchOutputSelected,
-                    )
-                }
-            }
-
-            item { Spacer(modifier = Modifier.height(42.dp)) }
-        }
-
-        AlwaysOnScalingPositionIndicator(
-            listState = columnState.state,
-            modifier = Modifier.align(Alignment.CenterEnd),
-            color = palette.textPrimary,
-            )
-    }
-}
-
-@Composable
-private fun WearSyncedLyricLineItem(
-    line: WearSyncedLyricLine,
-    active: Boolean,
-    isAmbient: Boolean,
-) {
-    val palette = LocalWearPalette.current
-    val targetTextColor = if (active) palette.textPrimary else palette.textSecondary.copy(alpha = 0.72f)
-    val textColor = if (isAmbient) {
-        targetTextColor
-    } else {
-        animateColorAsState(
-            targetValue = targetTextColor,
-            animationSpec = spring(),
-            label = "wearLyricLineColor",
-        ).value
-    }
-    val scale = if (isAmbient) {
-        1f
-    } else {
-        animateFloatAsState(
-            targetValue = if (active) 1.08f else 1f,
-            animationSpec = spring(),
-            label = "wearLyricLineScale",
-        ).value
-    }
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
-            }
-            .padding(horizontal = 12.dp, vertical = 6.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Text(
-            text = line.line.ifBlank { line.translation.orEmpty() },
-            style = if (active) MaterialTheme.typography.body1 else MaterialTheme.typography.caption1,
-            fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
-            color = textColor,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth(),
-        )
-
-        val romanizationText = line.romanization?.takeIf { it.isNotBlank() && it != line.line }
-        val translationText = line.translation?.takeIf { it.isNotBlank() && it != line.line && it != romanizationText }
-        if (active && romanizationText != null) {
-            Text(
-                text = romanizationText,
-                style = MaterialTheme.typography.caption2,
-                color = palette.textSecondary,
-                textAlign = TextAlign.Center,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 2.dp),
-            )
-        }
-        if (active && translationText != null) {
-            Text(
-                text = translationText,
-                style = MaterialTheme.typography.caption2,
-                color = palette.textSecondary,
-                textAlign = TextAlign.Center,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 2.dp),
-            )
-        }
-    }
-}
-
-@Composable
-private fun WearPlainLyricLineItem(line: String) {
-    val palette = LocalWearPalette.current
-    Text(
-        text = line,
-        style = MaterialTheme.typography.caption1,
-        color = palette.textPrimary,
-        textAlign = TextAlign.Center,
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 14.dp, vertical = 5.dp),
-    )
-}
-
-@Composable
-private fun WearLyricsEmptyState(
-    isPhoneConnected: Boolean,
-    isWatchOutputSelected: Boolean,
-) {
-    val palette = LocalWearPalette.current
-    val message = when {
-        isWatchOutputSelected -> "Phone lyrics sync is available while controlling phone playback"
-        !isPhoneConnected -> "Connect phone to sync lyrics"
-        else -> "No lyrics synced yet"
-    }
-    Text(
-        text = message,
-        style = MaterialTheme.typography.caption1,
-        color = palette.textSecondary,
-        textAlign = TextAlign.Center,
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 20.dp, vertical = 18.dp),
-    )
-}
-
-private fun List<WearSyncedLyricLine>.activeLyricLineIndex(positionMs: Long): Int {
-    if (isEmpty()) return -1
-    val index = indexOfLast { it.timeMs.toLong() <= positionMs }
-    return index.coerceAtLeast(0)
-}
-
-@Composable
-private fun rememberActiveLyricLineIndex(
-    state: WearPlayerState,
-    lines: List<WearSyncedLyricLine>,
-): androidx.compose.runtime.State<Int> {
-    val safeDuration = state.totalDurationMs.coerceAtLeast(0L)
-    val safeAnchorPosition = state.currentPositionMs.coerceIn(0L, safeDuration)
-    val positionKey = remember(
-        state.songId,
-        safeAnchorPosition,
-        safeDuration,
-        state.isPlaying,
-        state.positionUpdatedElapsedRealtimeMs,
-        lines,
-    ) {
-        "${state.songId}|$safeAnchorPosition|$safeDuration|${state.isPlaying}|${state.positionUpdatedElapsedRealtimeMs}|${lines.size}|${lines.firstOrNull()?.timeMs}|${lines.lastOrNull()?.timeMs}"
-    }
-
-    return produceState(
-        initialValue = lines.activeLyricLineIndex(
-            state.livePositionFromAnchor(safeAnchorPosition, safeDuration),
-        ),
-        key1 = positionKey,
-    ) {
-        if (lines.isEmpty()) {
-            value = -1
-            return@produceState
-        }
-
-        while (true) {
-            val livePositionMs = state.livePositionFromAnchor(safeAnchorPosition, safeDuration)
-            val currentIndex = lines.activeLyricLineIndex(livePositionMs)
-            value = currentIndex
-
-            if (!state.isPlaying || safeDuration <= 0L) {
-                return@produceState
-            }
-
-            val nextLineTimeMs = lines.getOrNull(currentIndex + 1)?.timeMs?.toLong()
-                ?: return@produceState
-            val delayUntilNextLine = (nextLineTimeMs - livePositionMs)
-                .coerceIn(80L, 60_000L)
-            delay(delayUntilNextLine)
         }
     }
 }
@@ -1642,7 +1327,6 @@ private fun MainControlsRow(
     isPlaying: Boolean,
     isEmpty: Boolean,
     enabled: Boolean,
-    outlined: Boolean,
     trackProgress: Float,
     onTogglePlayPause: () -> Unit,
     onNext: () -> Unit,
@@ -1659,7 +1343,6 @@ private fun MainControlsRow(
             icon = Icons.Rounded.SkipPrevious,
             contentDescription = "Previous",
             enabled = enabled,
-            outlined = outlined,
             onClick = onPrevious,
             width = 44.dp,
             height = 54.dp,
@@ -1670,7 +1353,6 @@ private fun MainControlsRow(
         CenterPlayButton(
             isPlaying = isPlaying,
             enabled = enabled && !isEmpty,
-            outlined = outlined,
             trackProgress = trackProgress,
             onClick = onTogglePlayPause,
         )
@@ -1681,7 +1363,6 @@ private fun MainControlsRow(
             icon = Icons.Rounded.SkipNext,
             contentDescription = "Next",
             enabled = enabled,
-            outlined = outlined,
             onClick = onNext,
             width = 44.dp,
             height = 54.dp,
@@ -1694,41 +1375,19 @@ private fun FlattenedControlButton(
     icon: ImageVector,
     contentDescription: String,
     enabled: Boolean,
-    outlined: Boolean,
     onClick: () -> Unit,
     width: Dp,
     height: Dp,
 ) {
     val palette = LocalWearPalette.current
-    val shape = CircleShape
-    val container = when {
-        outlined -> Color.Transparent
-        enabled -> palette.transportContainer
-        else -> palette.controlDisabledContainer
-    }
-    val tint = when {
-        outlined && enabled -> palette.transportContainer
-        enabled -> palette.transportContent
-        else -> palette.controlDisabledContent
-    }
-    val borderColor = if (enabled) {
-        palette.transportContainer.copy(alpha = 0.82f)
-    } else {
-        palette.controlDisabledContent.copy(alpha = 0.34f)
-    }
+    val container = if (enabled) palette.transportContainer else palette.controlDisabledContainer
+    val tint = if (enabled) palette.transportContent else palette.controlDisabledContent
 
     Box(
         modifier = Modifier
             .size(width = width, height = height)
-            .clip(shape)
+            .clip(CircleShape)
             .background(container)
-            .then(
-                if (outlined) {
-                    Modifier.border(1.5.dp, borderColor, shape)
-                } else {
-                    Modifier
-                }
-            )
             .clickable(enabled = enabled, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
@@ -1745,7 +1404,6 @@ private fun FlattenedControlButton(
 private fun CenterPlayButton(
     isPlaying: Boolean,
     enabled: Boolean,
-    outlined: Boolean,
     trackProgress: Float,
     onClick: () -> Unit,
 ) {
@@ -1761,18 +1419,7 @@ private fun CenterPlayButton(
         initial = WearLifecycleState.isInteractiveNow,
     )
     LaunchedEffect(isPlaying, isInteractive) {
-        if (!isPlaying || !isInteractive) {
-            val normalizedRotation = ((rotation.value % 360f) + 360f) % 360f
-            rotation.snapTo(normalizedRotation)
-            rotation.animateTo(
-                targetValue = 0f,
-                animationSpec = tween(
-                    durationMillis = 616,
-                    easing = FastOutSlowInEasing,
-                ),
-            )
-            return@LaunchedEffect
-        }
+        if (!isPlaying || !isInteractive) return@LaunchedEffect
         while (true) {
             val current = rotation.value
             rotation.animateTo(
@@ -1794,30 +1441,17 @@ private fun CenterPlayButton(
         label = "playButtonSize",
     )
     val container by animateColorAsState(
-        targetValue = when {
-            outlined -> Color.Transparent
-            enabled -> palette.controlContainer
-            else -> palette.controlDisabledContainer
-        },
+        targetValue = if (enabled) palette.controlContainer else palette.controlDisabledContainer,
         animationSpec = spring(),
         label = "playContainer",
     )
     val tint by animateColorAsState(
-        targetValue = when {
-            outlined && enabled -> palette.controlContainer
-            enabled -> palette.controlContent
-            else -> palette.controlDisabledContent
-        },
+        targetValue = if (enabled) palette.controlContent else palette.controlDisabledContent,
         animationSpec = spring(),
         label = "playTint",
     )
 
     val ringProgress = trackProgress.coerceIn(0f, 1f)
-    val playButtonShape = RoundedStarShape(
-        sides = 8,
-        curve = animatedCurve.toDouble(),
-        rotation = animatedRotation,
-    )
 
     Box(
         modifier = Modifier.size(animatedSize + 12.dp),
@@ -1891,23 +1525,14 @@ private fun CenterPlayButton(
         Box(
             modifier = Modifier
                 .size(animatedSize)
-                .clip(playButtonShape)
-                .background(container)
-                .then(
-                    if (outlined) {
-                        Modifier.border(
-                            width = 1.6.dp,
-                            color = if (enabled) {
-                                palette.controlContainer.copy(alpha = 0.86f)
-                            } else {
-                                palette.controlDisabledContent.copy(alpha = 0.34f)
-                            },
-                            shape = playButtonShape,
-                        )
-                    } else {
-                        Modifier
-                    }
+                .clip(
+                    RoundedStarShape(
+                        sides = 8,
+                        curve = animatedCurve.toDouble(),
+                        rotation = animatedRotation,
+                    )
                 )
+                .background(container)
                 .clickable(enabled = enabled, onClick = onClick),
             contentAlignment = Alignment.Center,
         ) {
@@ -1963,7 +1588,6 @@ private fun buildPlayButtonRingPath(
 private fun SecondaryControlsRow(
     volumeEnabled: Boolean,
     deviceEnabled: Boolean,
-    outlined: Boolean,
     deviceRouteType: String,
     moreEnabled: Boolean,
     onVolumeClick: () -> Unit,
@@ -1987,7 +1611,6 @@ private fun SecondaryControlsRow(
                 enabled = volumeEnabled,
                 active = false,
                 activeColor = deviceActiveColor,
-                outlined = outlined,
                 raisedInactiveStyle = true,
                 onClick = onVolumeClick,
                 contentDescription = "Volume",
@@ -1999,7 +1622,6 @@ private fun SecondaryControlsRow(
                 enabled = deviceEnabled,
                 active = deviceRouteType == com.theveloper.pixelplay.shared.WearVolumeState.ROUTE_TYPE_WATCH,
                 activeColor = deviceActiveColor,
-                outlined = outlined,
                 raisedInactiveStyle = true,
                 onClick = onOutputClick,
                 contentDescription = "Output device",
@@ -2011,7 +1633,6 @@ private fun SecondaryControlsRow(
                 enabled = moreEnabled,
                 active = false,
                 activeColor = deviceActiveColor,
-                outlined = outlined,
                 raisedInactiveStyle = true,
                 heavilyMutedWhenDisabled = true,
                 onClick = onMoreClick,
@@ -2027,7 +1648,6 @@ private fun SecondaryActionButton(
     enabled: Boolean,
     active: Boolean,
     activeColor: Color,
-    outlined: Boolean,
     raisedInactiveStyle: Boolean = false,
     heavilyMutedWhenDisabled: Boolean = false,
     onClick: () -> Unit,
@@ -2057,7 +1677,6 @@ private fun SecondaryActionButton(
     }
     val container by animateColorAsState(
         targetValue = when {
-            outlined -> Color.Transparent
             !enabled -> disabledContainerColor
             active -> activeContainerColor
             else -> inactiveContainerColor
@@ -2067,7 +1686,6 @@ private fun SecondaryActionButton(
     )
     val tint by animateColorAsState(
         targetValue = when {
-            outlined && enabled -> if (active) activeColor else inactiveContentColor
             !enabled -> disabledContentColor
             active -> if (activeContainerColor.luminance() > 0.52f) Color.Black else Color.White
             else -> inactiveContentColor
@@ -2076,25 +1694,11 @@ private fun SecondaryActionButton(
         label = "secondaryTint",
     )
 
-    val shape = RoundedCornerShape(18.dp)
-    val borderColor = when {
-        !enabled -> disabledContentColor.copy(alpha = 0.32f)
-        active -> activeColor.copy(alpha = 0.84f)
-        else -> inactiveContentColor.copy(alpha = 0.62f)
-    }
-
     Box(
         modifier = Modifier
             .size(width = 48.dp, height = 36.dp)
-            .clip(shape)
+            .clip(RoundedCornerShape(18.dp))
             .background(container)
-            .then(
-                if (outlined) {
-                    Modifier.border(1.4.dp, borderColor, shape)
-                } else {
-                    Modifier
-                }
-            )
             .clickable(enabled = enabled, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {

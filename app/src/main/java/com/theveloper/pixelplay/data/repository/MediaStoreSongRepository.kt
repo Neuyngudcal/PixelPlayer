@@ -65,27 +65,7 @@ class MediaStoreSongRepository @Inject constructor(
         return favoritesDao.getFavoriteSongIdsOnce().toSet()
     }
 
-    private val normalizedPathCache = java.util.concurrent.ConcurrentHashMap<String, String>()
-    private fun normalizePath(path: String): String =
-        normalizedPathCache.getOrPut(path) { File(path).absolutePath }
-
-    private data class AllowedDirsCacheEntry(
-        val allowedDirs: Set<String>,
-        val blockedDirs: Set<String>,
-        val allParentDirs: List<String>,
-        val result: Pair<List<String>, Boolean>
-    )
-
-    @Volatile
-    private var lastAllowedDirsCache: AllowedDirsCacheEntry? = null
-
-    private val directoryFilterFlow: Flow<Pair<List<String>, Boolean>>
-        get() = combine(
-            userPreferencesRepository.allowedDirectoriesFlow.distinctUntilChanged(),
-            userPreferencesRepository.blockedDirectoriesFlow.distinctUntilChanged()
-        ) { allowedDirs, blockedDirs ->
-            computeAllowedDirs(allowedDirs, blockedDirs)
-        }.distinctUntilChanged()
+    private fun normalizePath(path: String): String = File(path).absolutePath
 
     private fun observeSongs(
         extraSelection: String? = null,
@@ -468,29 +448,12 @@ class MediaStoreSongRepository @Inject constructor(
         allowedDirs: Set<String>,
         blockedDirs: Set<String>
     ): Pair<List<String>, Boolean> {
-        if (blockedDirs.isEmpty()) return Pair(emptyList(), false)
-        val allParentDirs = musicDao.getDistinctParentDirectories()
-        val cached = lastAllowedDirsCache
-        if (cached != null &&
-            cached.allowedDirs == allowedDirs &&
-            cached.blockedDirs == blockedDirs &&
-            cached.allParentDirs == allParentDirs
-        ) {
-            return cached.result
-        }
-        val computed = DirectoryFilterUtils.computeAllowedParentDirs(
+        return DirectoryFilterUtils.computeAllowedParentDirs(
             allowedDirs = allowedDirs,
             blockedDirs = blockedDirs,
-            getAllParentDirs = { allParentDirs },
+            getAllParentDirs = { musicDao.getDistinctParentDirectories() },
             normalizePath = ::normalizePath
         )
-        lastAllowedDirsCache = AllowedDirsCacheEntry(
-            allowedDirs = allowedDirs,
-            blockedDirs = blockedDirs,
-            allParentDirs = allParentDirs,
-            result = computed
-        )
-        return computed
     }
 
     private val defaultPagingConfig = androidx.paging.PagingConfig(
@@ -501,18 +464,29 @@ class MediaStoreSongRepository @Inject constructor(
 
     @OptIn(ExperimentalCoroutinesApi::class)
     override fun getPaginatedSongs(sortOption: com.theveloper.pixelplay.data.model.SortOption, storageFilter: com.theveloper.pixelplay.data.model.StorageFilter): Flow<PagingData<Song>> {
-        return directoryFilterFlow.flatMapLatest { (allowedParentDirs, applyDirectoryFilter) ->
-            androidx.paging.Pager(
-                config = defaultPagingConfig,
-                pagingSourceFactory = {
-                    musicDao.getSongsPaginated(
-                        allowedParentDirs = allowedParentDirs,
-                        applyDirectoryFilter = applyDirectoryFilter,
-                        sortOrder = sortOption.storageKey,
-                        filterMode = storageFilter.value
-                    )
-                }
-            ).flow
+        return combine(
+            userPreferencesRepository.allowedDirectoriesFlow,
+            userPreferencesRepository.blockedDirectoriesFlow
+        ) { allowedDirs, blockedDirs ->
+            allowedDirs to blockedDirs
+        }.flatMapLatest { (allowedDirs, blockedDirs) ->
+            kotlinx.coroutines.flow.flow {
+                val (allowedParentDirs, applyDirectoryFilter) =
+                    computeAllowedDirs(allowedDirs, blockedDirs)
+                emit(
+                    androidx.paging.Pager(
+                        config = defaultPagingConfig,
+                        pagingSourceFactory = {
+                            musicDao.getSongsPaginated(
+                                allowedParentDirs = allowedParentDirs,
+                                applyDirectoryFilter = applyDirectoryFilter,
+                                sortOrder = sortOption.storageKey,
+                                filterMode = storageFilter.value
+                            )
+                        }
+                    ).flow
+                )
+            }.flatMapLatest { it }
         }.map { pagingData ->
             pagingData.map { entity -> entity.toSong() }
         }
@@ -523,18 +497,29 @@ class MediaStoreSongRepository @Inject constructor(
         sortOption: com.theveloper.pixelplay.data.model.SortOption,
         storageFilter: com.theveloper.pixelplay.data.model.StorageFilter
     ): Flow<PagingData<Song>> {
-        return directoryFilterFlow.flatMapLatest { (allowedParentDirs, applyDirectoryFilter) ->
-            androidx.paging.Pager(
-                config = defaultPagingConfig,
-                pagingSourceFactory = {
-                    musicDao.getFavoriteSongsPaginated(
-                        allowedParentDirs = allowedParentDirs,
-                        applyDirectoryFilter = applyDirectoryFilter,
-                        sortOrder = sortOption.storageKey,
-                        filterMode = storageFilter.value
-                    )
-                }
-            ).flow
+        return combine(
+            userPreferencesRepository.allowedDirectoriesFlow,
+            userPreferencesRepository.blockedDirectoriesFlow
+        ) { allowedDirs, blockedDirs ->
+            allowedDirs to blockedDirs
+        }.flatMapLatest { (allowedDirs, blockedDirs) ->
+            kotlinx.coroutines.flow.flow {
+                val (allowedParentDirs, applyDirectoryFilter) =
+                    computeAllowedDirs(allowedDirs, blockedDirs)
+                emit(
+                    androidx.paging.Pager(
+                        config = defaultPagingConfig,
+                        pagingSourceFactory = {
+                            musicDao.getFavoriteSongsPaginated(
+                                allowedParentDirs = allowedParentDirs,
+                                applyDirectoryFilter = applyDirectoryFilter,
+                                sortOrder = sortOption.storageKey,
+                                filterMode = storageFilter.value
+                            )
+                        }
+                    ).flow
+                )
+            }.flatMapLatest { it }
         }.map { pagingData ->
             pagingData.map { entity -> entity.toSong().copy(isFavorite = true) }
         }
@@ -559,12 +544,23 @@ class MediaStoreSongRepository @Inject constructor(
     override fun getFavoriteSongCountFlow(
         storageFilter: com.theveloper.pixelplay.data.model.StorageFilter
     ): Flow<Int> {
-        return directoryFilterFlow.flatMapLatest { (allowedDirs, applyFilter) ->
-            musicDao.getFavoriteSongCount(
-                allowedParentDirs = allowedDirs,
-                applyDirectoryFilter = applyFilter,
-                filterMode = storageFilter.value
-            )
+        return combine(
+            userPreferencesRepository.allowedDirectoriesFlow,
+            userPreferencesRepository.blockedDirectoriesFlow
+        ) { allowedDirs, blockedDirs ->
+            allowedDirs to blockedDirs
+        }.flatMapLatest { (allowedDirs, blockedDirs) ->
+            kotlinx.coroutines.flow.flow {
+                val (allowedParentDirs, applyDirectoryFilter) =
+                    computeAllowedDirs(allowedDirs, blockedDirs)
+                emit(Pair(allowedParentDirs, applyDirectoryFilter))
+            }.flatMapLatest { (allowedDirs, applyFilter) ->
+                musicDao.getFavoriteSongCount(
+                    allowedParentDirs = allowedDirs,
+                    applyDirectoryFilter = applyFilter,
+                    filterMode = storageFilter.value
+                )
+            }
         }
     }
 }

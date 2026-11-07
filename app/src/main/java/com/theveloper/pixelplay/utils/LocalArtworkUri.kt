@@ -45,15 +45,16 @@ object LocalArtworkUri {
         if (uriString.isNullOrBlank()) return null
         if (!looksLikeVolatileArtworkUri(uriString)) return null
 
-        val segment = uriString.substringAfterLast('/').substringBefore('?')
-        if (segment.startsWith("song_art_")) {
-            return segment
-                .removePrefix("song_art_")
-                .substringBefore('_')
-                .substringBefore('.')
-                .toLongOrNull()
+        val fileName = uriString.substringAfterLast('/').substringBefore('?')
+        if (!fileName.startsWith("song_art_")) {
+            return null
         }
-        return segment.toLongOrNull()
+
+        return fileName
+            .removePrefix("song_art_")
+            .substringBefore('_')
+            .substringBefore('.')
+            .toLongOrNull()
     }
 
     fun extractCacheBustToken(uriString: String?): String? {

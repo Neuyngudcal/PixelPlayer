@@ -71,6 +71,7 @@ class ControlWidget4x2 : GlanceAppWidget() {
 
         Box(
             modifier = GlanceModifier
+                .fillMaxSize()
                 .background(colors.surface)
                 .cornerRadius(widgetCornerRadius)
                 .padding(16.dp)
@@ -83,18 +84,18 @@ class ControlWidget4x2 : GlanceAppWidget() {
                 // Top Row: Album Art + Info
                 Row(
                     modifier = GlanceModifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.Top
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
                     AlbumArtImage(
-                        modifier = GlanceModifier.size(80.dp),
+                        modifier = GlanceModifier.size(72.dp),
                         bitmapData = albumArtBitmapData,
                         albumArtUri = albumArtUri,
-                        size = 80.dp,
+                        size = 72.dp,
                         context = context,
                         cornerRadius = albumArtCornerRadius
                     )
 
-                    Spacer(GlanceModifier.width(8.dp))
+                    Spacer(GlanceModifier.width(16.dp))
 
                     Column(
                         modifier = GlanceModifier.defaultWeight(),
@@ -109,7 +110,7 @@ class ControlWidget4x2 : GlanceAppWidget() {
                             ),
                             maxLines = 2
                         )
-                        Spacer(GlanceModifier.height(2.dp))
+                        Spacer(GlanceModifier.height(4.dp))
                         Text(
                             text = artist,
                             style = TextStyle(

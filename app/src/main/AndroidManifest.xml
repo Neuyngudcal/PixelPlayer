@@ -23,9 +23,6 @@
         android:maxSdkVersion="28" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-    <uses-permission
-        android:name="android.permission.WRITE_SETTINGS"
-        tools:ignore="ProtectedPermissions" />
     <!-- MANAGE_EXTERNAL_STORAGE removed for Google Play compliance.
          Write access to individual files is obtained via MediaStore.createWriteRequest(). -->
     <!-- Required only on Android 11 and below for legacy Bluetooth discovery and Wi-Fi SSID access. -->
@@ -56,8 +53,7 @@
             android:label="@string/app_name"
             android:theme="@style/Theme.PixelPlay"
             android:launchMode="singleTop"
-            android:configChanges="orientation|screenSize|keyboardHidden|screenLayout|smallestScreenSize"
-            android:windowSoftInputMode="adjustResize">
+            android:configChanges="orientation|screenSize|keyboardHidden|screenLayout|smallestScreenSize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
 
@@ -82,43 +78,37 @@
             android:name=".presentation.telegram.auth.TelegramLoginActivity"
             android:exported="false"
             android:label="Telegram Login"
-            android:theme="@style/Theme.PixelPlay"
-            android:windowSoftInputMode="adjustResize" />
+            android:theme="@style/Theme.PixelPlay" />
 
         <activity
             android:name=".presentation.netease.auth.NeteaseLoginActivity"
             android:exported="false"
             android:label="Netease Login"
-            android:theme="@style/Theme.PixelPlay"
-            android:windowSoftInputMode="adjustResize" />
+            android:theme="@style/Theme.PixelPlay" />
 
         <activity
             android:name=".presentation.gdrive.auth.GDriveLoginActivity"
             android:exported="false"
             android:label="Google Drive Login"
-            android:theme="@style/Theme.PixelPlay"
-            android:windowSoftInputMode="adjustResize" />
+            android:theme="@style/Theme.PixelPlay" />
 
         <activity
             android:name=".presentation.qqmusic.auth.QqMusicLoginActivity"
             android:exported="false"
             android:label="QQ Music Login"
-            android:theme="@style/Theme.PixelPlay"
-            android:windowSoftInputMode="adjustResize" />
+            android:theme="@style/Theme.PixelPlay" />
 
         <activity
             android:name=".presentation.navidrome.auth.NavidromeLoginActivity"
             android:exported="false"
             android:label="Navidrome Login"
-            android:theme="@style/Theme.PixelPlay"
-            android:windowSoftInputMode="adjustResize" />
+            android:theme="@style/Theme.PixelPlay" />
 
         <activity
             android:name=".presentation.jellyfin.auth.JellyfinLoginActivity"
             android:exported="false"
             android:label="Jellyfin Login"
-            android:theme="@style/Theme.PixelPlay"
-            android:windowSoftInputMode="adjustResize" />
+            android:theme="@style/Theme.PixelPlay" />
 
 
         <activity
@@ -137,6 +127,7 @@
 
                 <data android:mimeType="audio/*" />
                 <data android:scheme="content" />
+                <data android:scheme="file" />
             </intent-filter>
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />
@@ -246,10 +237,6 @@
             android:name=".data.service.wear.WatchTransferForegroundService"
             android:foregroundServiceType="dataSync"
             android:exported="false" />
-        <service
-            android:name=".data.ai.offline.ModelDownloadService"
-            android:foregroundServiceType="dataSync"
-            android:exported="false" />
         <meta-data
             android:name="preloaded_fonts"
             android:resource="@array/preloaded_fonts" />
@@ -269,8 +256,7 @@
         <provider
             android:name=".data.provider.SharedArtworkContentProvider"
             android:authorities="${applicationId}.artwork"
-            android:exported="true"
-            android:grantUriPermissions="true" />
+            android:exported="true" />
 
         <!-- Wear OS Data Layer: receives playback/volume commands from the watch -->
         <service

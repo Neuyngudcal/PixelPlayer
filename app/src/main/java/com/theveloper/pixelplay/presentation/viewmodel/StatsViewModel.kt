@@ -10,17 +10,13 @@ import com.theveloper.pixelplay.data.stats.StatsTimeRange
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.drop
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import timber.log.Timber
 
@@ -47,20 +43,17 @@ class StatsViewModel @Inject constructor(
     private val _homeOverview = MutableStateFlow<PlaybackStatsSummary?>(null)
     val homeOverview: StateFlow<PlaybackStatsSummary?> = _homeOverview.asStateFlow()
 
-    private val songsMutex = Mutex()
     @Volatile
-    private var cachedSongsById: Map<String, Song> = emptyMap()
+    private var cachedSongs: List<Song>? = null
 
     init {
         observeStatsRefreshFlow()
-        viewModelScope.launch {
-            // Defer heavy JSON history parsing & multi-range aggregation until HomeScreen finishes initial composition
-            delay(400L)
-            refreshRangeAndHomeOverview(
-                range = StatsTimeRange.WEEK,
-                showLoading = true
-            )
-        }
+        refreshRange(
+            range = StatsTimeRange.WEEK,
+            showLoading = true,
+            updateWeeklyOverview = true
+        )
+        refreshHomeOverview()
     }
 
     fun onRangeSelected(range: StatsTimeRange) {
@@ -90,18 +83,12 @@ class StatsViewModel @Inject constructor(
         }
     }
 
-    fun refreshHomeOverview(precomputedWeekSummary: PlaybackStatsSummary? = null) {
+    fun refreshHomeOverview() {
         viewModelScope.launch {
             runCatching {
                 withContext(Dispatchers.IO) {
-                    if (precomputedWeekSummary != null && precomputedWeekSummary.hasListeningActivity()) {
-                        return@withContext precomputedWeekSummary
-                    }
                     val songs = loadSongs()
                     for (range in HomeOverviewRanges) {
-                        if (range == StatsTimeRange.WEEK && precomputedWeekSummary != null) {
-                            continue
-                        }
                         val summary = playbackStatsRepository.loadSummary(range, songs)
                         if (summary.hasListeningActivity()) {
                             return@withContext summary
@@ -115,43 +102,6 @@ class StatsViewModel @Inject constructor(
                 Timber.e(throwable, "Failed to load home stats overview")
                 _homeOverview.value = null
             }
-        }
-    }
-
-    private fun refreshRangeAndHomeOverview(
-        range: StatsTimeRange,
-        showLoading: Boolean
-    ) {
-        viewModelScope.launch {
-            if (showLoading) {
-                _uiState.update { it.copy(isLoading = true, isRefreshing = false, selectedRange = range) }
-            } else {
-                _uiState.update { it.copy(isRefreshing = true, selectedRange = range) }
-            }
-            val summaryResult = runCatching {
-                withContext(Dispatchers.IO) {
-                    val songs = loadSongs()
-                    playbackStatsRepository.loadSummary(range, songs)
-                }
-            }
-            val loadedSummary = summaryResult.getOrNull()
-            if (range == StatsTimeRange.WEEK && loadedSummary != null) {
-                _weeklyOverview.value = loadedSummary
-            }
-            _uiState.update { current ->
-                current.copy(
-                    isLoading = false,
-                    isRefreshing = false,
-                    summary = loadedSummary,
-                    selectedRange = range
-                )
-            }
-            summaryResult.exceptionOrNull()?.let { Timber.e(it, "Failed to load stats for range %s", range) }
-
-            if (range != StatsTimeRange.WEEK) {
-                refreshWeeklyOverview()
-            }
-            refreshHomeOverview(precomputedWeekSummary = if (range == StatsTimeRange.WEEK) loadedSummary else null)
         }
     }
 
@@ -194,10 +144,16 @@ class StatsViewModel @Inject constructor(
             playbackStatsRepository.refreshFlow
                 .drop(1)
                 .collectLatest {
-                    refreshRangeAndHomeOverview(
-                        range = _uiState.value.selectedRange,
-                        showLoading = false
+                    val selectedRange = _uiState.value.selectedRange
+                    refreshRange(
+                        range = selectedRange,
+                        showLoading = false,
+                        updateWeeklyOverview = selectedRange == StatsTimeRange.WEEK
                     )
+                    if (selectedRange != StatsTimeRange.WEEK) {
+                        refreshWeeklyOverview()
+                    }
+                    refreshHomeOverview()
                 }
         }
     }
@@ -207,24 +163,17 @@ class StatsViewModel @Inject constructor(
     }
 
     fun forceRegenerateStats() {
-        cachedSongsById = emptyMap()
+        cachedSongs = null
         playbackStatsRepository.requestRefresh()
     }
 
-    private suspend fun loadSongs(): List<Song> = songsMutex.withLock {
-        val playedIds = playbackStatsRepository.getPlayedSongIds()
-        if (playedIds.isEmpty()) return@withLock emptyList()
-
-        val missingIds = playedIds.filterNot { cachedSongsById.containsKey(it) }
-        if (missingIds.isNotEmpty()) {
-            val fetchedSongs = missingIds.chunked(SONG_ID_QUERY_CHUNK_SIZE).flatMap { chunk ->
-                musicRepository.getSongsByIds(chunk).first()
-            }
-            if (fetchedSongs.isNotEmpty()) {
-                cachedSongsById = cachedSongsById + fetchedSongs.associateBy { it.id }
-            }
+    private suspend fun loadSongs(): List<Song> {
+        cachedSongs?.let { existing ->
+            if (existing.isNotEmpty()) return existing
         }
-        playedIds.mapNotNull { cachedSongsById[it] }
+        val songs = musicRepository.getAllSongsOnce()
+        cachedSongs = songs
+        return songs
     }
 
     private fun PlaybackStatsSummary.hasListeningActivity(): Boolean {
@@ -236,7 +185,6 @@ class StatsViewModel @Inject constructor(
     }
 
     private companion object {
-        const val SONG_ID_QUERY_CHUNK_SIZE = 500
         val HomeOverviewRanges = listOf(
             StatsTimeRange.WEEK,
             StatsTimeRange.MONTH,

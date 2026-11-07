@@ -43,12 +43,9 @@ class RoundedStarShape(
             val xCenter = size.width * 0.5f
             val yCenter = size.height * 0.5f
 
-            var t = 0.0
-            val startX = radius * (cos(t - rotationDegree) * (1 + curve * cos(sides * t)))
-            val startY = radius * (sin(t - rotationDegree) * (1 + curve * cos(sides * t)))
-            moveTo((startX + xCenter).toFloat(), (startY + yCenter).toFloat())
-            t += steps
+            moveTo(xCenter, yCenter)
 
+            var t = 0.0
             while (t <= TWO_PI) {
                 val x = radius * (cos(t - rotationDegree) * (1 + curve * cos(sides * t)))
                 val y = radius * (sin(t - rotationDegree) * (1 + curve * cos(sides * t)))

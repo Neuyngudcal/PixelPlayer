@@ -180,8 +180,8 @@ fun PreviousButton(
         action = actionRunCallback<PlayerControlActionCallback>(params),
         backgroundColor = backgroundColor,
         iconColor = iconColor,
-        imageProvider = ImageProvider(R.drawable.rounded_skip_previous_filled_24),
-        contentDescription = context.getString(R.string.common_previous_track),
+        imageProvider = ImageProvider(R.drawable.rounded_skip_previous_24),
+        contentDescription = context.getString(R.string.previous_track),
         iconSize = iconSize,
         cornerRadius = cornerRadius
     )
@@ -202,8 +202,8 @@ fun NextButton(
         action = actionRunCallback<PlayerControlActionCallback>(params),
         backgroundColor = backgroundColor,
         iconColor = iconColor,
-        imageProvider = ImageProvider(R.drawable.rounded_skip_next_filled_24),
-        contentDescription = context.getString(R.string.common_next_track),
+        imageProvider = ImageProvider(R.drawable.rounded_skip_next_24),
+        contentDescription = context.getString(R.string.next_track),
         iconSize = iconSize,
         cornerRadius = cornerRadius
     )
@@ -226,11 +226,11 @@ fun PlayPauseButton(
         backgroundColor = backgroundColor,
         iconColor = iconColor,
         imageProvider = ImageProvider(
-            if (isPlaying) R.drawable.rounded_pause_filled_24
-            else R.drawable.rounded_play_arrow_filled_24
+            if (isPlaying) R.drawable.rounded_pause_24
+            else R.drawable.rounded_play_arrow_24
         ),
         contentDescription = context.getString(
-            if (isPlaying) R.string.common_pause else R.string.common_play
+            if (isPlaying) R.string.cd_pause else R.string.cd_play
         ),
         iconSize = iconSize,
         cornerRadius = cornerRadius
@@ -252,7 +252,7 @@ fun ShuffleButton(
         backgroundColor = backgroundColor,
         iconColor = iconColor,
         imageProvider = ImageProvider(R.drawable.rounded_shuffle_24),
-        contentDescription = context.getString(R.string.common_shuffle),
+        contentDescription = context.getString(R.string.shortcut_shuffle_short),
         cornerRadius = cornerRadius
     )
 }
@@ -273,7 +273,7 @@ fun RepeatButton(
         backgroundColor = backgroundColor,
         iconColor = iconColor,
         imageProvider = ImageProvider(iconRes),
-        contentDescription = context.getString(R.string.common_repeat),
+        contentDescription = context.getString(R.string.cd_repeat),
         cornerRadius = cornerRadius
     )
 }

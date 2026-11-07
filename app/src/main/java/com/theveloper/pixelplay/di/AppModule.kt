@@ -163,9 +163,7 @@ object AppModule {
             PixelPlayDatabase.MIGRATION_36_37,
             PixelPlayDatabase.MIGRATION_37_38,
             PixelPlayDatabase.MIGRATION_38_39,
-            PixelPlayDatabase.MIGRATION_39_40,
-            PixelPlayDatabase.MIGRATION_40_41,
-            PixelPlayDatabase.MIGRATION_41_42
+            PixelPlayDatabase.MIGRATION_39_40
         )
             .addCallback(PixelPlayDatabase.createRuntimeArtifactsCallback())
             .setJournalMode(RoomDatabase.JournalMode.WRITE_AHEAD_LOGGING)
@@ -293,16 +291,7 @@ object AppModule {
             .allowHardware(true) // Re-enable hardware bitmaps for better performance
             .memoryCache {
                 MemoryCache.Builder(context)
-                    // Hard 40 MB cap instead of 20%-of-heap. Rationale:
-                    //  - On large-heap devices (Pixel 8 etc.) the percentage
-                    //    expanded to ~80–100 MB, far beyond what an album-art
-                    //    workload needs.
-                    //  - allowHardware(true) keeps most decoded pixels in GPU
-                    //    memory, so the MemoryCache mostly tracks Bitmap
-                    //    references — 40 MB still buffers ~100+ album arts.
-                    //  - Tighter cap = less GC pressure and less thermal
-                    //    headroom spent on memory pressure during long sessions.
-                    .maxSizeBytes(40 * 1024 * 1024)
+                    .maxSizePercent(0.20) // Use 20% of app memory for image cache
                     .build()
             }
             .diskCache {
@@ -321,19 +310,13 @@ object AppModule {
         @ApplicationContext context: Context,
         lrcLibApiService: LrcLibApiService,
         lyricsDao: LyricsDao,
-        okHttpClient: OkHttpClient,
-        neteaseRepository: Lazy<com.theveloper.pixelplay.data.netease.NeteaseRepository>,
-        jellyfinRepository: Lazy<com.theveloper.pixelplay.data.jellyfin.JellyfinRepository>,
-        navidromeRepository: Lazy<com.theveloper.pixelplay.data.navidrome.NavidromeRepository>
+        okHttpClient: OkHttpClient
     ): LyricsRepository {
         return LyricsRepositoryImpl(
             context = context,
             lrcLibApiService = lrcLibApiService,
             lyricsDao = lyricsDao,
-            okHttpClient = okHttpClient,
-            neteaseRepository = neteaseRepository,
-            jellyfinRepository = jellyfinRepository,
-            navidromeRepository = navidromeRepository
+            okHttpClient = okHttpClient
         )
     }
 
@@ -434,25 +417,14 @@ object AppModule {
     @Provides
     @Singleton
     fun provideOkHttpClient(): OkHttpClient {
-        val loggingInterceptor = HttpLoggingInterceptor().apply {
-            // HEADERS (not BODY) so we never print response bodies that may contain
-            // cookies, tokens, or third-party API payloads. Headers are still useful
-            // for debugging request paths and status codes.
-            level = if (BuildConfig.DEBUG) {
-                HttpLoggingInterceptor.Level.HEADERS
+        val loggingInterceptor = HttpLoggingInterceptor()
+        loggingInterceptor.setLevel(
+            if (BuildConfig.DEBUG) {
+                HttpLoggingInterceptor.Level.BODY
             } else {
                 HttpLoggingInterceptor.Level.NONE
             }
-            // Redact every header that can carry a credential or session token.
-            redactHeader("Authorization")
-            redactHeader("Proxy-Authorization")
-            redactHeader("Cookie")
-            redactHeader("Set-Cookie")
-            redactHeader("x-goog-api-key")
-            redactHeader("X-Emby-Token")
-            redactHeader("X-Emby-Authorization")
-            redactHeader("X-MediaBrowser-Token")
-        }
+        )
         
         // Connection pool with optimized connections for better performance
         val connectionPool = okhttp3.ConnectionPool(

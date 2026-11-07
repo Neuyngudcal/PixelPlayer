@@ -40,7 +40,6 @@ class DailyMixStateHolder @Inject constructor(
 ) {
     private var scope: CoroutineScope? = null
     private var updateJob: Job? = null
-    private var checkJob: Job? = null
 
     private val _dailyMixSongs = MutableStateFlow<ImmutableList<Song>>(persistentListOf())
     val dailyMixSongs: StateFlow<ImmutableList<Song>> = _dailyMixSongs.asStateFlow()
@@ -95,23 +94,25 @@ class DailyMixStateHolder @Inject constructor(
      * instead of combining with the full allSongs flow.
      */
     fun loadPersistedDailyMix() {
+        // Load Daily Mix
         scope?.launch {
-            val (dailyMixIds, yourMixIds) = kotlinx.coroutines.flow.combine(
-                userPreferencesRepository.dailyMixSongIdsFlow,
-                userPreferencesRepository.yourMixSongIdsFlow
-            ) { daily, your -> daily to your }.first()
-
+            val dailyMixIds = userPreferencesRepository.dailyMixSongIdsFlow.first()
             if (dailyMixIds.isNotEmpty() && _dailyMixSongs.value.isEmpty()) {
                 val songs = withContext(Dispatchers.IO) {
                     musicRepository.getSongsByIds(dailyMixIds).first()
                 }
                 if (songs.isNotEmpty()) {
+                    // Maintain persisted order
                     val songMap = songs.associateBy { it.id }
                     val orderedSongs = dailyMixIds.mapNotNull { songMap[it] }
                     _dailyMixSongs.value = orderedSongs.toImmutableList()
                 }
             }
+        }
 
+        // Load Your Mix
+        scope?.launch {
+            val yourMixIds = userPreferencesRepository.yourMixSongIdsFlow.first()
             if (yourMixIds.isNotEmpty() && _yourMixSongs.value.isEmpty()) {
                 val songs = withContext(Dispatchers.IO) {
                     musicRepository.getSongsByIds(yourMixIds).first()
@@ -136,24 +137,17 @@ class DailyMixStateHolder @Inject constructor(
     }
 
     /**
-     * Check if daily mix needs updating (new day or empty persisted mix) and update if so.
+     * Check if daily mix needs updating (new day) and update if so.
      */
     fun checkAndUpdateIfNeeded(favoriteSongIdsFlow: kotlinx.coroutines.flow.Flow<Set<String>>) {
-        if (checkJob?.isActive == true || updateJob?.isActive == true) return
-        checkJob = scope?.launch(Dispatchers.IO) {
-            val (lastUpdate, persistedDailyMixIds) = kotlinx.coroutines.flow.combine(
-                userPreferencesRepository.lastDailyMixUpdateFlow,
-                userPreferencesRepository.dailyMixSongIdsFlow
-            ) { timestamp, ids -> timestamp to ids }.first()
-
-            val todayCal = Calendar.getInstance()
-            val lastUpdateCal = Calendar.getInstance().apply {
+        scope?.launch {
+            val lastUpdate = userPreferencesRepository.lastDailyMixUpdateFlow.first()
+            val today = Calendar.getInstance().get(Calendar.DAY_OF_YEAR)
+            val lastUpdateDay = Calendar.getInstance().apply {
                 timeInMillis = lastUpdate
-            }
-            val isNewDay = todayCal.get(Calendar.YEAR) != lastUpdateCal.get(Calendar.YEAR) ||
-                todayCal.get(Calendar.DAY_OF_YEAR) != lastUpdateCal.get(Calendar.DAY_OF_YEAR)
+            }.get(Calendar.DAY_OF_YEAR)
 
-            if (isNewDay || persistedDailyMixIds.isEmpty()) {
+            if (today != lastUpdateDay) {
                 updateDailyMix(favoriteSongIdsFlow)
                 userPreferencesRepository.saveLastDailyMixUpdateTimestamp(System.currentTimeMillis())
             }
@@ -182,7 +176,6 @@ class DailyMixStateHolder @Inject constructor(
     }
 
     fun onCleared() {
-        checkJob?.cancel()
         updateJob?.cancel()
         scope = null
     }

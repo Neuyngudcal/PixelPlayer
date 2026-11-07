@@ -199,30 +199,4 @@ class LyricsSheetLogicTest {
 
         assertEquals(0L, seekPosition)
     }
-
-    @Test
-    fun resolveLineEndTimeMs_respectsExplicitEndDuringLongInstrumentalGap() {
-        val line = SyncedLine(
-            time = 5_000,
-            endTime = 8_000,
-            line = "Before solo"
-        )
-
-        val lineEnd = resolveLineEndTimeMs(line, nextLineStartMs = 25_000)
-
-        assertEquals(8_000L, lineEnd)
-    }
-
-    @Test
-    fun resolveCurrentLineIndex_prefersLeadVocalOverOverlappingBackgroundVocal() {
-        val lines = listOf(
-            SyncedLine(time = 10_000, endTime = 16_000, line = "Lead vocal", isBackground = false),
-            SyncedLine(time = 12_000, endTime = 15_000, line = "Backing vocal", isBackground = true),
-            SyncedLine(time = 16_000, endTime = 20_000, line = "Next lead", isBackground = false)
-        )
-
-        val activeIndex = resolveCurrentLineIndex(lines = lines, position = 13_000L)
-
-        assertEquals(0, activeIndex)
-    }
 }

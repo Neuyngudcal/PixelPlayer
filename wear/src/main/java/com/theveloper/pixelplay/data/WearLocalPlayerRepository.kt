@@ -1,20 +1,18 @@
 package com.theveloper.pixelplay.data
 
 import android.app.Application
-import android.content.ComponentName
-import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.media.MediaMetadataRetriever
 import android.net.Uri
-import androidx.core.content.ContextCompat
 import androidx.media3.common.C
+import androidx.media3.common.AudioAttributes
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
-import androidx.media3.session.MediaController
-import androidx.media3.session.SessionToken
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.session.MediaSession
 import com.theveloper.pixelplay.data.local.LocalSongDao
 import com.theveloper.pixelplay.data.local.LocalSongEntity
 import com.theveloper.pixelplay.shared.WearLibraryItem
@@ -30,10 +28,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
-import kotlin.coroutines.resume
-import kotlin.coroutines.resumeWithException
 import kotlinx.serialization.json.Json
 import timber.log.Timber
 import java.io.File
@@ -68,14 +63,11 @@ data class WearQueueSong(
 )
 
 /**
- * Repository driving standalone local playback on the watch.
+ * Repository managing ExoPlayer for standalone local playback on the watch.
  * Plays audio files that have been transferred from the phone and stored locally.
  *
- * The actual ExoPlayer + MediaSession live inside [WearPlaybackService] (a foreground
- * MediaSessionService); this repository controls them through a [MediaController]. Hosting playback
- * in a foreground service is what keeps the process alive when the app is backgrounded — and the
- * MediaSession also routes Bluetooth headset media buttons and system transport controls to watch
- * playback.
+ * Uses a lightweight local ExoPlayer plus MediaSession so Bluetooth headset media buttons
+ * and other system transport controls route to watch playback correctly.
  */
 @Singleton
 class WearLocalPlayerRepository @Inject constructor(
@@ -84,7 +76,8 @@ class WearLocalPlayerRepository @Inject constructor(
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val json = Json { ignoreUnknownKeys = true }
-    private var mediaController: MediaController? = null
+    private var exoPlayer: ExoPlayer? = null
+    private var mediaSession: MediaSession? = null
 
     private val _localPlayerState = MutableStateFlow(WearLocalPlayerState())
     val localPlayerState: StateFlow<WearLocalPlayerState> = _localPlayerState.asStateFlow()
@@ -116,6 +109,7 @@ class WearLocalPlayerRepository @Inject constructor(
     companion object {
         private const val TAG = "WearLocalPlayer"
         private const val POSITION_UPDATE_INTERVAL_MS = 1000L
+        private const val MEDIA_SESSION_ID = "wear-local-playback"
     }
 
     init {
@@ -137,57 +131,45 @@ class WearLocalPlayerRepository @Inject constructor(
         }
     }
 
-    private val playerListener = object : Player.Listener {
-        override fun onPlaybackStateChanged(playbackState: Int) {
-            updateState()
-            if (playbackState == Player.STATE_ENDED) {
-                stopPositionUpdates()
-            }
-        }
+    private fun getOrCreatePlayer(): ExoPlayer {
+        return exoPlayer ?: ExoPlayer.Builder(application).build().also { player ->
+            exoPlayer = player
+            player.setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(androidx.media3.common.C.USAGE_MEDIA)
+                    .setContentType(androidx.media3.common.C.AUDIO_CONTENT_TYPE_MUSIC)
+                    .build(),
+                true,
+            )
+            player.setHandleAudioBecomingNoisy(true)
+            ensureMediaSession(player)
+            player.addListener(object : Player.Listener {
+                override fun onPlaybackStateChanged(playbackState: Int) {
+                    updateState()
+                    if (playbackState == Player.STATE_ENDED) {
+                        stopPositionUpdates()
+                    }
+                }
 
-        override fun onIsPlayingChanged(isPlaying: Boolean) {
-            updateState()
-            if (isPlaying) startPositionUpdates() else stopPositionUpdates()
-        }
+                override fun onIsPlayingChanged(isPlaying: Boolean) {
+                    updateState()
+                    if (isPlaying) startPositionUpdates() else stopPositionUpdates()
+                }
 
-        override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-            updateState()
+                override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                    updateState()
+                }
+            })
+            Timber.tag(TAG).d("ExoPlayer created")
         }
     }
 
-    /**
-     * Connect to (and implicitly start) [WearPlaybackService], returning a [MediaController] that
-     * drives its ExoPlayer. Playback lives inside that MediaSessionService so Android keeps it alive
-     * as a foreground "mediaPlayback" service while audio plays — otherwise Wear OS reaps the
-     * background process after a few minutes and playback dies silently.
-     */
-    private suspend fun getOrConnectController(): MediaController {
-        mediaController?.let { return it }
-        return withContext(Dispatchers.Main) {
-            mediaController?.let { return@withContext it }
-            val token = SessionToken(
-                application,
-                ComponentName(application, WearPlaybackService::class.java),
-            )
-            val controller = suspendCancellableCoroutine<MediaController> { continuation ->
-                val future = MediaController.Builder(application, token).buildAsync()
-                future.addListener(
-                    {
-                        try {
-                            continuation.resume(future.get())
-                        } catch (e: Exception) {
-                            continuation.resumeWithException(e)
-                        }
-                    },
-                    ContextCompat.getMainExecutor(application),
-                )
-                continuation.invokeOnCancellation { MediaController.releaseFuture(future) }
-            }
-            mediaController = controller
-            controller.addListener(playerListener)
-            Timber.tag(TAG).d("MediaController connected to WearPlaybackService")
-            controller
-        }
+    private fun ensureMediaSession(player: ExoPlayer) {
+        if (mediaSession != null) return
+
+        mediaSession = MediaSession.Builder(application, player)
+            .setId(MEDIA_SESSION_ID)
+            .build()
     }
 
     /**
@@ -297,12 +279,7 @@ class WearLocalPlayerRepository @Inject constructor(
         transientCleanupPaths: Set<String> = emptySet(),
     ) {
         withContext(Dispatchers.Main) {
-            val player = try {
-                getOrConnectController()
-            } catch (e: Exception) {
-                Timber.tag(TAG).e(e, "Failed to connect to WearPlaybackService")
-                return@withContext
-            }
+            val player = getOrCreatePlayer()
             if (this@WearLocalPlayerRepository.transientCleanupPaths.isNotEmpty()) {
                 player.stop()
             }
@@ -329,14 +306,6 @@ class WearLocalPlayerRepository @Inject constructor(
                 MediaItem.Builder()
                     .setMediaId(song.songId)
                     .setUri(song.uri)
-                    // A MediaController drops localConfiguration (the URI) when items cross the
-                    // binder to the service, so stash it in requestMetadata for the service's
-                    // MediaSession.Callback to restore. See WearPlaybackService.
-                    .setRequestMetadata(
-                        MediaItem.RequestMetadata.Builder()
-                            .setMediaUri(song.uri)
-                            .build()
-                    )
                     .setMediaMetadata(
                         MediaMetadata.Builder()
                             .setTitle(song.title)
@@ -365,11 +334,11 @@ class WearLocalPlayerRepository @Inject constructor(
     }
 
     fun play() {
-        mediaController?.play()
+        exoPlayer?.play()
     }
 
     fun togglePlayPause() {
-        val player = mediaController ?: return
+        val player = exoPlayer ?: return
         if (player.isPlaying) {
             player.pause()
         } else {
@@ -378,31 +347,31 @@ class WearLocalPlayerRepository @Inject constructor(
     }
 
     fun pause() {
-        mediaController?.pause()
+        exoPlayer?.pause()
     }
 
     fun next() {
-        val player = mediaController ?: return
+        val player = exoPlayer ?: return
         if (player.hasNextMediaItem()) {
             player.seekToNext()
         }
     }
 
     fun previous() {
-        val player = mediaController ?: return
+        val player = exoPlayer ?: return
         if (player.hasPreviousMediaItem()) {
             player.seekToPrevious()
         }
     }
 
     fun seekTo(positionMs: Long) {
-        mediaController?.seekTo(positionMs)
+        exoPlayer?.seekTo(positionMs)
     }
 
     fun toggleShuffle() {
         scope.launch {
             withContext(Dispatchers.Main) {
-                val player = mediaController ?: return@withContext
+                val player = exoPlayer ?: return@withContext
                 player.shuffleModeEnabled = !player.shuffleModeEnabled
                 updateState()
             }
@@ -412,7 +381,7 @@ class WearLocalPlayerRepository @Inject constructor(
     fun cycleRepeat() {
         scope.launch {
             withContext(Dispatchers.Main) {
-                val player = mediaController ?: return@withContext
+                val player = exoPlayer ?: return@withContext
                 player.repeatMode = when (player.repeatMode) {
                     Player.REPEAT_MODE_OFF -> Player.REPEAT_MODE_ONE
                     Player.REPEAT_MODE_ONE -> Player.REPEAT_MODE_ALL
@@ -426,7 +395,7 @@ class WearLocalPlayerRepository @Inject constructor(
     fun playQueueIndex(index: Int) {
         scope.launch {
             withContext(Dispatchers.Main) {
-                val player = mediaController ?: return@withContext
+                val player = exoPlayer ?: return@withContext
                 if (index !in 0 until player.mediaItemCount) return@withContext
 
                 player.seekToDefaultPosition(index)
@@ -444,7 +413,7 @@ class WearLocalPlayerRepository @Inject constructor(
             val queueIndex = currentQueueSongIds.indexOf(songId)
             if (queueIndex == -1) return@withContext
 
-            val player = mediaController
+            val player = exoPlayer
             if (player == null || currentQueueSongIds.size <= 1) {
                 release()
                 return@withContext
@@ -472,19 +441,10 @@ class WearLocalPlayerRepository @Inject constructor(
      */
     fun release() {
         stopPositionUpdates()
-        mediaController?.let { controller ->
-            controller.removeListener(playerListener)
-            runCatching {
-                controller.stop()
-                controller.clearMediaItems()
-            }
-            controller.release()
-        }
-        mediaController = null
-        // Tear down the foreground service so its media notification clears immediately.
-        runCatching {
-            application.stopService(Intent(application, WearPlaybackService::class.java))
-        }
+        mediaSession?.release()
+        mediaSession = null
+        exoPlayer?.release()
+        exoPlayer = null
         clearTransientPlaybackArtifacts()
         _isLocalPlaybackActive.value = false
         _localPlayerState.value = WearLocalPlayerState()
@@ -497,11 +457,11 @@ class WearLocalPlayerRepository @Inject constructor(
         currentQueueItemsById = emptyMap()
         lastPaletteSongId = ""
         lastArtworkSongId = ""
-        Timber.tag(TAG).d("MediaController released, WearPlaybackService stopped")
+        Timber.tag(TAG).d("ExoPlayer released")
     }
 
     private fun updateState() {
-        val player = mediaController ?: return
+        val player = exoPlayer ?: return
         val currentItem = player.currentMediaItem
         val currentLocalSong = currentItem?.mediaId?.let(currentQueueSongsById::get)
         _localPlayerState.value = WearLocalPlayerState(
@@ -556,8 +516,8 @@ class WearLocalPlayerRepository @Inject constructor(
     }
 
     private fun updateQueueState(currentIndex: Int? = null) {
-        val player = mediaController
-        val rawCurrentIndex = currentIndex ?: mediaController?.currentMediaItemIndex ?: -1
+        val player = exoPlayer
+        val rawCurrentIndex = currentIndex ?: exoPlayer?.currentMediaItemIndex ?: -1
         val visibleQueueIndices = when {
             player == null -> {
                 if (rawCurrentIndex in currentQueueSongIds.indices) {
@@ -617,7 +577,7 @@ class WearLocalPlayerRepository @Inject constructor(
         )
     }
 
-    private fun buildVisibleQueueIndices(player: Player, currentIndex: Int): List<Int> {
+    private fun buildVisibleQueueIndices(player: ExoPlayer, currentIndex: Int): List<Int> {
         if (currentIndex !in 0 until player.mediaItemCount) {
             return (0 until player.mediaItemCount).toList()
         }

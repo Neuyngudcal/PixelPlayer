@@ -2,22 +2,18 @@ package com.theveloper.pixelplay.data.ai
 
 
 import com.theveloper.pixelplay.data.DailyMixManager
-import com.theveloper.pixelplay.data.ai.offline.LlamaEngine
-import com.theveloper.pixelplay.data.ai.provider.AiProvider
 import com.theveloper.pixelplay.data.model.Song
 import com.theveloper.pixelplay.data.preferences.AiPreferencesRepository
 import kotlinx.coroutines.flow.first
 import kotlinx.serialization.json.Json
 import javax.inject.Inject
 import kotlin.math.max
-import kotlin.math.min
 
 class AiPlaylistGenerator @Inject constructor(
     private val dailyMixManager: DailyMixManager,
-    private val aiHandler: dagger.Lazy<AiHandler>,
-    private val digestGenerator: dagger.Lazy<UserProfileDigestGenerator>,
+    private val aiOrchestrator: AiOrchestrator,
+    private val digestGenerator: UserProfileDigestGenerator,
     private val preferencesRepo: AiPreferencesRepository,
-    private val llamaEngine: dagger.Lazy<LlamaEngine>,
     private val json: Json
 ) {
 
@@ -33,7 +29,7 @@ class AiPlaylistGenerator @Inject constructor(
 
             // Get offline scored candidates to pass to LLM (much smaller context window than the whole library)
             val samplingPool = when {
-                candidateSongs.isNullOrEmpty().not() -> candidateSongs
+                candidateSongs.isNullOrEmpty().not() -> candidateSongs ?: allSongs
                 else -> {
                     val rankedForPrompt = dailyMixManager.getTopCandidatesForAi(
                         allSongs = allSongs,
@@ -44,15 +40,13 @@ class AiPlaylistGenerator @Inject constructor(
                 }
             }
 
+            // Token Optimization: Reduce sample size based on safe mode
             val isSafe = preferencesRepo.isSafeTokenLimitEnabled.first()
-            val prefSampleSize = preferencesRepo.aiSampleSize.first()
-            val useExtendedFields = preferencesRepo.aiIncludeExtendedFields.first()
-            val isOfflineProvider = preferencesRepo.aiProvider.first() == AiProvider.OFFLINE_GGUF.name
-            val rawSampleCap = if (isSafe) prefSampleSize else prefSampleSize * 2
-            // On-device GGUF models use a 2048-token context window; keep sample cap <= 40 for fast prefill
-            val sampleCap = if (isOfflineProvider) min(rawSampleCap, 40) else rawSampleCap
-            val songSample = samplingPool.take(sampleCap)
-
+            val sampleCap = if (isSafe) 40 else 80
+            val sampleSize = max(minLength, sampleCap).coerceAtMost(sampleCap)
+            val songSample = samplingPool.take(sampleSize)
+            
+            // Token Optimization: Compact JSON format — only essential fields
             val availableSongsJson = buildString {
                 songSample.forEachIndexed { index, song ->
                     val score = dailyMixManager.getScore(song.id)
@@ -60,19 +54,12 @@ class AiPlaylistGenerator @Inject constructor(
                     val artist = song.displayArtist.replace("\"", "'").take(25)
                     val genre = song.genre?.replace("\"", "'")?.take(15) ?: "?"
                     if (index > 0) append(",\n")
-                    if (useExtendedFields) {
-                        val album = song.album?.replace("\"", "'")?.take(25) ?: "?"
-                        val dur = song.duration
-                        val fav = if (song.isFavorite) "1" else "0"
-                        append("""{"id":"${song.id}","t":"$title","a":"$artist","g":"$genre","al":"$album","d":$dur,"f":$fav,"s":$score}""")
-                    } else {
-                        append("""{"id":"${song.id}","t":"$title","a":"$artist","g":"$genre","s":$score}""")
-                    }
+                    append("""{"id":"${song.id}","t":"$title","a":"$artist","g":"$genre","s":$score}""")
                 }
             }
 
             // Bring in the telemetry digest
-            val userDigest = digestGenerator.get().generateDigest(allSongs, isSafe)
+            val userDigest = digestGenerator.generateDigest(allSongs, isSafe)
 
             // Token Optimization: Compact prompt structure with XML data boundaries
             val fullPrompt = """
@@ -86,13 +73,7 @@ class AiPlaylistGenerator @Inject constructor(
             </candidate_pool>
             """.trimIndent()
 
-            val responseText = try {
-                aiHandler.get().generateContent(fullPrompt, type)
-            } finally {
-                if (isOfflineProvider) {
-                    llamaEngine.get().scheduleAutoUnload()
-                }
-            }
+            val responseText = aiOrchestrator.generateContent(fullPrompt, type)
 
             val songIds = extractPlaylistSongIds(responseText)
 
@@ -142,14 +123,12 @@ class AiPlaylistGenerator @Inject constructor(
                 "Airplane mode is active. Please turn it off to use AI."
 
             combinedMessages.contains("401", ignoreCase = true) ||
-            combinedMessages.contains("unauthorized", ignoreCase = true) ->
-                "Permission Denied. Your API key might be invalid or restricted."
-
             combinedMessages.contains("403", ignoreCase = true) ||
             combinedMessages.contains("permission", ignoreCase = true) ||
             combinedMessages.contains("denied", ignoreCase = true) ||
-            combinedMessages.contains("forbidden", ignoreCase = true) ->
-                "Permission denied by the AI provider. Check that this API key has access to the selected model and that the provider API is enabled."
+            combinedMessages.contains("forbidden", ignoreCase = true) ||
+            combinedMessages.contains("unauthorized", ignoreCase = true) ->
+                "Permission Denied. Your API key might be invalid or restricted."
             
             combinedMessages.contains("safety", ignoreCase = true) ||
             combinedMessages.contains("blocked", ignoreCase = true) ->
@@ -167,18 +146,55 @@ class AiPlaylistGenerator @Inject constructor(
     }
 
     private fun extractPlaylistSongIds(rawResponse: String): List<String> {
-        val cleaned = AiResponseCleaner.cleanJsonResponse(rawResponse)
-        val jsonArray = AiResponseCleaner.extractJsonArray(cleaned)
-            ?: throw IllegalArgumentException(
-                "AI returned an invalid response format. Expected a JSON array of song IDs but got something else. " +
-                "This usually happens with smaller models. Try selecting a more capable model in AI Settings."
-            )
+        val sanitized = rawResponse
+            .replace("```json", "")
+            .replace("```", "")
+            .trim()
 
-        return runCatching { json.decodeFromString<List<String>>(jsonArray) }
-            .getOrElse {
-                throw IllegalArgumentException(
-                    "AI returned malformed JSON. Expected a string array but got: ${jsonArray.take(100)}"
-                )
+        for (startIndex in sanitized.indices) {
+            if (sanitized[startIndex] != '[') continue
+
+            var depth = 0
+            var inString = false
+            var isEscaped = false
+
+            for (index in startIndex until sanitized.length) {
+                val character = sanitized[index]
+
+                if (inString) {
+                    if (isEscaped) {
+                        isEscaped = false
+                        continue
+                    }
+
+                    when (character) {
+                        '\\' -> isEscaped = true
+                        '"' -> inString = false
+                    }
+                    continue
+                }
+
+                when (character) {
+                    '"' -> inString = true
+                    '[' -> depth++
+                    ']' -> {
+                        depth--
+                        if (depth == 0) {
+                            val candidate = sanitized.substring(startIndex, index + 1)
+                            val decoded = runCatching { json.decodeFromString<List<String>>(candidate) }
+                            if (decoded.isSuccess) {
+                                return decoded.getOrThrow()
+                            }
+                            break
+                        }
+                    }
+                }
             }
+        }
+
+        throw IllegalArgumentException(
+            "AI returned an invalid response format. Expected a JSON array of song IDs but got something else. " +
+            "This usually happens with smaller models. Try selecting a more capable model in AI Settings."
+        )
     }
 }

@@ -91,11 +91,6 @@ class PlaylistViewModel @Inject constructor(
         const val FOLDER_PLAYLIST_PREFIX = "folder_playlist:"
         private const val MANUAL_ORDER_MODE = "manual"
         private const val SMART_PLAYLIST_MAX_ITEMS = 100
-
-        fun sanitizeFileName(name: String): String {
-            val sanitized = name.replace(Regex("[\\\\/:*?\"<>|\\s]+"), "_").trim('_')
-            return if (sanitized.isEmpty()) "Playlist" else sanitized
-        }
     }
 
     // Helper function to resolve stored playlist sort keys
@@ -435,28 +430,18 @@ class PlaylistViewModel @Inject constructor(
     ): String? {
         return withContext(Dispatchers.IO) {
             try {
-                // Robust bitmap loading (Content URI or Local File)
+                // Load original bitmap
                 val originalBitmap = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                    val source = when {
-                        uri.scheme == "content" -> ImageDecoder.createSource(context.contentResolver, uri)
-                        uri.scheme == "file" || uri.path?.startsWith("/") == true -> {
-                            ImageDecoder.createSource(File(uri.path ?: ""))
-                        }
-                        else -> ImageDecoder.createSource(context.contentResolver, uri)
-                    }
-                    ImageDecoder.decodeBitmap(source) { decoder, _, _ ->
+                    ImageDecoder.decodeBitmap(ImageDecoder.createSource(context.contentResolver, uri)) { decoder, _, _ ->
+                        // Optimization: Mutable to support software rendering if needed
                         decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+                        // Use HARWARE if possible but need to copy for Canvas?
+                        // Software is safer for manual Canvas drawing.
                     }
                 } else {
                     @Suppress("DEPRECATION")
-                    if (uri.scheme == "content") {
-                        MediaStore.Images.Media.getBitmap(context.contentResolver, uri)
-                    } else {
-                        android.graphics.BitmapFactory.decodeFile(uri.path)
-                    }
+                    MediaStore.Images.Media.getBitmap(context.contentResolver, uri)
                 }
-
-                if (originalBitmap == null) return@withContext null
 
                 // Target dimensions (Square)
                 val targetSize = 1024
@@ -598,36 +583,50 @@ class PlaylistViewModel @Inject constructor(
         viewModelScope.launch {
             var savedCoverPath: String? = currentPlaylist.coverImageUri
 
-            val isNewImage = coverImageUri != null && coverImageUri != currentPlaylist.coverImageUri
-            val isAdjusted = cropScale != 1f || cropPanX != 0f || cropPanY != 0f
+            // If a new URI is provided and it's different from the existing one (and not null)
+            // Or if we need to re-save because crop params changed?
+            // For simplicity, if coverImageUri is passed and it's a content URI, we save it.
+            // If it's the same string as savedCoverPath, we assume it's unchanged unless we want to force re-crop.
+            // The UI will pass the Uri string. If it's a local file path, it's likely already saved.
+            // But if the user selected a new image, it will be a content content:// uri.
 
-            if (coverImageUri != null && (isNewImage || isAdjusted)) {
-                // Save new image or re-crop existing one
-                val imageId = UUID.randomUUID().toString()
-                val newPath = saveCoverImageToInternalStorage(
-                    Uri.parse(coverImageUri),
-                    imageId,
-                    cropScale,
-                    cropPanX,
-                    cropPanY
-                )
-                if (newPath != null) {
-                    // Optional: Delete old file if it was a local file managed by us
-                    currentPlaylist.coverImageUri?.let { oldPath ->
-                        if (oldPath.contains("playlist_cover_")) {
-                            try { File(oldPath).delete() } catch (e: Exception) {}
-                        }
+            if (coverImageUri != null && coverImageUri != currentPlaylist.coverImageUri) {
+                // Check if it is a content URI or a file path that is NOT the existing saved path
+                if (coverImageUri.startsWith("content://") || (coverImageUri.startsWith("/") && coverImageUri != currentPlaylist.coverImageUri)) {
+                    val imageId = UUID.randomUUID().toString()
+                    val newPath = saveCoverImageToInternalStorage(
+                        Uri.parse(coverImageUri),
+                        imageId,
+                        cropScale,
+                        cropPanX,
+                        cropPanY
+                    )
+                    if (newPath != null) {
+                        savedCoverPath = newPath
                     }
-                    savedCoverPath = newPath
                 }
             } else if (coverImageUri == null) {
-                // Explicitly removed
-                currentPlaylist.coverImageUri?.let { oldPath ->
-                    if (oldPath.contains("playlist_cover_")) {
-                        try { File(oldPath).delete() } catch (e: Exception) {}
-                    }
-                }
-                savedCoverPath = null
+                // If passed null, it might mean remove cover? Or just no change?
+                // For this implementation let's assume if the user cleared it, the UI passes null.
+                // But we need to distinguish "no change" vs "remove".
+                // In CreatePlaylist we have "selectedImageUri".
+                // Let's assume the UI sends the desired final state.
+                // NOTE: If the user didn't change the image, the UI might send the existing coverImageUri (which is a file path).
+                // Or if they removed it, they send null.
+
+                // However, we also have crop parameters. If image is unchanged but crop changed, we should re-save (re-crop)
+                // if we have the original source. But we don't have the original source for the existing cover (we only have the cropped result).
+                // So, we can only re-crop if we have a source URI.
+                // This limitation implies: We can only update crop if we pick an image.
+                // So if coverImageUri is the existing path, we ignore crop params.
+                savedCoverPath = null // If explicit null passed, we remove it.
+            }
+            // Logic correction: 
+            // If the UI passes the EXISTING file path, implies NO CHANGE to image.
+            // If the UI passes a NEW content URI, implies NEW IMAGE (and we use crop params).
+            // If the UI passes NULL, implies REMOVE IMAGE.
+            if (coverImageUri == currentPlaylist.coverImageUri) {
+                savedCoverPath = currentPlaylist.coverImageUri
             }
 
 
@@ -959,9 +958,9 @@ class PlaylistViewModel @Inject constructor(
                     _playlistCreationEvent.emit(true)
                 }.onFailure { e ->
                     val errorMessage = if (e.message?.contains("API Key") == true) {
-                        context.getString(R.string.playlist_view_model_ai_gemini_key_required)
+                        context.getString(R.string.ai_playlist_gemini_key_required)
                     } else {
-                        e.message ?: context.getString(R.string.common_error_unknown)
+                        e.message ?: context.getString(R.string.error_unknown)
                     }
                     _uiState.update { it.copy(isAiGenerating = false, aiGenerationError = errorMessage) }
                 }
@@ -1049,7 +1048,7 @@ class PlaylistViewModel @Inject constructor(
 
                 if (playlistsWithSongs.isEmpty()) {
                     Log.w("PlaylistViewModel", "No playlists found to share")
-                    Toast.makeText(context, context.getString(R.string.playlist_view_model_none_to_share), Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, context.getString(R.string.playlist_none_to_share), Toast.LENGTH_SHORT).show()
                     return@launch
                 }
 
@@ -1061,33 +1060,21 @@ class PlaylistViewModel @Inject constructor(
                     // Single playlist: share M3U file directly
                     val (playlist, songs) = playlistsWithSongs.first()
                     val m3uContent = m3uManager.generateM3u(playlist, songs)
-                    val sanitizedName = sanitizeFileName(playlist.name)
-                    shareFileName = "$sanitizedName.m3u"
+                    shareFileName = "${playlist.name}.m3u"
                     shareFile = File(context.cacheDir, shareFileName)
                     shareFile.writeText(m3uContent)
                     shareMimeType = "audio/mpegurl"
                     Log.d("PlaylistViewModel", "Created M3U file: ${shareFile.absolutePath}, size: ${shareFile.length()} bytes")
                 } else {
                     // Multiple playlists: create ZIP file
-                    val firstPlaylistName = sanitizeFileName(playlistsWithSongs.first().first.name)
-                    val zipFileName = "Playlists_${firstPlaylistName}_and_${playlistsWithSongs.size - 1}_more.zip"
+                    val zipFileName = "Playlists_${playlistsWithSongs.first().first.name}_and_${playlistsWithSongs.size - 1}_more.zip"
                     shareFile = File(context.cacheDir, zipFileName)
                     val outputStream = FileOutputStream(shareFile)
 
                     java.util.zip.ZipOutputStream(outputStream).use { zipOut ->
-                        val usedNames = mutableSetOf<String>()
                         playlistsWithSongs.forEach { (playlist, songs) ->
                             val m3uContent = m3uManager.generateM3u(playlist, songs)
-                            val baseName = sanitizeFileName(playlist.name)
-                            var entryName = "$baseName.m3u"
-                            var counter = 1
-                            while (usedNames.contains(entryName)) {
-                                entryName = "${baseName}_$counter.m3u"
-                                counter++
-                            }
-                            usedNames.add(entryName)
-
-                            val entry = java.util.zip.ZipEntry(entryName)
+                            val entry = java.util.zip.ZipEntry("${playlist.name}.m3u")
                             zipOut.putNextEntry(entry)
                             zipOut.write(m3uContent.toByteArray())
                             zipOut.closeEntry()
@@ -1113,14 +1100,14 @@ class PlaylistViewModel @Inject constructor(
                 }
 
                 Log.d("PlaylistViewModel", "Launching share intent for: $shareFileName")
-                activity.startActivity(Intent.createChooser(shareIntent, context.getString(R.string.playlist_view_model_share_chooser_title)))
+                activity.startActivity(Intent.createChooser(shareIntent, context.getString(R.string.playlist_share_chooser_title)))
                 val n = playlistsWithSongs.size
-                val sharingMsg = context.resources.getQuantityString(R.plurals.playlist_view_model_sharing_message, n, n)
+                val sharingMsg = context.resources.getQuantityString(R.plurals.sharing_playlists_message, n, n)
                 Toast.makeText(context, sharingMsg, Toast.LENGTH_SHORT).show()
 
             } catch (e: Exception) {
                 Log.e("PlaylistViewModel", "Error sharing playlists", e)
-                Toast.makeText(context, context.getString(R.string.playlist_view_model_share_failed, e.message ?: ""), Toast.LENGTH_LONG).show()
+                Toast.makeText(context, context.getString(R.string.playlist_share_failed, e.message ?: ""), Toast.LENGTH_LONG).show()
             }
         }
     }
@@ -1195,32 +1182,26 @@ class PlaylistViewModel @Inject constructor(
                 val playlistsWithSongs = getPlaylistsWithSongs(playlistIds)
                 if (playlistsWithSongs.isEmpty()) {
                     Log.w("PlaylistViewModel", "No playlists found to export")
-                    Toast.makeText(context, context.getString(R.string.playlist_view_model_none_to_export), Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, context.getString(R.string.playlist_none_to_export), Toast.LENGTH_SHORT).show()
                     return@launch
                 }
 
                 playlistsWithSongs.forEach { (playlist, songs) ->
                     val m3uContent = m3uManager.generateM3u(playlist, songs)
-                    val baseName = sanitizeFileName(playlist.name)
-                    var file = File(exportDir, "$baseName.m3u")
-                    var counter = 1
-                    while (file.exists()) {
-                        file = File(exportDir, "${baseName}_$counter.m3u")
-                        counter++
-                    }
+                    val file = File(exportDir, "${playlist.name}.m3u")
                     file.writeText(m3uContent)
                     Log.d("PlaylistViewModel", "Exported playlist '${playlist.name}' to ${file.absolutePath}")
                 }
 
                 Log.d("PlaylistViewModel", "Successfully exported ${playlistIds.size} playlists to $exportDir")
                 val count = playlistsWithSongs.size
-                val folderLabel = context.getString(R.string.playlist_view_model_export_folder_display)
-                val exportedMsg = context.resources.getQuantityString(R.plurals.playlist_view_model_exported_message, count, count, folderLabel)
+                val folderLabel = context.getString(R.string.playlist_export_folder_display)
+                val exportedMsg = context.resources.getQuantityString(R.plurals.exported_playlists_message, count, count, folderLabel)
                 Toast.makeText(context, exportedMsg, Toast.LENGTH_SHORT).show()
 
             } catch (e: Exception) {
                 Log.e("PlaylistViewModel", "Error exporting playlists", e)
-                Toast.makeText(context, context.getString(R.string.playlist_view_model_export_failed, e.message ?: ""), Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, context.getString(R.string.playlist_export_failed, e.message ?: ""), Toast.LENGTH_SHORT).show()
             }
         }
     }

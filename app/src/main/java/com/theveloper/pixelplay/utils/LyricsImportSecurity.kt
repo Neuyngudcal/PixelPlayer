@@ -29,11 +29,6 @@ sealed interface LyricsImportValidationResult {
 
 object LyricsImportSecurity {
     const val MAX_LYRICS_FILE_BYTES = 256 * 1024
-
-    // TTML files from Apple Music and other sources are verbose XML and
-    // routinely exceed 256 KB. Give them a separate higher ceiling while
-    // keeping the tighter limit for plain LRC files.
-    const val MAX_TTML_FILE_BYTES = 1024 * 1024 // 1 MB
     const val MAX_LYRICS_TEXT_CHARS = 50_000
 
     private enum class LyricsDocumentFormat(
@@ -84,12 +79,11 @@ object LyricsImportSecurity {
         if (!hasSupportedMimeType(format, mimeType)) {
             return LyricsImportValidationResult.Invalid(LyricsImportFailureReason.UNSUPPORTED_MIME_TYPE)
         }
-        val maxBytes = maxFileBytesFor(format)
-        if (reportedSizeBytes != null && reportedSizeBytes > maxBytes) {
+        if (reportedSizeBytes != null && reportedSizeBytes > MAX_LYRICS_FILE_BYTES) {
             return LyricsImportValidationResult.Invalid(LyricsImportFailureReason.FILE_TOO_LARGE)
         }
 
-        val payload = readBytesWithLimit(inputStream, maxBytes + 1)
+        val payload = readBytesWithLimit(inputStream, MAX_LYRICS_FILE_BYTES + 1)
             ?: return LyricsImportValidationResult.Invalid(LyricsImportFailureReason.FILE_TOO_LARGE)
 
         return validatePayload(payload, format)
@@ -102,15 +96,13 @@ object LyricsImportSecurity {
         if (!file.exists() || !file.canRead()) {
             return LyricsImportValidationResult.Invalid(LyricsImportFailureReason.EMPTY_CONTENT)
         }
-
-        val maxBytes = maxFileBytesFor(format)
-        if (file.length() > maxBytes) {
+        if (file.length() > MAX_LYRICS_FILE_BYTES) {
             return LyricsImportValidationResult.Invalid(LyricsImportFailureReason.FILE_TOO_LARGE)
         }
 
         return runCatching {
             file.inputStream().buffered().use { input ->
-                val payload = readBytesWithLimit(input, maxBytes + 1)
+                val payload = readBytesWithLimit(input, MAX_LYRICS_FILE_BYTES + 1)
                     ?: return LyricsImportValidationResult.Invalid(LyricsImportFailureReason.FILE_TOO_LARGE)
                 validatePayload(payload, format)
             }
@@ -119,10 +111,7 @@ object LyricsImportSecurity {
         }
     }
 
-    fun validateImportedLrcContent(
-        rawText: String,
-        allowSingleLinePlain: Boolean = true
-    ): LyricsImportValidationResult {
+    fun validateImportedLrcContent(rawText: String): LyricsImportValidationResult {
         val sanitized = sanitizeImportedLyrics(rawText)
         if (sanitized.isBlank()) {
             return LyricsImportValidationResult.Invalid(LyricsImportFailureReason.EMPTY_CONTENT)
@@ -132,12 +121,7 @@ object LyricsImportSecurity {
         }
 
         val parsed = LyricsUtils.parseLyrics(sanitized)
-        val hasSynced = !parsed.synced.isNullOrEmpty()
-        val nonBlankPlainCount = parsed.plain?.count { it.isNotBlank() } ?: 0
-        val hasValidPlain = !looksLikeMarkupOrStructuredPayload(sanitized) &&
-            (if (allowSingleLinePlain) nonBlankPlainCount >= 1 else nonBlankPlainCount >= 2)
-
-        if (!hasSynced && !hasValidPlain) {
+        if (parsed.synced.isNullOrEmpty() && parsed.plain.isNullOrEmpty()) {
             return LyricsImportValidationResult.Invalid(LyricsImportFailureReason.INVALID_LYRICS_CONTENT)
         }
 
@@ -147,14 +131,6 @@ object LyricsImportSecurity {
                 parsedLyrics = parsed
             )
         )
-    }
-
-    private fun looksLikeMarkupOrStructuredPayload(text: String): Boolean {
-        val trimmed = text.trimStart()
-        return trimmed.startsWith("<") ||
-            trimmed.startsWith("{") ||
-            trimmed.contains("<!DOCTYPE", ignoreCase = true) ||
-            trimmed.contains("<!ENTITY", ignoreCase = true)
     }
 
     fun messageFor(reason: LyricsImportFailureReason): String {
@@ -181,7 +157,7 @@ object LyricsImportSecurity {
         if (payload.isEmpty()) {
             return LyricsImportValidationResult.Invalid(LyricsImportFailureReason.EMPTY_CONTENT)
         }
-        if (payload.size > maxFileBytesFor(format)) {
+        if (payload.size > MAX_LYRICS_FILE_BYTES) {
             return LyricsImportValidationResult.Invalid(LyricsImportFailureReason.FILE_TOO_LARGE)
         }
 
@@ -189,11 +165,7 @@ object LyricsImportSecurity {
             ?: return LyricsImportValidationResult.Invalid(LyricsImportFailureReason.INVALID_ENCODING)
 
         for (normalized in normalizationCandidates(decoded, format)) {
-            val allowSingleLinePlain = false
-            val validation = validateImportedLrcContent(
-                rawText = normalized,
-                allowSingleLinePlain = allowSingleLinePlain
-            )
+            val validation = validateImportedLrcContent(normalized)
             if (validation is LyricsImportValidationResult.Valid) {
                 return validation
             }
@@ -209,10 +181,10 @@ object LyricsImportSecurity {
         val candidates = when (format) {
             LyricsDocumentFormat.LRC -> listOfNotNull(
                 sanitizeImportedLyrics(decoded),
-                TtmlLyricsParser.parseToEnhancedLrc(decoded, includeWordEndTags = false)?.let(::sanitizeImportedLyrics)
+                TtmlLyricsParser.parseToEnhancedLrc(decoded)?.let(::sanitizeImportedLyrics)
             )
             LyricsDocumentFormat.TTML -> listOfNotNull(
-                TtmlLyricsParser.parseToEnhancedLrc(decoded, includeWordEndTags = false)?.let(::sanitizeImportedLyrics),
+                TtmlLyricsParser.parseToEnhancedLrc(decoded)?.let(::sanitizeImportedLyrics),
                 sanitizeImportedLyrics(decoded)
             )
         }
@@ -241,9 +213,6 @@ object LyricsImportSecurity {
         if (normalized.isBlank()) return true
         return normalized in format.allowedMimeTypes
     }
-
-    private fun maxFileBytesFor(format: LyricsDocumentFormat): Int =
-        if (format == LyricsDocumentFormat.TTML) MAX_TTML_FILE_BYTES else MAX_LYRICS_FILE_BYTES
 
     private fun readBytesWithLimit(inputStream: InputStream, maxBytes: Int): ByteArray? {
         val output = ByteArrayOutputStream(minOf(DEFAULT_BUFFER_SIZE, maxBytes))

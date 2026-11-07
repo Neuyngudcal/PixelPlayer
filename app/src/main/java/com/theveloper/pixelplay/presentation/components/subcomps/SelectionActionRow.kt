@@ -25,7 +25,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Deselect
-import androidx.compose.material.icons.rounded.MoreVert
+import androidx.compose.material.icons.rounded.MoreHoriz
 import androidx.compose.material.icons.rounded.SelectAll
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilledTonalButton
@@ -128,7 +128,7 @@ fun SelectionActionRow(
                 )
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
-                    text = stringResource(R.string.library_selection_all),
+                    text = stringResource(R.string.presentation_batch_g_selection_all),
                     style = MaterialTheme.typography.labelLarge,
                     fontWeight = FontWeight.Medium,
                     fontFamily = GoogleSansRounded
@@ -153,7 +153,7 @@ fun SelectionActionRow(
                 )
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
-                    text = stringResource(R.string.library_selection_deselect),
+                    text = stringResource(R.string.presentation_batch_g_selection_deselect),
                     style = MaterialTheme.typography.labelLarge,
                     fontWeight = FontWeight.Medium,
                     fontFamily = GoogleSansRounded
@@ -171,13 +171,20 @@ fun SelectionActionRow(
                 containerColor = MaterialTheme.colorScheme.primaryContainer,
                 contentColor = MaterialTheme.colorScheme.onPrimaryContainer
             ),
-            contentPadding = PaddingValues(horizontal = 2.dp),
-            modifier = Modifier.height(buttonHeight).width(36.dp)
+            contentPadding = PaddingValues(horizontal = 16.dp),
+            modifier = Modifier.height(buttonHeight)
         ) {
             Icon(
-                imageVector = Icons.Rounded.MoreVert,
-                contentDescription = stringResource(R.string.library_selection_more_options),
+                imageVector = Icons.Rounded.MoreHoriz,
+                contentDescription = stringResource(R.string.presentation_batch_g_selection_cd_more),
                 modifier = Modifier.size(20.dp)
+            )
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(
+                text = stringResource(R.string.presentation_batch_g_selection_options),
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.Medium,
+                fontFamily = GoogleSansRounded
             )
         }
     }

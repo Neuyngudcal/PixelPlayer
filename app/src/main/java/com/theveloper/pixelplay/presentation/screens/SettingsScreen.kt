@@ -82,7 +82,7 @@ import com.theveloper.pixelplay.presentation.viewmodel.PlayerViewModel
 import com.theveloper.pixelplay.presentation.viewmodel.SettingsViewModel
 import kotlin.math.roundToInt
 import kotlinx.coroutines.launch
-import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.media3.common.util.UnstableApi
 import androidx.navigation.NavController
 import com.theveloper.pixelplay.data.preferences.LaunchTab
@@ -262,8 +262,8 @@ fun SettingsScreen(
                     itemIndex++
 
                     ExpressiveNavigationItem(
-                        title = stringResource(R.string.settings_category_accounts_title),
-                        subtitle = stringResource(R.string.settings_category_accounts_subtitle),
+                        title = stringResource(R.string.settings_accounts_row_title),
+                        subtitle = stringResource(R.string.settings_accounts_row_subtitle),
                         icon = Icons.Rounded.AccountCircle,
                         colors = getAccountsColors(isDark),
                         onClick = { navController.navigateSafely(Screen.Accounts.route) },
@@ -287,7 +287,7 @@ fun SettingsScreen(
             }
         }
         CollapsibleCommonTopBar(
-                title = stringResource(R.string.common_settings),
+                title = stringResource(R.string.settings_top_bar_title),
                 collapseFraction = collapseFraction,
                 headerHeight = currentTopBarHeightDp,
                 onBackClick = onNavigationIconClick

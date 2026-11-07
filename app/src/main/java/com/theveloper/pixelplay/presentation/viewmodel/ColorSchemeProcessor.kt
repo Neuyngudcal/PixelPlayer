@@ -3,7 +3,6 @@ package com.theveloper.pixelplay.presentation.viewmodel
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
-import android.graphics.drawable.BitmapDrawable
 import android.os.Trace
 import android.util.LruCache
 import androidx.compose.material3.ColorScheme
@@ -50,7 +49,7 @@ class ColorSchemeProcessor @Inject constructor(
     private val albumArtThemeDao: AlbumArtThemeDao
 ) {
     // In-memory LRU cache for faster access (avoids DB reads for hot paths)
-    private val memoryCache = LruCache<String, ColorSchemePair>(64)
+    private val memoryCache = LruCache<String, ColorSchemePair>(20)
     private val processingMutex = Mutex()
     private val inProgressUris = mutableSetOf<String>()
 
@@ -123,11 +122,6 @@ class ColorSchemeProcessor @Inject constructor(
         )
     }
 
-    private data class ExtractedBitmapHolder(
-        val bitmap: Bitmap,
-        val ownsBitmap: Boolean
-    )
-
     /**
      * Generates a color scheme from the album art bitmap.
      * All processing done on Default dispatcher for CPU-bound work.
@@ -143,23 +137,20 @@ class ColorSchemeProcessor @Inject constructor(
         try {
             val cacheKey = buildCacheKey(albumArtUri, paletteStyle, colorAccuracyLevel)
             // Load bitmap on IO dispatcher
-            val bitmapHolder = withContext(Dispatchers.IO) {
+            val bitmap = withContext(Dispatchers.IO) {
                 loadBitmapForColorExtraction(albumArtUri, forceRefresh)
             } ?: return null
 
             // Extract colors on Default dispatcher (CPU-bound)
             val schemePair = withContext(Dispatchers.Default) {
                 val seed = extractSeedColor(
-                    bitmap = bitmapHolder.bitmap,
+                    bitmap = bitmap,
                     config = com.theveloper.pixelplay.ui.theme.ColorExtractionConfig(
                         accuracyLevel = colorAccuracyLevel
                     )
                 )
-                // Only recycle if we allocated a temporary rasterized copy; never recycle
-                // a Bitmap owned by Coil's MemoryCache.
-                if (bitmapHolder.ownsBitmap) {
-                    bitmapHolder.bitmap.recycle()
-                }
+                // Recycle immediately after pixel access — we only need the seed color.
+                bitmap.recycle()
                 generateColorSchemeFromSeed(
                     seedColor = seed,
                     paletteStyle = paletteStyle
@@ -192,10 +183,8 @@ class ColorSchemeProcessor @Inject constructor(
 
     /**
      * Loads a small bitmap optimized for color extraction.
-     * Reuses the decoded BitmapDrawable's bitmap directly when possible instead of
-     * allocating and drawing a duplicate Bitmap via Canvas.
      */
-    private suspend fun loadBitmapForColorExtraction(uri: String, skipCache: Boolean): ExtractedBitmapHolder? {
+    private suspend fun loadBitmapForColorExtraction(uri: String, skipCache: Boolean): Bitmap? {
         return try {
             val cachePolicy = if (skipCache) CachePolicy.DISABLED else CachePolicy.ENABLED
             val diskCachePolicy = if (LocalArtworkUri.isLocalArtworkUri(uri)) CachePolicy.DISABLED else cachePolicy
@@ -210,14 +199,8 @@ class ColorSchemeProcessor @Inject constructor(
                 .build()
             
             val drawable = context.imageLoader.execute(request).drawable ?: return null
-            if (drawable is BitmapDrawable) {
-                val existingBitmap = drawable.bitmap
-                if (existingBitmap != null && !existingBitmap.isRecycled && existingBitmap.config != Bitmap.Config.HARDWARE) {
-                    return ExtractedBitmapHolder(bitmap = existingBitmap, ownsBitmap = false)
-                }
-            }
             
-            val rasterized = createBitmap(
+            createBitmap(
                 drawable.intrinsicWidth.coerceAtLeast(1),
                 drawable.intrinsicHeight.coerceAtLeast(1)
             ).also { bmp ->
@@ -225,8 +208,9 @@ class ColorSchemeProcessor @Inject constructor(
                     drawable.setBounds(0, 0, canvas.width, canvas.height)
                     drawable.draw(canvas)
                 }
+                // bitmap is only needed for extractSeedColor() which is called synchronously
+                // by the caller on Dispatchers.Default; it will be recycled there.
             }
-            ExtractedBitmapHolder(bitmap = rasterized, ownsBitmap = true)
         } catch (e: Exception) {
             null
         }

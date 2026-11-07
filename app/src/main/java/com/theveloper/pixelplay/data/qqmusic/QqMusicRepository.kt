@@ -1,4 +1,3 @@
-@file:Suppress("DEPRECATION")
 package com.theveloper.pixelplay.data.qqmusic
 
 import android.content.Context
@@ -39,7 +38,6 @@ import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.math.absoluteValue
 
-@Suppress("DEPRECATION")
 @Singleton
 class QqMusicRepository @Inject constructor(
     private val api: QqMusicApiService,

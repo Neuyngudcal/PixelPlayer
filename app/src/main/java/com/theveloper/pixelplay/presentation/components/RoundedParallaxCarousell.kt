@@ -77,10 +77,11 @@ class CarouselState(
 
     suspend fun scrollToItem(item: Int) = pagerState.scrollToPage(item, 0f)
 
+    @Suppress("UNUSED_PARAMETER")
     suspend fun animateScrollToItem(item: Int, animationSpec: AnimationSpec<Float> = spring()) {
         if ((item == pagerState.currentPage && pagerState.currentPageOffsetFraction == 0f) || pagerState.pageCount == 0) return
         val targetPage = if (pagerState.pageCount > 0) item.coerceIn(0, pagerState.pageCount - 1) else 0
-        pagerState.animateScrollToPage(page = targetPage, animationSpec = animationSpec)
+        pagerState.animateScrollToPage(targetPage)
     }
 
     companion object {
@@ -288,7 +289,7 @@ private fun RoundedCarousel(
                 ): Outline {
                     // 1) Limitar la máscara al tamaño del layer (item)
                     val layerBounds = Rect(0f, 0f, size.width, size.height)
-                    // intersecta con bounds y da un respiro sub-px para que no se vea 「cortado」
+                    // intersecta con bounds y da un respiro sub-px para que no se vea “cortado”
                     val rect = carouselItemInfo.maskRect.intersect(layerBounds).inflate(0.5f)
 
                     // 2) Creamos un outline redondeado del tamaño del rect ya intersectado
@@ -830,7 +831,7 @@ private data class Arrangement(
     fun itemCount() = smallCount + mediumCount + largeCount
 
     companion object {
-        /** Búsqueda simple: prueba combinaciones y escoge la que mejor llena el espacio con menor 「coste」. */
+        /** Búsqueda simple: prueba combinaciones y escoge la que mejor llena el espacio con menor “coste”. */
         fun findLowestCostArrangement(
             availableSpace: Float,
             itemSpacing: Float,

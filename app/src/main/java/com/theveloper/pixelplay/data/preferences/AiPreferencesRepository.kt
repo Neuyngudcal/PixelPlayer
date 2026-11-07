@@ -4,11 +4,8 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
-import androidx.datastore.preferences.core.floatPreferencesKey
-import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import com.theveloper.pixelplay.data.ai.provider.AiProvider
 import javax.inject.Inject
@@ -38,51 +35,26 @@ class AiPreferencesRepository @Inject constructor(
     private object Keys {
         val AI_PROVIDER = stringPreferencesKey("ai_provider")
         val SAFE_TOKEN_LIMIT = booleanPreferencesKey("safe_token_limit")
-        val AI_TEMPERATURE = floatPreferencesKey("ai_temperature")
-        val AI_TOP_P = floatPreferencesKey("ai_top_p")
-        val AI_TOP_K = intPreferencesKey("ai_top_k")
-        val AI_MAX_TOKENS = intPreferencesKey("ai_max_tokens")
-        val AI_PRESENCE_PENALTY = floatPreferencesKey("ai_presence_penalty")
-        val AI_FREQUENCY_PENALTY = floatPreferencesKey("ai_frequency_penalty")
-        val AI_SAMPLE_SIZE = intPreferencesKey("ai_sample_size")
-        val AI_DIGEST_MODE = stringPreferencesKey("ai_digest_mode")
-        val AI_INCLUDE_EXTENDED_FIELDS = booleanPreferencesKey("ai_include_extended_fields")
-
-        // Offline GGUF LLM preferences
-        val ACTIVE_OFFLINE_MODEL_PATH = stringPreferencesKey("active_offline_model_path")
-        val ACTIVE_OFFLINE_MODEL_NAME = stringPreferencesKey("active_offline_model_name")
-        val ACTIVE_OFFLINE_MODEL_ID = stringPreferencesKey("active_offline_model_id")
-        val OFFLINE_HARDWARE_PASSED = booleanPreferencesKey("offline_hardware_passed")
-        val OFFLINE_THREADS_COUNT = intPreferencesKey("offline_threads_count")
-        val OFFLINE_USE_GPU = booleanPreferencesKey("offline_use_gpu")
-        val OFFLINE_LAST_BENCHMARK_SPEED = floatPreferencesKey("offline_last_benchmark_speed")
 
         fun getApiKey(provider: AiProvider) = stringPreferencesKey("${provider.name.lowercase()}_api_key")
         fun getModel(provider: AiProvider) = stringPreferencesKey("${provider.name.lowercase()}_model")
         fun getSystemPrompt(provider: AiProvider) = stringPreferencesKey("${provider.name.lowercase()}_system_prompt")
-        fun getBaseUrl(provider: AiProvider) = stringPreferencesKey("${provider.name.lowercase()}_base_url")
     }
 
-    // Generic accessors for AiHandler
+    // Generic accessors for AiOrchestrator
     fun getApiKey(provider: AiProvider): Flow<String> =
-        dataStore.data.map { preferences -> preferences[Keys.getApiKey(provider)]?.trim() ?: "" }
-            .distinctUntilChanged()
+        dataStore.data.map { preferences -> preferences[Keys.getApiKey(provider)] ?: "" }
 
     fun getModel(provider: AiProvider): Flow<String> =
         dataStore.data.map { preferences -> preferences[Keys.getModel(provider)] ?: "" }
-            .distinctUntilChanged()
 
     fun getSystemPrompt(provider: AiProvider): Flow<String> =
         dataStore.data.map { preferences ->
             preferences[Keys.getSystemPrompt(provider)] ?: DEFAULT_SYSTEM_PROMPT
-        }.distinctUntilChanged()
-
-    fun getBaseUrl(provider: AiProvider): Flow<String> =
-        dataStore.data.map { preferences -> preferences[Keys.getBaseUrl(provider)] ?: "" }
-            .distinctUntilChanged()
+        }
 
     suspend fun setApiKey(provider: AiProvider, apiKey: String) {
-        dataStore.edit { preferences -> preferences[Keys.getApiKey(provider)] = apiKey.trim() }
+        dataStore.edit { preferences -> preferences[Keys.getApiKey(provider)] = apiKey }
     }
 
     suspend fun setModel(provider: AiProvider, model: String) {
@@ -97,10 +69,6 @@ class AiPreferencesRepository @Inject constructor(
         dataStore.edit { preferences ->
             preferences[Keys.getSystemPrompt(provider)] = DEFAULT_SYSTEM_PROMPT
         }
-    }
-
-    suspend fun setBaseUrl(provider: AiProvider, url: String) {
-        dataStore.edit { preferences -> preferences[Keys.getBaseUrl(provider)] = url.trim() }
     }
 
     // Convenience properties for legacy compatibility (e.g. PlayerViewModel)
@@ -140,139 +108,11 @@ class AiPreferencesRepository @Inject constructor(
     val openrouterModel: Flow<String> = getModel(AiProvider.OPENROUTER)
     val openrouterSystemPrompt: Flow<String> = getSystemPrompt(AiProvider.OPENROUTER)
 
-    val ollamaApiKey: Flow<String> = getApiKey(AiProvider.OLLAMA)
-    val ollamaModel: Flow<String> = getModel(AiProvider.OLLAMA)
-    val ollamaSystemPrompt: Flow<String> = getSystemPrompt(AiProvider.OLLAMA)
-
-    val customApiKey: Flow<String> = getApiKey(AiProvider.CUSTOM)
-    val customModel: Flow<String> = getModel(AiProvider.CUSTOM)
-    val customSystemPrompt: Flow<String> = getSystemPrompt(AiProvider.CUSTOM)
-    val customBaseUrl: Flow<String> = getBaseUrl(AiProvider.CUSTOM)
-
     val aiProvider: Flow<String> =
         dataStore.data.map { preferences -> preferences[Keys.AI_PROVIDER] ?: "GEMINI" }
-            .distinctUntilChanged()
-
-    /**
-     * Single-pass check for whether the currently selected AI provider is ready to use,
-     * avoiding combining 14 separate DataStore flows in PlayerViewModel.
-     */
-    val hasActiveProviderConfigured: Flow<Boolean> =
-        dataStore.data.map { preferences ->
-            val providerName = preferences[Keys.AI_PROVIDER] ?: "GEMINI"
-            if (providerName == AiProvider.OFFLINE_GGUF.name) {
-                val path = preferences[Keys.ACTIVE_OFFLINE_MODEL_PATH]?.trim().orEmpty()
-                val passed = preferences[Keys.OFFLINE_HARDWARE_PASSED] ?: false
-                path.isNotEmpty() && passed
-            } else {
-                val provider = AiProvider.fromString(providerName)
-                preferences[Keys.getApiKey(provider)]?.trim().isNullOrEmpty().not()
-            }
-        }.distinctUntilChanged()
 
     val isSafeTokenLimitEnabled: Flow<Boolean> =
         dataStore.data.map { preferences -> preferences[Keys.SAFE_TOKEN_LIMIT] ?: true }
-            .distinctUntilChanged()
-
-    val aiTemperature: Flow<Float> =
-        dataStore.data.map { preferences -> preferences[Keys.AI_TEMPERATURE] ?: 0.7f }
-            .distinctUntilChanged()
-
-    val aiTopP: Flow<Float> =
-        dataStore.data.map { preferences -> preferences[Keys.AI_TOP_P] ?: 0.95f }
-            .distinctUntilChanged()
-
-    val aiTopK: Flow<Int> =
-        dataStore.data.map { preferences -> preferences[Keys.AI_TOP_K] ?: 64 }
-            .distinctUntilChanged()
-
-    val aiMaxTokens: Flow<Int> =
-        dataStore.data.map { preferences -> preferences[Keys.AI_MAX_TOKENS] ?: 4096 }
-            .distinctUntilChanged()
-
-    val aiPresencePenalty: Flow<Float> =
-        dataStore.data.map { preferences -> preferences[Keys.AI_PRESENCE_PENALTY] ?: 0.0f }
-            .distinctUntilChanged()
-
-    val aiFrequencyPenalty: Flow<Float> =
-        dataStore.data.map { preferences -> preferences[Keys.AI_FREQUENCY_PENALTY] ?: 0.0f }
-            .distinctUntilChanged()
-
-    val aiSampleSize: Flow<Int> =
-        dataStore.data.map { preferences -> preferences[Keys.AI_SAMPLE_SIZE] ?: 40 }
-            .distinctUntilChanged()
-
-    val aiDigestMode: Flow<String> =
-        dataStore.data.map { preferences -> preferences[Keys.AI_DIGEST_MODE] ?: "safe" }
-            .distinctUntilChanged()
-
-    val aiIncludeExtendedFields: Flow<Boolean> =
-        dataStore.data.map { preferences -> preferences[Keys.AI_INCLUDE_EXTENDED_FIELDS] ?: false }
-            .distinctUntilChanged()
-
-    val activeOfflineModelPath: Flow<String> =
-        dataStore.data.map { preferences -> preferences[Keys.ACTIVE_OFFLINE_MODEL_PATH] ?: "" }
-            .distinctUntilChanged()
-
-    val activeOfflineModelName: Flow<String> =
-        dataStore.data.map { preferences -> preferences[Keys.ACTIVE_OFFLINE_MODEL_NAME] ?: "" }
-            .distinctUntilChanged()
-
-    val activeOfflineModelId: Flow<String> =
-        dataStore.data.map { preferences -> preferences[Keys.ACTIVE_OFFLINE_MODEL_ID] ?: "" }
-            .distinctUntilChanged()
-
-    val offlineHardwarePassed: Flow<Boolean> =
-        dataStore.data.map { preferences -> preferences[Keys.OFFLINE_HARDWARE_PASSED] ?: false }
-            .distinctUntilChanged()
-
-    val offlineThreadsCount: Flow<Int> =
-        dataStore.data.map { preferences -> preferences[Keys.OFFLINE_THREADS_COUNT] ?: 4 }
-            .distinctUntilChanged()
-
-    val offlineUseGpu: Flow<Boolean> =
-        dataStore.data.map { preferences -> preferences[Keys.OFFLINE_USE_GPU] ?: false }
-            .distinctUntilChanged()
-
-    val offlineLastBenchmarkSpeed: Flow<Float> =
-        dataStore.data.map { preferences -> preferences[Keys.OFFLINE_LAST_BENCHMARK_SPEED] ?: 0f }
-            .distinctUntilChanged()
-
-    suspend fun setActiveOfflineModel(
-        modelId: String,
-        modelName: String,
-        modelPath: String,
-        hardwarePassed: Boolean,
-        benchmarkSpeedTokensPerSec: Float = 0f
-    ) {
-        dataStore.edit { preferences ->
-            preferences[Keys.ACTIVE_OFFLINE_MODEL_ID] = modelId
-            preferences[Keys.ACTIVE_OFFLINE_MODEL_NAME] = modelName
-            preferences[Keys.ACTIVE_OFFLINE_MODEL_PATH] = modelPath
-            preferences[Keys.OFFLINE_HARDWARE_PASSED] = hardwarePassed
-            if (benchmarkSpeedTokensPerSec > 0f) {
-                preferences[Keys.OFFLINE_LAST_BENCHMARK_SPEED] = benchmarkSpeedTokensPerSec
-            }
-        }
-    }
-
-    suspend fun clearActiveOfflineModel() {
-        dataStore.edit { preferences ->
-            preferences[Keys.ACTIVE_OFFLINE_MODEL_ID] = ""
-            preferences[Keys.ACTIVE_OFFLINE_MODEL_NAME] = ""
-            preferences[Keys.ACTIVE_OFFLINE_MODEL_PATH] = ""
-            preferences[Keys.OFFLINE_HARDWARE_PASSED] = false
-            preferences[Keys.OFFLINE_LAST_BENCHMARK_SPEED] = 0f
-        }
-    }
-
-    suspend fun setOfflineThreadsCount(threads: Int) {
-        dataStore.edit { preferences -> preferences[Keys.OFFLINE_THREADS_COUNT] = threads.coerceIn(1, 8) }
-    }
-
-    suspend fun setOfflineUseGpu(useGpu: Boolean) {
-        dataStore.edit { preferences -> preferences[Keys.OFFLINE_USE_GPU] = useGpu }
-    }
 
     suspend fun setAiProvider(provider: String) {
         dataStore.edit { preferences -> preferences[Keys.AI_PROVIDER] = provider }
@@ -280,41 +120,5 @@ class AiPreferencesRepository @Inject constructor(
 
     suspend fun setSafeTokenLimitEnabled(enabled: Boolean) {
         dataStore.edit { preferences -> preferences[Keys.SAFE_TOKEN_LIMIT] = enabled }
-    }
-
-    suspend fun setAiTemperature(value: Float) {
-        dataStore.edit { preferences -> preferences[Keys.AI_TEMPERATURE] = value }
-    }
-
-    suspend fun setAiTopP(value: Float) {
-        dataStore.edit { preferences -> preferences[Keys.AI_TOP_P] = value }
-    }
-
-    suspend fun setAiTopK(value: Int) {
-        dataStore.edit { preferences -> preferences[Keys.AI_TOP_K] = value }
-    }
-
-    suspend fun setAiMaxTokens(value: Int) {
-        dataStore.edit { preferences -> preferences[Keys.AI_MAX_TOKENS] = value }
-    }
-
-    suspend fun setAiPresencePenalty(value: Float) {
-        dataStore.edit { preferences -> preferences[Keys.AI_PRESENCE_PENALTY] = value }
-    }
-
-    suspend fun setAiFrequencyPenalty(value: Float) {
-        dataStore.edit { preferences -> preferences[Keys.AI_FREQUENCY_PENALTY] = value }
-    }
-
-    suspend fun setAiSampleSize(value: Int) {
-        dataStore.edit { preferences -> preferences[Keys.AI_SAMPLE_SIZE] = value }
-    }
-
-    suspend fun setAiDigestMode(mode: String) {
-        dataStore.edit { preferences -> preferences[Keys.AI_DIGEST_MODE] = mode }
-    }
-
-    suspend fun setAiIncludeExtendedFields(enabled: Boolean) {
-        dataStore.edit { preferences -> preferences[Keys.AI_INCLUDE_EXTENDED_FIELDS] = enabled }
     }
 }

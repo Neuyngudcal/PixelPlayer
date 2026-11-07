@@ -24,7 +24,6 @@ import com.theveloper.pixelplay.data.preferences.UserPreferencesRepository
 import com.theveloper.pixelplay.data.worker.collectArtistNames
 import com.theveloper.pixelplay.utils.AlbumArtUtils
 import com.theveloper.pixelplay.utils.LocalArtworkUri
-import com.theveloper.pixelplay.utils.MediaStorePermissionHelper
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first // Added
 import kotlinx.coroutines.withContext
@@ -97,8 +96,6 @@ class SongMetadataEditor(
         const val MAX_TITLE_LENGTH = 500
         const val MAX_ARTIST_LENGTH = 500
         const val MAX_ALBUM_LENGTH = 500
-        const val MAX_ALBUM_ARTIST_LENGTH = 500
-        const val MAX_COMPOSER_LENGTH = 500
         const val MAX_GENRE_LENGTH = 100
         const val MAX_LYRICS_LENGTH = 50_000
     }
@@ -110,8 +107,6 @@ class SongMetadataEditor(
         title: String,
         artist: String,
         album: String,
-        albumArtist: String?,
-        composer: String?,
         genre: String,
         lyrics: String
     ): String? {
@@ -119,8 +114,6 @@ class SongMetadataEditor(
         if (title.length > MetadataLimits.MAX_TITLE_LENGTH) return "Title too long"
         if (artist.length > MetadataLimits.MAX_ARTIST_LENGTH) return "Artist name too long"
         if (album.length > MetadataLimits.MAX_ALBUM_LENGTH) return "Album name too long"
-        if (!albumArtist.isNullOrBlank() && albumArtist.length > MetadataLimits.MAX_ALBUM_ARTIST_LENGTH) return "Album artist name too long"
-        if (!composer.isNullOrBlank() && composer.length > MetadataLimits.MAX_COMPOSER_LENGTH) return "Composer name too long"
         if (genre.length > MetadataLimits.MAX_GENRE_LENGTH) return "Genre too long"
         if (lyrics.length > MetadataLimits.MAX_LYRICS_LENGTH) return "Lyrics too long"
         return null
@@ -152,7 +145,6 @@ class SongMetadataEditor(
         title: String,
         artist: String,
         album: String,
-        albumArtist: String?,
         genre: String?,
         trackNumber: Int,
         discNumber: Int?
@@ -223,7 +215,6 @@ class SongMetadataEditor(
             artistId = primaryArtistId,
             artistsJson = artistsJson,
             album = album,
-            albumArtist = albumArtist,
             genre = genre,
             trackNumber = trackNumber,
             discNumber = discNumber,
@@ -238,8 +229,6 @@ class SongMetadataEditor(
         newTitle: String,
         newArtist: String,
         newAlbum: String,
-        newAlbumArtist: String? = null,
-        newComposer: String? = null,
         newGenre: String,
         newLyrics: String,
         newTrackNumber: Int,
@@ -248,7 +237,7 @@ class SongMetadataEditor(
         newReplayGainAlbumGainDb: String? = null,
         coverArtUpdate: CoverArtUpdate? = null,
     ): SongMetadataEditResult = withContext(Dispatchers.IO) {
-        val validationError = validateMetadataInput(newTitle, newArtist, newAlbum, newAlbumArtist, newComposer, newGenre, newLyrics)
+        val validationError = validateMetadataInput(newTitle, newArtist, newAlbum, newGenre, newLyrics)
         if (validationError != null) {
             Timber.w("Metadata validation failed: $validationError")
             return@withContext SongMetadataEditResult(
@@ -350,8 +339,6 @@ class SongMetadataEditor(
                         newTitle = newTitle,
                         newArtist = newArtist,
                         newAlbum = newAlbum,
-                        newAlbumArtist = newAlbumArtist,
-                        newComposer = newComposer,
                         newGenre = trimmedGenre,
                         newLyrics = trimmedLyrics,
                         newTrackNumber = newTrackNumber,
@@ -367,8 +354,6 @@ class SongMetadataEditor(
                         newTitle = newTitle,
                         newArtist = newArtist,
                         newAlbum = newAlbum,
-                        newAlbumArtist = newAlbumArtist,
-                        newComposer = newComposer,
                         newGenre = trimmedGenre,
                         newLyrics = trimmedLyrics,
                         newTrackNumber = newTrackNumber,
@@ -384,8 +369,6 @@ class SongMetadataEditor(
                         newTitle = newTitle,
                         newArtist = newArtist,
                         newAlbum = newAlbum,
-                        newAlbumArtist = newAlbumArtist,
-                        newComposer = newComposer,
                         newGenre = trimmedGenre,
                         newLyrics = trimmedLyrics,
                         newTrackNumber = newTrackNumber,
@@ -402,8 +385,6 @@ class SongMetadataEditor(
                             newTitle = newTitle,
                             newArtist = newArtist,
                             newAlbum = newAlbum,
-                            newAlbumArtist = newAlbumArtist,
-                            newComposer = newComposer,
                             newGenre = trimmedGenre,
                             newLyrics = trimmedLyrics,
                             newTrackNumber = newTrackNumber,
@@ -425,60 +406,10 @@ class SongMetadataEditor(
                     Timber.tag(TAG).e("METADATA_EDIT: File does not exist: $finalFilePath")
                     false
                 }
+            } else if (needsExtensionSwap) {
+                writeMetadataViaExtensionSwap(finalFilePath, effectiveExtension, runPipeline)
             } else {
-                val tempFile = File(
-                    context.cacheDir,
-                    "metadata_edit_${System.nanoTime()}.$effectiveExtension"
-                )
-                try {
-                    File(finalFilePath).inputStream().use { input ->
-                        FileOutputStream(tempFile).use { out -> input.copyTo(out) }
-                    }
-                    val writeOk = runPipeline(tempFile.absolutePath)
-                    if (writeOk) {
-                        var writeBackSuccess = false
-                        try {
-                            val originalFile = File(finalFilePath)
-                            if (originalFile.canWrite()) {
-                                tempFile.inputStream().use { input ->
-                                    FileOutputStream(originalFile, false).use { out ->
-                                        input.copyTo(out)
-                                        out.fd.sync()
-                                    }
-                                }
-                                writeBackSuccess = true
-                                Timber.tag(TAG).d("Successfully wrote metadata directly to raw file path")
-                            } else {
-                                val uri = if (!isTelegramSong) MediaStorePermissionHelper.getMediaStoreUri(context, songId) else null
-                                if (uri != null) {
-                                    context.contentResolver.openFileDescriptor(uri, "rwt")?.use { pfd ->
-                                        FileOutputStream(pfd.fileDescriptor).use { output ->
-                                            tempFile.inputStream().use { input ->
-                                                input.copyTo(output)
-                                            }
-                                        }
-                                    }
-                                    writeBackSuccess = true
-                                    Timber.tag(TAG).d("Successfully wrote metadata via ContentResolver (rwt)")
-                                } else {
-                                    Timber.tag(TAG).e("Cannot write back: file is not writeable and no MediaStore URI resolved")
-                                }
-                            }
-                        } catch (e: Exception) {
-                            Timber.tag(TAG).e(e, "Failed to write edited bytes back to destination")
-                        }
-                        writeBackSuccess
-                    } else {
-                        false
-                    }
-                } catch (e: Exception) {
-                    Timber.tag(TAG).e(e, "Error processing file metadata via temp file")
-                    false
-                } finally {
-                    if (tempFile.exists()) {
-                        tempFile.delete()
-                    }
-                }
+                runPipeline(finalFilePath)
             }
 
             if (!fileUpdateSuccess) {
@@ -511,7 +442,6 @@ class SongMetadataEditor(
                     title = newTitle,
                     artist = newArtist,
                     album = newAlbum,
-                    albumArtist = newAlbumArtist,
                     genre = trimmedGenre,
                     trackNumber = newTrackNumber,
                     discNumber = newDiscNumber
@@ -527,7 +457,6 @@ class SongMetadataEditor(
                 title = newTitle,
                 artist = newArtist,
                 album = newAlbum,
-                albumArtist = newAlbumArtist,
                 genre = normalizedGenre,
                 trackNumber = newTrackNumber,
                 discNumber = newDiscNumber
@@ -585,6 +514,51 @@ class SongMetadataEditor(
         }
     }
 
+    /**
+     * Copies [originalPath] to a temp file with [correctExtension], runs [writer] on the temp
+     * path (so JAudioTagger/TagLib pick the correct parser by extension), and streams the edited
+     * bytes back into the original location. The original filename/extension are preserved so
+     * MediaStore URIs stay valid; only the file's byte content is replaced.
+     */
+    private fun writeMetadataViaExtensionSwap(
+        originalPath: String,
+        correctExtension: String,
+        writer: (String) -> Boolean
+    ): Boolean {
+        val originalFile = File(originalPath)
+        val tempFile = File(
+            context.cacheDir,
+            "metadata_edit_${System.nanoTime()}.$correctExtension"
+        )
+        return try {
+            originalFile.inputStream().use { input ->
+                FileOutputStream(tempFile).use { out -> input.copyTo(out) }
+            }
+            Timber.tag(TAG).d(
+                "METADATA_EDIT: Copied ${originalFile.length()} bytes to temp ${tempFile.name} for extension-corrected write"
+            )
+            val writeOk = writer(tempFile.absolutePath)
+            if (!writeOk) {
+                Timber.tag(TAG).e("METADATA_EDIT: Writer failed on temp file ${tempFile.absolutePath}")
+                return false
+            }
+            // Stream edited bytes back to the original path (truncate + overwrite).
+            tempFile.inputStream().use { input ->
+                FileOutputStream(originalFile, false).use { out -> input.copyTo(out) }
+            }
+            Timber.tag(TAG).d(
+                "METADATA_EDIT: Restored ${tempFile.length()} edited bytes back to $originalPath"
+            )
+            true
+        } catch (e: Exception) {
+            Timber.tag(TAG).e(e, "METADATA_EDIT: Extension-swap pipeline failed for $originalPath")
+            false
+        } finally {
+            if (tempFile.exists() && !tempFile.delete()) {
+                Timber.tag(TAG).w("METADATA_EDIT: Could not delete temp file ${tempFile.absolutePath}")
+            }
+        }
+    }
 
     /**
      * FLAC files with high sample rates (>96kHz) or bit depths (>24bit) can cause issues with TagLib.
@@ -689,7 +663,7 @@ class SongMetadataEditor(
                         header[2] == '3'.code.toByte() -> DetectedContainer.MP3
                     // MP3 frame sync (0xFFE... 11-bit sync word)
                     header[0] == 0xFF.toByte() &&
-                        (header[1].toInt() and 0xE0) == 0xE0 -> DetectedContainer.MP3
+                        (header[1].toInt() and 0xE0) == 0xE0.toInt() -> DetectedContainer.MP3
                     // "ftyp" at offset 4 → ISO BMFF (MP4/M4A)
                     bytesRead >= 8 &&
                         header[4] == 'f'.code.toByte() &&
@@ -753,8 +727,6 @@ class SongMetadataEditor(
         newTitle: String,
         newArtist: String,
         newAlbum: String,
-        newAlbumArtist: String?,
-        newComposer: String?,
         newGenre: String,
         newLyrics: String,
         newTrackNumber: Int,
@@ -799,10 +771,6 @@ class SongMetadataEditor(
                 propertyMap["TITLE"] = arrayOf(newTitle)
                 propertyMap["ARTIST"] = arrayOf(newArtist)
                 propertyMap["ALBUM"] = arrayOf(newAlbum)
-                if (!newAlbumArtist.isNullOrBlank()) {
-                    propertyMap["ALBUMARTIST"] = arrayOf(newAlbumArtist)
-                }
-                propertyMap.upsertOrRemove("COMPOSER", newComposer)
                 propertyMap.upsertOrRemove("GENRE", newGenre)
                 propertyMap.upsertOrRemove("LYRICS", newLyrics)
                 propertyMap["TRACKNUMBER"] = arrayOf(newTrackNumber.toString())
@@ -811,6 +779,7 @@ class SongMetadataEditor(
                 } else {
                     propertyMap.remove("DISCNUMBER")
                 }
+                propertyMap["ALBUMARTIST"] = arrayOf(newArtist)
                 propertyMap.applyReplayGainUpdate(REPLAYGAIN_TRACK_GAIN_KEY, replayGainTrackUpdate)
                 propertyMap.applyReplayGainUpdate(REPLAYGAIN_ALBUM_GAIN_KEY, replayGainAlbumUpdate)
                 Timber.tag(TAG).e("TAGLIB: Updated property map, saving...")
@@ -879,8 +848,6 @@ class SongMetadataEditor(
         newTitle: String,
         newArtist: String,
         newAlbum: String,
-        newAlbumArtist: String?,
-        newComposer: String?,
         newGenre: String,
         newLyrics: String,
         newTrackNumber: Int,
@@ -902,14 +869,7 @@ class SongMetadataEditor(
             tag.setField(FieldKey.TITLE, newTitle)
             tag.setField(FieldKey.ARTIST, newArtist)
             tag.setField(FieldKey.ALBUM, newAlbum)
-            if (!newAlbumArtist.isNullOrBlank()) {
-                tag.setField(FieldKey.ALBUM_ARTIST, newAlbumArtist)
-            }
-            if (!newComposer.isNullOrBlank()) {
-                tag.setField(FieldKey.COMPOSER, newComposer)
-            } else {
-                tag.deleteField(FieldKey.COMPOSER)
-            }
+            tag.setField(FieldKey.ALBUM_ARTIST, newArtist)
             
             if (newGenre.isNotBlank()) {
                 tag.setField(FieldKey.GENRE, newGenre)
@@ -977,8 +937,6 @@ class SongMetadataEditor(
         newTitle: String,
         newArtist: String,
         newAlbum: String,
-        newAlbumArtist: String?,
-        newComposer: String?,
         newGenre: String,
         newLyrics: String,
         newTrackNumber: Int,
@@ -1009,8 +967,7 @@ class SongMetadataEditor(
             
             tags.replaceSingleComment("TITLE", newTitle)
             tags.replaceSingleComment("ARTIST", newArtist)
-            tags.replaceSingleComment("ALBUMARTIST", newAlbumArtist?.takeIf { it.isNotBlank() })
-            tags.replaceSingleComment("COMPOSER", newComposer)
+            tags.replaceSingleComment("ALBUMARTIST", newArtist)
             tags.replaceSingleComment("ALBUM", newAlbum)
             tags.replaceSingleComment("GENRE", newGenre)
             tags.replaceSingleComment("LYRICS", newLyrics)
@@ -1070,8 +1027,8 @@ class SongMetadataEditor(
             } catch (e: Exception) {
                 Timber.tag(TAG).w(e, "VORBISJAVA: Could not close source Opus file")
             }
-            if (tempFile != null && tempFile.exists() && tempFile.delete() == false) {
-                Timber.tag(TAG).w("VORBISJAVA: Could not delete temp file ${tempFile.absolutePath}")
+            if (tempFile?.exists() == true && tempFile?.delete() == false) {
+                Timber.tag(TAG).w("VORBISJAVA: Could not delete temp file ${tempFile?.absolutePath}")
             }
         }
     }
@@ -1082,7 +1039,6 @@ class SongMetadataEditor(
         title: String,
         artist: String,
         album: String,
-        albumArtist: String?,
         genre: String,
         trackNumber: Int,
         discNumber: Int?
@@ -1098,9 +1054,7 @@ class SongMetadataEditor(
                 val encodedTrack = ((discNumber ?: 0) * 1000) + trackNumber
                 put(MediaStore.Audio.Media.TRACK, encodedTrack)
                 put(MediaStore.Audio.Media.DATE_MODIFIED, System.currentTimeMillis() / 1000)
-                if (!albumArtist.isNullOrBlank()) {
-                    put(MediaStore.Audio.Media.ALBUM_ARTIST, albumArtist)
-                }
+                put(MediaStore.Audio.Media.ALBUM_ARTIST, artist)
             }
 
             val rowsUpdated = context.contentResolver.update(uri, values, null, null)

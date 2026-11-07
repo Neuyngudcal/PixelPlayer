@@ -35,8 +35,7 @@ internal class MiniPlayerDismissGestureHandler(
     private val hapticFeedback: HapticFeedback,
     private val offsetAnimatable: Animatable<Float, AnimationVector1D>,
     private val screenWidthPx: Float,
-    private val onDismissPlaylistAndShowUndo: () -> Unit,
-    private val onDismissStarted: () -> Unit = {}
+    private val onDismissPlaylistAndShowUndo: () -> Unit
 ) {
     private var dragPhase: MiniDismissDragPhase = MiniDismissDragPhase.IDLE
     private var accumulatedDragX: Float = 0f
@@ -107,7 +106,6 @@ internal class MiniPlayerDismissGestureHandler(
         offsetJob?.cancel()
         val dismissThreshold = screenWidthPx * 0.4f
         if (abs(accumulatedDragX) > dismissThreshold) {
-            onDismissStarted()
             val targetDismissOffset = if (accumulatedDragX < 0) -screenWidthPx else screenWidthPx
             offsetJob = scope.launch(start = CoroutineStart.UNDISPATCHED) {
                 offsetAnimatable.animateTo(
@@ -141,11 +139,9 @@ internal fun rememberMiniPlayerDismissGestureHandler(
     hapticFeedback: HapticFeedback,
     offsetAnimatable: Animatable<Float, AnimationVector1D>,
     screenWidthPx: Float,
-    onDismissPlaylistAndShowUndo: () -> Unit,
-    onDismissStarted: () -> Unit
+    onDismissPlaylistAndShowUndo: () -> Unit
 ): MiniPlayerDismissGestureHandler {
     val onDismissPlaylistAndShowUndoState = rememberUpdatedState(onDismissPlaylistAndShowUndo)
-    val onDismissStartedState = rememberUpdatedState(onDismissStarted)
     return remember(scope, density, hapticFeedback, offsetAnimatable, screenWidthPx) {
         MiniPlayerDismissGestureHandler(
             scope = scope,
@@ -153,8 +149,7 @@ internal fun rememberMiniPlayerDismissGestureHandler(
             hapticFeedback = hapticFeedback,
             offsetAnimatable = offsetAnimatable,
             screenWidthPx = screenWidthPx,
-            onDismissPlaylistAndShowUndo = { onDismissPlaylistAndShowUndoState.value() },
-            onDismissStarted = { onDismissStartedState.value() }
+            onDismissPlaylistAndShowUndo = { onDismissPlaylistAndShowUndoState.value() }
         )
     }
 }

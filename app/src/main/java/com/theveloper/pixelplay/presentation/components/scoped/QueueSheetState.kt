@@ -15,12 +15,9 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.theveloper.pixelplay.presentation.viewmodel.PlayerSheetState
 import kotlinx.coroutines.CoroutineScope
-import androidx.compose.material3.MotionScheme
-import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 
 internal data class QueueSheetState(
     val showQueueSheet: Boolean,
-    val isCollapsing: Boolean,
     val allowQueueSheetInteraction: Boolean,
     val queueSheetOffset: Animatable<Float, AnimationVector1D>,
     val queueSheetHeightPx: Float,
@@ -29,7 +26,6 @@ internal data class QueueSheetState(
     val onQueueSheetHeightPxChange: (Float) -> Unit
 )
 
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 internal fun rememberQueueSheetState(
     scope: CoroutineScope,
@@ -37,29 +33,20 @@ internal fun rememberQueueSheetState(
     density: Density,
     currentBottomPadding: Dp,
     showPlayerContentArea: Boolean,
-    isPlayerFullyExpanded: Boolean
+    currentSheetContentState: PlayerSheetState
 ): QueueSheetState {
-    val motionScheme = MotionScheme.expressive()
-    val queueAnimationSpec = remember { motionScheme.defaultSpatialSpec<Float>() }
     var showQueueSheet by remember { mutableStateOf(false) }
-    var isCollapsing by remember { mutableStateOf(false) }
-    val allowQueueSheetInteraction by remember(showPlayerContentArea, isPlayerFullyExpanded) {
+    val allowQueueSheetInteraction by remember(showPlayerContentArea, currentSheetContentState) {
         derivedStateOf {
-            showPlayerContentArea && isPlayerFullyExpanded
+            showPlayerContentArea && currentSheetContentState == PlayerSheetState.EXPANDED
         }
     }
     val queueSheetOffset = remember(screenHeightPx) { Animatable(screenHeightPx) }
     var queueSheetHeightPx by remember { mutableFloatStateOf(0f) }
-    val queueHiddenOffsetPx by remember(currentBottomPadding, queueSheetHeightPx, density, screenHeightPx) {
+    val queueHiddenOffsetPx by remember(currentBottomPadding, queueSheetHeightPx, density) {
         derivedStateOf {
             val basePadding = with(density) { currentBottomPadding.toPx() }
-            if (queueSheetHeightPx == 0f) {
-                // When unmeasured, fall back to screenHeightPx so the initial open animation can
-                // immediately transition from offscreen to 0f without waiting for layout.
-                screenHeightPx
-            } else {
-                queueSheetHeightPx + basePadding
-            }
+            if (queueSheetHeightPx == 0f) 0f else queueSheetHeightPx + basePadding
         }
     }
     val minQueueDragThresholdPx = remember(density) { with(density) { 14.dp.toPx() } }
@@ -84,8 +71,7 @@ internal fun rememberQueueSheetState(
     val showQueueSheetState = rememberUpdatedState(showQueueSheet)
     val queueSheetController = remember(
         scope,
-        queueSheetOffset,
-        queueAnimationSpec
+        queueSheetOffset
     ) {
         QueueSheetController(
             scope = scope,
@@ -95,15 +81,12 @@ internal fun rememberQueueSheetState(
             minFlingTravelPxProvider = { queueMinFlingTravelPxState.value },
             dragThresholdPxProvider = { queueDragThresholdPxState.value },
             showQueueSheetProvider = { showQueueSheetState.value },
-            onShowQueueSheetChange = { showQueueSheet = it },
-            onIsCollapsingChange = { isCollapsing = it },
-            animationSpec = queueAnimationSpec
+            onShowQueueSheetChange = { showQueueSheet = it }
         )
     }
 
     return QueueSheetState(
         showQueueSheet = showQueueSheet,
-        isCollapsing = isCollapsing,
         allowQueueSheetInteraction = allowQueueSheetInteraction,
         queueSheetOffset = queueSheetOffset,
         queueSheetHeightPx = queueSheetHeightPx,

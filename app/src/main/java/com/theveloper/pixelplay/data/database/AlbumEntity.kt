@@ -13,8 +13,7 @@ import com.theveloper.pixelplay.utils.normalizeMetadataTextOrEmpty
     indices = [
         Index(value = ["title"], unique = false),
         Index(value = ["artist_id"], unique = false), // Para buscar álbumes por artista
-        Index(value = ["artist_name"], unique = false), // Nuevo índice para búsquedas por nombre de artista del álbum
-        Index(value = ["album_artist"], unique = false) // Album artist tag from metadata (TPE2)
+        Index(value = ["artist_name"], unique = false) // Nuevo índice para búsquedas por nombre de artista del álbum
     ]
 )
 data class AlbumEntity(
@@ -25,25 +24,13 @@ data class AlbumEntity(
     @ColumnInfo(name = "album_art_uri_string") val albumArtUriString: String?,
     @ColumnInfo(name = "song_count") val songCount: Int,
     @ColumnInfo(name = "date_added") val dateAdded: Long,
-    @ColumnInfo(name = "year") val year: Int,
-    @ColumnInfo(name = "album_artist") val albumArtist: String? = null
+    @ColumnInfo(name = "year") val year: Int
 )
 
 fun AlbumEntity.toAlbum(): Album {
     val effectiveAlbumArtUri = when {
         this.albumArtUriString.isNullOrBlank() -> null
-        // Beta 6 stored per-song FileProvider URIs (e.g.
-        // content://...provider/cache/song_art_<id>.jpg) as the album's
-        // representative art. After the v0.7 artwork-pipeline rewrite those
-        // cache files no longer exist, so the raw URI 404s. Recover the song
-        // id embedded in the filename and remap to the stable
-        // pixelplay_local_art:// scheme so LocalArtworkCoilFetcher can
-        // re-extract embedded art on demand. Songs go through the same remap
-        // in LocalArtworkUri.resolveSongArtworkUri; without this, album rows
-        // would render placeholders until a metadata-save re-syncs the row.
-        LocalArtworkUri.looksLikeVolatileArtworkUri(this.albumArtUriString) ->
-            LocalArtworkUri.parseSongIdFromVolatileArtworkUri(this.albumArtUriString)
-                ?.let { LocalArtworkUri.buildSongUri(it) }
+        LocalArtworkUri.looksLikeVolatileArtworkUri(this.albumArtUriString) -> null
         else -> this.albumArtUriString
     }
 
@@ -51,7 +38,6 @@ fun AlbumEntity.toAlbum(): Album {
         id = this.id,
         title = this.title.normalizeMetadataTextOrEmpty(),
         artist = this.artistName.normalizeMetadataTextOrEmpty(),
-        albumArtist = this.albumArtist?.normalizeMetadataTextOrEmpty()?.takeIf { it.isNotBlank() },
         albumArtUriString = effectiveAlbumArtUri,
         songCount = this.songCount,
         dateAdded = this.dateAdded,
@@ -72,7 +58,6 @@ fun Album.toEntity(artistIdForAlbum: Long): AlbumEntity { // Necesitamos pasar e
         albumArtUriString = this.albumArtUriString,
         songCount = this.songCount,
         dateAdded = this.dateAdded,
-        year = this.year,
-        albumArtist = this.albumArtist
+        year = this.year
     )
 }

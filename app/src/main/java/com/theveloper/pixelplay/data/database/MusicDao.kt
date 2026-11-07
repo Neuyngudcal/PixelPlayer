@@ -90,33 +90,6 @@ data class DeviceCapabilitySongRow(
     val sourceType: Int
 )
 
-/**
- * Aggregate audio statistics for the diagnostic performance report.
- * Computed in a single SQL pass so it stays cheap even on large libraries —
- * we never materialize every row. File-size figures are *estimated* from
- * bitrate × duration because raw byte sizes are not stored in the DB; this
- * avoids per-file filesystem stat calls just to build a report.
- */
-data class LibraryAudioStatsRow(
-    val totalCount: Int,
-    val localCount: Int,
-    val cloudCount: Int,
-    val hiResCount: Int,
-    val ultraHiResCount: Int,
-    val likelyExpensiveCount: Int,
-    val maxBitrate: Int?,
-    val minSampleRate: Int?,
-    val maxSampleRate: Int?,
-    val estMinBytes: Long?,
-    val estAvgBytes: Double?,
-    val estMaxBytes: Long?
-)
-
-data class MimeTypeCountRow(
-    val mimeType: String?,
-    val count: Int
-)
-
 @Dao
 interface MusicDao {
 
@@ -225,15 +198,6 @@ interface MusicDao {
 
     @Query("SELECT id FROM songs WHERE source_type = 0")
     suspend fun getAllMediaStoreSongIds(): List<Long>
-
-    @Query("""
-        SELECT songs.id FROM songs 
-        LEFT JOIN lyrics ON lyrics.songId = songs.id 
-        WHERE songs.source_type = 0 
-          AND (songs.lyrics IS NULL OR songs.lyrics = '') 
-          AND lyrics.songId IS NULL
-    """)
-    suspend fun getMediaStoreSongIdsWithoutLyrics(): List<Long>
 
     @Query("DELETE FROM songs WHERE id IN (:songIds)")
     suspend fun deleteSongsByIds(songIds: List<Long>)
@@ -402,15 +366,6 @@ interface MusicDao {
     @Query("SELECT DISTINCT parent_directory_path FROM songs")
     suspend fun getDistinctParentDirectories(): List<String>
 
-    /**
-     * Reactive variant of [getDistinctParentDirectories]. Re-emits whenever the songs
-     * table changes (e.g. after a sync adds songs in new folders), so cached directory
-     * filters stay consistent with the actual library instead of freezing at an early,
-     * possibly-empty snapshot taken before the first sync completes.
-     */
-    @Query("SELECT DISTINCT parent_directory_path FROM songs")
-    fun getDistinctParentDirectoriesFlow(): Flow<List<String>>
-
     // --- Song Queries ---
     // Updated getSongs to include Telegram songs (negative IDs) regardless of directory filter
     @Query("SELECT " + SONG_LIST_PROJECTION + """
@@ -531,9 +486,6 @@ interface MusicDao {
     @Query("SELECT COUNT(*) FROM songs")
     fun getSongCount(): Flow<Int>
 
-    @Query("SELECT COUNT(*) FROM songs WHERE source_type != 0")
-    fun getCloudSongCount(): Flow<Int>
-
     @Query("SELECT COUNT(*) FROM songs")
     suspend fun getSongCountOnce(): Int
 
@@ -549,40 +501,6 @@ interface MusicDao {
         FROM songs
     """)
     suspend fun getDeviceCapabilitySongRows(): List<DeviceCapabilitySongRow>
-
-    /**
-     * Single-pass audio aggregates for the diagnostic performance report.
-     * Hi-res thresholds: > 48 kHz = hi-res, >= 176.4 kHz = ultra-hi-res.
-     * Estimated bytes = bitrate(bps) * duration(ms) / 8000.
-     */
-    @Query("""
-        SELECT
-            COUNT(*) AS totalCount,
-            COALESCE(SUM(CASE WHEN source_type = 0 THEN 1 ELSE 0 END), 0) AS localCount,
-            COALESCE(SUM(CASE WHEN source_type != 0 THEN 1 ELSE 0 END), 0) AS cloudCount,
-            COALESCE(SUM(CASE WHEN sample_rate > 48000 THEN 1 ELSE 0 END), 0) AS hiResCount,
-            COALESCE(SUM(CASE WHEN sample_rate >= 176400 THEN 1 ELSE 0 END), 0) AS ultraHiResCount,
-            COALESCE(SUM(CASE
-                WHEN sample_rate > 48000
-                    OR mime_type LIKE '%flac%'
-                    OR mime_type LIKE '%alac%'
-                    OR mime_type LIKE '%wav%'
-                    OR mime_type LIKE '%aiff%'
-                    OR mime_type LIKE '%ape%'
-                THEN 1 ELSE 0 END), 0) AS likelyExpensiveCount,
-            MAX(bitrate) AS maxBitrate,
-            MIN(NULLIF(sample_rate, 0)) AS minSampleRate,
-            MAX(sample_rate) AS maxSampleRate,
-            MIN(CASE WHEN bitrate > 0 AND duration > 0 THEN bitrate * duration / 8000 END) AS estMinBytes,
-            AVG(CASE WHEN bitrate > 0 AND duration > 0 THEN bitrate * duration / 8000 END) AS estAvgBytes,
-            MAX(CASE WHEN bitrate > 0 AND duration > 0 THEN bitrate * duration / 8000 END) AS estMaxBytes
-        FROM songs
-    """)
-    suspend fun getLibraryAudioStats(): LibraryAudioStatsRow
-
-    /** Per-MIME song counts for the diagnostic performance report. */
-    @Query("SELECT mime_type AS mimeType, COUNT(*) AS count FROM songs GROUP BY mime_type ORDER BY count DESC")
-    suspend fun getMimeTypeCounts(): List<MimeTypeCountRow>
 
     /**
      * Returns random songs for efficient shuffle without loading all songs into memory.
@@ -676,7 +594,7 @@ interface MusicDao {
 
     @Query("""
         SELECT id FROM songs
-        WHERE (:applyDirectoryFilter = 0 OR id < 0 OR parent_directory_path IN (:allowedParentDirs))
+        WHERE (:applyDirectoryFilter = 0 OR parent_directory_path IN (:allowedParentDirs))
         AND (
             :filterMode = 0
             OR (
@@ -713,7 +631,7 @@ interface MusicDao {
     @Query("""
         SELECT songs.id FROM songs
         INNER JOIN favorites ON songs.id = favorites.songId AND favorites.isFavorite = 1
-        WHERE (:applyDirectoryFilter = 0 OR songs.id < 0 OR songs.parent_directory_path IN (:allowedParentDirs))
+        WHERE (:applyDirectoryFilter = 0 OR songs.parent_directory_path IN (:allowedParentDirs))
         AND (
             :filterMode = 0
             OR (
@@ -751,7 +669,7 @@ interface MusicDao {
      */
     @Query("""
         SELECT * FROM songs
-        WHERE (:applyDirectoryFilter = 0 OR id < 0 OR parent_directory_path IN (:allowedParentDirs))
+        WHERE (:applyDirectoryFilter = 0 OR parent_directory_path IN (:allowedParentDirs))
         AND (
             :filterMode = 0
             OR (
@@ -835,7 +753,7 @@ interface MusicDao {
     @Query("""
         SELECT songs.* FROM songs
         INNER JOIN favorites ON songs.id = favorites.songId AND favorites.isFavorite = 1
-        WHERE (:applyDirectoryFilter = 0 OR songs.id < 0 OR songs.parent_directory_path IN (:allowedParentDirs))
+        WHERE (:applyDirectoryFilter = 0 OR songs.parent_directory_path IN (:allowedParentDirs))
         AND (
             :filterMode = 0
             OR (
@@ -872,7 +790,7 @@ interface MusicDao {
     @Query("""
         SELECT songs.* FROM songs
         INNER JOIN favorites ON songs.id = favorites.songId AND favorites.isFavorite = 1
-        WHERE (:applyDirectoryFilter = 0 OR songs.id < 0 OR songs.parent_directory_path IN (:allowedParentDirs))
+        WHERE (:applyDirectoryFilter = 0 OR songs.parent_directory_path IN (:allowedParentDirs))
         AND (
             :filterMode = 0
             OR (
@@ -936,7 +854,7 @@ interface MusicDao {
     @Query("""
         SELECT COUNT(*) FROM songs
         INNER JOIN favorites ON songs.id = favorites.songId AND favorites.isFavorite = 1
-        WHERE (:applyDirectoryFilter = 0 OR songs.id < 0 OR songs.parent_directory_path IN (:allowedParentDirs))
+        WHERE (:applyDirectoryFilter = 0 OR songs.parent_directory_path IN (:allowedParentDirs))
         AND (
             :filterMode = 0
             OR (
@@ -1093,7 +1011,6 @@ interface MusicDao {
             albums.title AS title,
             albums.artist_name AS artist_name,
             albums.artist_id AS artist_id,
-            albums.album_artist AS album_artist,
             albums.album_art_uri_string AS album_art_uri_string,
             COUNT(songs.id) AS song_count,
             albums.date_added AS date_added,
@@ -1117,7 +1034,6 @@ interface MusicDao {
             albums.title,
             albums.artist_name,
             albums.artist_id,
-            albums.album_artist,
             albums.album_art_uri_string,
             albums.date_added,
             albums.year
@@ -1137,7 +1053,6 @@ interface MusicDao {
             albums.title AS title,
             albums.artist_name AS artist_name,
             albums.artist_id AS artist_id,
-            albums.album_artist AS album_artist,
             albums.album_art_uri_string AS album_art_uri_string,
             COUNT(songs.id) AS song_count,
             albums.date_added AS date_added,
@@ -1161,7 +1076,6 @@ interface MusicDao {
             albums.title,
             albums.artist_name,
             albums.artist_id,
-            albums.album_artist,
             albums.album_art_uri_string,
             albums.date_added,
             albums.year
@@ -1169,8 +1083,8 @@ interface MusicDao {
         ORDER BY
             CASE WHEN :sortOrder = 'album_title_az' THEN albums.title END COLLATE NOCASE ASC,
             CASE WHEN :sortOrder = 'album_title_za' THEN albums.title END COLLATE NOCASE DESC,
-            CASE WHEN :sortOrder = 'album_artist' THEN COALESCE(NULLIF(TRIM(albums.album_artist), ''), albums.artist_name) END COLLATE NOCASE ASC,
-            CASE WHEN :sortOrder = 'album_artist_desc' THEN COALESCE(NULLIF(TRIM(albums.album_artist), ''), albums.artist_name) END COLLATE NOCASE DESC,
+            CASE WHEN :sortOrder = 'album_artist' THEN albums.artist_name END COLLATE NOCASE ASC,
+            CASE WHEN :sortOrder = 'album_artist_desc' THEN albums.artist_name END COLLATE NOCASE DESC,
             CASE WHEN :sortOrder = 'album_release_year' THEN albums.year END DESC,
             CASE WHEN :sortOrder = 'album_release_year_asc' THEN albums.year END ASC,
             CASE WHEN :sortOrder = 'album_date_added' THEN albums.date_added END DESC,
@@ -1194,7 +1108,6 @@ interface MusicDao {
             albums.title AS title,
             albums.artist_name AS artist_name,
             albums.artist_id AS artist_id,
-            albums.album_artist AS album_artist,
             albums.album_art_uri_string AS album_art_uri_string,
             COUNT(songs.id) AS song_count,
             albums.date_added AS date_added,
@@ -1218,7 +1131,6 @@ interface MusicDao {
             albums.title,
             albums.artist_name,
             albums.artist_id,
-            albums.album_artist,
             albums.album_art_uri_string,
             albums.date_added,
             albums.year
@@ -1226,8 +1138,8 @@ interface MusicDao {
         ORDER BY
             CASE WHEN :sortOrder = 'album_title_az' THEN albums.title END COLLATE NOCASE ASC,
             CASE WHEN :sortOrder = 'album_title_za' THEN albums.title END COLLATE NOCASE DESC,
-            CASE WHEN :sortOrder = 'album_artist' THEN COALESCE(NULLIF(TRIM(albums.album_artist), ''), albums.artist_name) END COLLATE NOCASE ASC,
-            CASE WHEN :sortOrder = 'album_artist_desc' THEN COALESCE(NULLIF(TRIM(albums.album_artist), ''), albums.artist_name) END COLLATE NOCASE DESC,
+            CASE WHEN :sortOrder = 'album_artist' THEN albums.artist_name END COLLATE NOCASE ASC,
+            CASE WHEN :sortOrder = 'album_artist_desc' THEN albums.artist_name END COLLATE NOCASE DESC,
             CASE WHEN :sortOrder = 'album_release_year' THEN albums.year END DESC,
             CASE WHEN :sortOrder = 'album_release_year_asc' THEN albums.year END ASC,
             CASE WHEN :sortOrder = 'album_date_added' THEN albums.date_added END DESC,
@@ -1254,7 +1166,6 @@ interface MusicDao {
             albums.title AS title,
             albums.artist_name AS artist_name,
             albums.artist_id AS artist_id,
-            albums.album_artist AS album_artist,
             albums.album_art_uri_string AS album_art_uri_string,
             (
                 SELECT COUNT(*)
@@ -1275,7 +1186,6 @@ interface MusicDao {
             albums.title AS title,
             albums.artist_name AS artist_name,
             albums.artist_id AS artist_id,
-            albums.album_artist AS album_artist,
             albums.album_art_uri_string AS album_art_uri_string,
             (
                 SELECT COUNT(*)
@@ -1301,7 +1211,6 @@ interface MusicDao {
             albums.title AS title,
             albums.artist_name AS artist_name,
             albums.artist_id AS artist_id,
-            albums.album_artist AS album_artist,
             albums.album_art_uri_string AS album_art_uri_string,
             COUNT(songs.id) AS song_count,
             albums.date_added AS date_added,
@@ -1314,7 +1223,6 @@ interface MusicDao {
             albums.title,
             albums.artist_name,
             albums.artist_id,
-            albums.album_artist,
             albums.album_art_uri_string,
             albums.date_added,
             albums.year
@@ -1333,7 +1241,6 @@ interface MusicDao {
             albums.title AS title,
             albums.artist_name AS artist_name,
             albums.artist_id AS artist_id,
-            albums.album_artist AS album_artist,
             albums.album_art_uri_string AS album_art_uri_string,
             COUNT(songs.id) AS song_count,
             albums.date_added AS date_added,
@@ -1346,7 +1253,6 @@ interface MusicDao {
             albums.title,
             albums.artist_name,
             albums.artist_id,
-            albums.album_artist,
             albums.album_art_uri_string,
             albums.date_added,
             albums.year
@@ -1360,7 +1266,6 @@ interface MusicDao {
             albums.title AS title,
             albums.artist_name AS artist_name,
             albums.artist_id AS artist_id,
-            albums.album_artist AS album_artist,
             albums.album_art_uri_string AS album_art_uri_string,
             COUNT(songs.id) AS song_count,
             albums.date_added AS date_added,
@@ -1374,7 +1279,6 @@ interface MusicDao {
             albums.title,
             albums.artist_name,
             albums.artist_id,
-            albums.album_artist,
             albums.album_art_uri_string,
             albums.date_added,
             albums.year
@@ -1422,8 +1326,7 @@ interface MusicDao {
         ORDER BY
             CASE WHEN :sortOrder = 'artist_name_az' THEN artists.name END COLLATE NOCASE ASC,
             CASE WHEN :sortOrder = 'artist_name_za' THEN artists.name END COLLATE NOCASE DESC,
-            CASE WHEN :sortOrder = 'artist_num_songs_desc' THEN track_count END DESC,
-            CASE WHEN :sortOrder = 'artist_num_songs_asc' THEN track_count END ASC,
+            CASE WHEN :sortOrder = 'artist_num_songs' THEN track_count END DESC,
             artists.name COLLATE NOCASE ASC,
             artists.id ASC
     """)
@@ -1456,8 +1359,7 @@ interface MusicDao {
         ORDER BY
             CASE WHEN :sortOrder = 'artist_name_az' THEN artists.name END COLLATE NOCASE ASC,
             CASE WHEN :sortOrder = 'artist_name_za' THEN artists.name END COLLATE NOCASE DESC,
-            CASE WHEN :sortOrder = 'artist_num_songs_desc' THEN track_count END DESC,
-            CASE WHEN :sortOrder = 'artist_num_songs_asc' THEN track_count END ASC,
+            CASE WHEN :sortOrder = 'artist_num_songs' THEN track_count END DESC,
             artists.name COLLATE NOCASE ASC,
             artists.id ASC
         LIMIT :limit OFFSET :offset
@@ -1561,35 +1463,6 @@ interface MusicDao {
         applyDirectoryFilter: Boolean
     ): Flow<List<SongEntity>>
 
-    // Multi-genre aware query: matches songs where the genre column equals the name (case-
-    // insensitively, via LIKE), or contains it as part of a comma-separated list.
-    // SQLite LIKE is case-insensitive for ASCII letters by default, which is sufficient
-    // for genre names. All six arms use LIKE so that "rock" matches "Rock", "Rock,Pop",
-    // "Rock, Pop", "Pop,Rock", "Pop, Rock", and "Pop,Rock,Jazz".
-    @Query("""
-        SELECT * FROM songs
-        WHERE (:applyDirectoryFilter = 0 OR id < 0 OR parent_directory_path IN (:allowedParentDirs))
-        AND (
-            genre LIKE :genreName
-            OR genre LIKE :genrePrefix
-            OR genre LIKE :genreSuffixWithSpace
-            OR genre LIKE :genreSuffix
-            OR genre LIKE :genreMiddleWithSpace
-            OR genre LIKE :genreMiddle
-        )
-        ORDER BY title ASC
-    """)
-    fun getSongsByGenreContaining(
-        genreName: String,
-        genrePrefix: String,
-        genreSuffixWithSpace: String,
-        genreSuffix: String,
-        genreMiddleWithSpace: String,
-        genreMiddle: String,
-        allowedParentDirs: List<String>,
-        applyDirectoryFilter: Boolean
-    ): Flow<List<SongEntity>>
-
     @Query("""
         SELECT * FROM songs
         WHERE (:applyDirectoryFilter = 0 OR id < 0 OR parent_directory_path IN (:allowedParentDirs))
@@ -1662,7 +1535,6 @@ interface MusicDao {
             artist_id = :artistId,
             artists_json = :artistsJson,
             album_name = :album,
-            album_artist = :albumArtist,
             genre = :genre,
             track_number = :trackNumber,
             disc_number = :discNumber
@@ -1675,7 +1547,6 @@ interface MusicDao {
         artistId: Long,
         artistsJson: String?,
         album: String,
-        albumArtist: String?,
         genre: String?,
         trackNumber: Int,
         discNumber: Int?
@@ -1689,7 +1560,6 @@ interface MusicDao {
         artistId: Long,
         artistsJson: String?,
         album: String,
-        albumArtist: String?,
         genre: String?,
         trackNumber: Int,
         discNumber: Int?,
@@ -1707,7 +1577,6 @@ interface MusicDao {
             artistId = artistId,
             artistsJson = artistsJson,
             album = album,
-            albumArtist = albumArtist,
             genre = genre,
             trackNumber = trackNumber,
             discNumber = discNumber

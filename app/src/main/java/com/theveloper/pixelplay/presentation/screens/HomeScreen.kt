@@ -21,7 +21,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -75,7 +74,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.media3.common.util.UnstableApi
 import androidx.navigation.NavController
 import androidx.lifecycle.Lifecycle
@@ -96,11 +95,11 @@ import com.theveloper.pixelplay.presentation.components.DailyMixSection
 import com.theveloper.pixelplay.presentation.components.HomeGradientTopBar
 import com.theveloper.pixelplay.presentation.components.HomeOptionsBottomSheet
 import com.theveloper.pixelplay.presentation.components.MiniPlayerHeight
+import com.theveloper.pixelplay.presentation.components.NavBarContentHeight
 import com.theveloper.pixelplay.presentation.components.RecentlyPlayedSection
 import com.theveloper.pixelplay.presentation.components.RecentlyPlayedSectionMinSongsToShow
 import com.theveloper.pixelplay.presentation.components.SmartImage
 import com.theveloper.pixelplay.presentation.components.StatsOverviewCard
-import com.theveloper.pixelplay.presentation.components.resolveMainScreenBottomGradientHeight
 import com.theveloper.pixelplay.presentation.model.collectRecentlyPlayedSongIds
 import com.theveloper.pixelplay.presentation.model.mapRecentlyPlayedSongs
 import com.theveloper.pixelplay.presentation.components.subcomps.PlayingEqIcon
@@ -130,6 +129,11 @@ fun HomeScreen(
     navController: NavController,
     paddingValuesParent: PaddingValues,
     playerViewModel: PlayerViewModel = hiltViewModel(),
+    settingsViewModel: SettingsViewModel = hiltViewModel(),
+    neteaseViewModel: NeteaseDashboardViewModel = hiltViewModel(),
+    qqMusicViewModel: QqMusicDashboardViewModel = hiltViewModel(),
+    navidromeViewModel: NavidromeDashboardViewModel = hiltViewModel(),
+    jellyfinViewModel: JellyfinDashboardViewModel = hiltViewModel(),
     onOpenSidebar: () -> Unit
 ) {
     val context = LocalContext.current
@@ -138,9 +142,7 @@ fun HomeScreen(
         (context as? android.app.Activity)?.intent?.getBooleanExtra("is_benchmark", false) ?: false
     }
     val statsViewModel: StatsViewModel = hiltViewModel()
-    val collagePattern by playerViewModel.collagePattern.collectAsStateWithLifecycle()
-    val collageAutoRotate by playerViewModel.collageAutoRotate.collectAsStateWithLifecycle()
-    val beta05CleanInstallDisclaimerDismissed by playerViewModel.beta05CleanInstallDisclaimerDismissed.collectAsStateWithLifecycle()
+    val settingsUiState by settingsViewModel.uiState.collectAsStateWithLifecycle()
     val dailyMixSongs by playerViewModel.dailyMixSongs.collectAsStateWithLifecycle()
     val curatedYourMixSongs by playerViewModel.yourMixSongs.collectAsStateWithLifecycle()
     val homeMixPreviewSongs by playerViewModel.homeMixPreviewSongs.collectAsStateWithLifecycle()
@@ -179,18 +181,8 @@ fun HomeScreen(
             maxItems = 64
         )
     }
-    val recentlyPlayedSourceSongsInitialValue = remember(recentSongIds, playerViewModel) {
-        if (recentSongIds.isEmpty()) {
-            persistentListOf<Song>()
-        } else {
-            val loadedSongs = playerViewModel.allSongsFlow.value
-            if (loadedSongs.isNotEmpty()) {
-                val songById = loadedSongs.associateBy { it.id }
-                recentSongIds.mapNotNull { songById[it] }
-            } else {
-                null
-            }
-        }
+    val recentlyPlayedSourceSongsInitialValue = remember(recentSongIds) {
+        if (recentSongIds.isEmpty()) persistentListOf<Song>() else null
     }
     val recentlyPlayedSourceSongs by remember(recentSongIds, playerViewModel) {
         playerViewModel.observeSongs(recentSongIds)
@@ -205,7 +197,7 @@ fun HomeScreen(
         )
     }
     // Keep the visible Home snapshot stable and only refresh it once the screen is off-screen.
-    var recentlyPlayedSongs by rememberSaveable { mutableStateOf(latestRecentlyPlayedSongs) }
+    var recentlyPlayedSongs by remember { mutableStateOf(latestRecentlyPlayedSongs) }
     val latestRecentlyPlayedSongsState = rememberUpdatedState(latestRecentlyPlayedSongs)
 
     LaunchedEffect(latestRecentlyPlayedSongs, lifecycleOwner) {
@@ -251,8 +243,6 @@ fun HomeScreen(
 
     // Padding inferior si hay canción en reproducción
     val bottomPadding = if (currentSong != null) MiniPlayerHeight else 0.dp
-    val navBarCompactMode by playerViewModel.navBarCompactMode.collectAsStateWithLifecycle()
-    val bottomGradientHeight = resolveMainScreenBottomGradientHeight(navBarCompactMode)
 
     var showOptionsBottomSheet by remember { mutableStateOf(false) }
     var showChangelogBottomSheet by remember { mutableStateOf(false) }
@@ -266,51 +256,17 @@ fun HomeScreen(
 
     val homeStatsOverview by statsViewModel.homeOverview.collectAsStateWithLifecycle()
 
-    val listState = rememberSaveable(saver = LazyListState.Saver) { LazyListState() }
+    val listState = rememberLazyListState()
     val density = LocalDensity.current
     val scrollThresholdPx = remember(density) { with(density) { 180.dp.toPx() } }
     val isScrolledPastThreshold = remember {
         derivedStateOf { listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > scrollThresholdPx }
     }
 
-    // Persist the scroll position across navigation away/back. The Stats card and other
-    // conditional sections can shift indices while data re-emits when returning, which
-    // would otherwise leave the list scrolled to the wrong place or jump to the top.
-    var savedScrollIndex by rememberSaveable { mutableIntStateOf(0) }
-    var savedScrollOffset by rememberSaveable { mutableIntStateOf(0) }
-    var needsScrollRestore by rememberSaveable { mutableStateOf(false) }
-
-    DisposableEffect(lifecycleOwner, listState) {
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_PAUSE) {
-                savedScrollIndex = listState.firstVisibleItemIndex
-                savedScrollOffset = listState.firstVisibleItemScrollOffset
-                needsScrollRestore = true
-            }
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
-    }
-
-    LaunchedEffect(
-        needsScrollRestore,
-        yourMixSongs.isNotEmpty(),
-        dailyMixSongs.isNotEmpty(),
-        recentlyPlayedSongs.size,
-        homeStatsOverview
-    ) {
-        if (!needsScrollRestore) return@LaunchedEffect
-        val totalItems = listState.layoutInfo.totalItemsCount
-        if (totalItems == 0) return@LaunchedEffect
-        val targetIndex = savedScrollIndex.coerceIn(0, (totalItems - 1).coerceAtLeast(0))
-        listState.scrollToItem(targetIndex, savedScrollOffset)
-        needsScrollRestore = false
-    }
-
     // Drawer state for sidebar
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val shouldShowCleanInstallDisclaimer =
-        beta05CleanInstallDisclaimerDismissed == false &&
+        settingsUiState.beta05CleanInstallDisclaimerDismissed == false &&
             !cleanInstallDisclaimerDismissedThisSession
 
     Box(
@@ -362,7 +318,7 @@ fun HomeScreen(
                             YourMixEmptyPlaceholder(
                                 onRefresh = {
                                     homePlaceholderRefreshGeneration++
-                                    playerViewModel.refreshLibrary()
+                                    settingsViewModel.refreshLibrary()
                                     playerViewModel.forceUpdateDailyMix()
                                 }
                             )
@@ -397,8 +353,8 @@ fun HomeScreen(
                         key = "album_art_collage",
                         contentType = "album_art_collage"
                     ) {
-                        val basePattern = collagePattern
-                        val isAutoRotate = collageAutoRotate
+                        val basePattern = settingsUiState.collagePattern
+                        val isAutoRotate = settingsUiState.collageAutoRotate
                         val patterns = remember { CollagePattern.entries }
 
                         val activePattern = if (isAutoRotate) {
@@ -480,7 +436,6 @@ fun HomeScreen(
                             onOpenAllClick = {
                                 navController.navigateSafely(Screen.RecentlyPlayed.route)
                             },
-                            themeStateHolder = playerViewModel.themeStateHolder,
                             currentSongId = currentSong?.id,
                             contentPadding = PaddingValues(start = 8.dp, end = 24.dp)
                         )
@@ -504,7 +459,7 @@ fun HomeScreen(
             modifier = Modifier
                 .fillMaxWidth()
                 .align(Alignment.BottomCenter)
-                .height(bottomGradientHeight)
+                .height(170.dp)
                 .background(
                     brush = Brush.verticalGradient(
                         colorStops = arrayOf(
@@ -556,10 +511,6 @@ fun HomeScreen(
         }
     }
     if (showStreamingProviderSheet) {
-        val neteaseViewModel: NeteaseDashboardViewModel = hiltViewModel()
-        val qqMusicViewModel: QqMusicDashboardViewModel = hiltViewModel()
-        val navidromeViewModel: NavidromeDashboardViewModel = hiltViewModel()
-        val jellyfinViewModel: JellyfinDashboardViewModel = hiltViewModel()
         val isNeteaseLoggedIn by neteaseViewModel.isLoggedIn.collectAsStateWithLifecycle()
         val isQqMusicLoggedIn by qqMusicViewModel.isLoggedIn.collectAsStateWithLifecycle()
         val isNavidromeLoggedIn by navidromeViewModel.isLoggedIn.collectAsStateWithLifecycle()
@@ -589,7 +540,7 @@ fun HomeScreen(
             onDismiss = { dontShowAgain ->
                 cleanInstallDisclaimerDismissedThisSession = true
                 if (dontShowAgain) {
-                    playerViewModel.setBeta05CleanInstallDisclaimerDismissed(true)
+                    settingsViewModel.setBeta05CleanInstallDisclaimerDismissed(true)
                 }
             }
         )
@@ -759,7 +710,7 @@ fun YourMixHeader(
         ) {
             Icon(
                 painter = painterResource(R.drawable.rounded_shuffle_24),
-                contentDescription = stringResource(R.string.common_shuffle_play),
+                contentDescription = stringResource(R.string.cd_shuffle_play),
                 modifier = Modifier.size(36.dp)
             )
         }
@@ -805,7 +756,7 @@ fun SongListItemFavs(
             ) {
                 SmartImage(
                     model = albumArtUrl,
-                    contentDescription = stringResource(R.string.common_album_art_for_title, title),
+                    contentDescription = stringResource(R.string.cd_album_art_for_title, title),
                     contentScale = ContentScale.Crop,
                     shape = RoundedCornerShape(8.dp),
                     modifier = Modifier.size(48.dp)

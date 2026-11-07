@@ -26,15 +26,11 @@ internal class QueueSheetController(
     private val minFlingTravelPxProvider: () -> Float,
     private val dragThresholdPxProvider: () -> Float,
     private val showQueueSheetProvider: () -> Boolean,
-    private val onShowQueueSheetChange: (Boolean) -> Unit,
-    private val onIsCollapsingChange: (Boolean) -> Unit,
-    private val animationSpec: androidx.compose.animation.core.AnimationSpec<Float>
+    private val onShowQueueSheetChange: (Boolean) -> Unit
 ) {
     private var dragOffsetCache: Float? = null
     private var pendingDragTarget: Float? = null
     private var dragSnapJob: Job? = null
-    private var animateJob: Job? = null
-    private var isCollapsing = false
 
     private fun resetDragPipeline() {
         dragOffsetCache = null
@@ -73,14 +69,12 @@ internal class QueueSheetController(
         } else {
             hiddenOffset
         }
-        if (!isCollapsing && !queueSheetOffset.isRunning) {
-            queueSheetOffset.snapTo(targetOffset)
-        }
+        queueSheetOffset.snapTo(targetOffset)
     }
 
     suspend fun syncCollapsedWhenHidden() {
         val hiddenOffset = hiddenOffsetProvider()
-        if (!showQueueSheetProvider() && !isCollapsing && !queueSheetOffset.isRunning && hiddenOffset > 0f && queueSheetOffset.value != hiddenOffset) {
+        if (!showQueueSheetProvider() && hiddenOffset > 0f && queueSheetOffset.value != hiddenOffset) {
             queueSheetOffset.snapTo(hiddenOffset)
         }
     }
@@ -97,43 +91,44 @@ internal class QueueSheetController(
     suspend fun animateTo(targetExpanded: Boolean) {
         resetDragPipeline()
         val hiddenOffset = hiddenOffsetProvider()
-        if (hiddenOffset <= 0f) {
+        if (hiddenOffset == 0f) {
             onShowQueueSheetChange(targetExpanded)
             return
         }
         val target = if (targetExpanded) 0f else hiddenOffset
-        val isOpening = targetExpanded && !showQueueSheetProvider()
-        if (!targetExpanded) {
-            isCollapsing = true
-            onIsCollapsingChange(true)
-        }
-        // Immediately notify UI that the sheet is visible so it starts composing and rendering smoothly
+        val shouldPrewarmFirstFrame = targetExpanded && !showQueueSheetProvider()
         onShowQueueSheetChange(true)
-        if (isOpening) {
-            // If opening from scratch, ensure start offset is at hidden offset
-            if (queueSheetOffset.value < hiddenOffset * 0.5f) {
-                queueSheetOffset.snapTo(hiddenOffset)
+        if (shouldPrewarmFirstFrame) {
+            queueSheetOffset.snapTo(hiddenOffset)
+            if (coroutineContext[MonotonicFrameClock] != null) {
+                withFrameNanos { }
+            } else {
+                yield()
             }
         }
-        try {
-            queueSheetOffset.animateTo(
-                targetValue = target,
-                animationSpec = animationSpec
+        val travelFraction = if (hiddenOffset > 0f) {
+            (abs(queueSheetOffset.value - target) / hiddenOffset).coerceIn(0f, 1f)
+        } else {
+            1f
+        }
+        val durationMillis = if (targetExpanded) {
+            (220f + (120f * travelFraction)).toInt()
+        } else {
+            (190f + (110f * travelFraction)).toInt()
+        }
+        queueSheetOffset.animateTo(
+            targetValue = target,
+            animationSpec = tween(
+                durationMillis = durationMillis,
+                easing = FastOutSlowInEasing
             )
-            onShowQueueSheetChange(targetExpanded)
-        } finally {
-            if (!targetExpanded) {
-                isCollapsing = false
-                onIsCollapsingChange(false)
-            }
-        }
+        )
+        onShowQueueSheetChange(targetExpanded)
     }
 
     fun animate(targetExpanded: Boolean) {
         if (!allowInteractionProvider() && targetExpanded) return
-        val target = targetExpanded && allowInteractionProvider()
-        animateJob?.cancel()
-        animateJob = scope.launch { animateTo(target) }
+        scope.launch { animateTo(targetExpanded && allowInteractionProvider()) }
     }
 
     fun beginDrag() {
@@ -164,30 +159,19 @@ internal class QueueSheetController(
         resetDragPipeline()
 
         val isFastUpward = velocity < -520f
-        val isFastDownward = velocity > 450f
+        val isFastDownward = velocity > 700f
         val minFlingTravelPx = minFlingTravelPxProvider()
         val hasMeaningfulUpwardTravel = totalDrag < -minFlingTravelPx
         // Quick upward flicks on full player can be short in travel but high in intent.
         val hasQuickUpwardTravel = totalDrag < -(minFlingTravelPx * 0.35f)
         val shouldExpandFromQuickFling = isFastUpward && hasQuickUpwardTravel
         val dragThresholdPx = dragThresholdPxProvider()
-
-        // Directional intent: a clear drag past the threshold in either direction
-        // commits to that direction. This makes dismissing from the header reliable
-        // (downward drag past threshold → close) while still letting upward drags
-        // from the closed state open the sheet.
-        val hasCommittedDownwardDrag = totalDrag > dragThresholdPx
-        val hasCommittedUpwardDrag = totalDrag < -dragThresholdPx
-
-        val shouldExpand = when {
-            shouldExpandFromQuickFling -> true
-            isFastUpward && hasMeaningfulUpwardTravel -> true
-            isFastDownward -> false
-            hasCommittedDownwardDrag -> false
-            hasCommittedUpwardDrag -> true
-            // Tiny residual drag: snap to whichever half the sheet ended in.
-            else -> settledOffset < hiddenOffset * 0.5f
-        }
+        val shouldExpand = shouldExpandFromQuickFling ||
+            (isFastUpward && hasMeaningfulUpwardTravel) ||
+            (!isFastDownward && (
+                settledOffset < hiddenOffset - dragThresholdPx ||
+                    totalDrag < -dragThresholdPx
+                ))
 
         animate(shouldExpand)
     }

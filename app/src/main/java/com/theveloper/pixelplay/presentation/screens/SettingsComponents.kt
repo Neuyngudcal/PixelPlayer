@@ -30,25 +30,18 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.DeleteForever
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Sync
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.rounded.Check
-import androidx.compose.material.icons.rounded.CheckCircle
-import androidx.compose.material.icons.rounded.Clear
 import androidx.compose.material.icons.rounded.Close
-import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -71,14 +64,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.theveloper.pixelplay.R
-import com.theveloper.pixelplay.data.ai.GeminiModel
 import com.theveloper.pixelplay.data.worker.SyncProgress
 import com.theveloper.pixelplay.presentation.viewmodel.LyricsRefreshProgress
 import com.theveloper.pixelplay.ui.theme.GoogleSansRounded
 import androidx.compose.ui.res.vectorResource
-import androidx.compose.ui.unit.sp
 import androidx.core.view.HapticFeedbackConstantsCompat
-import com.theveloper.pixelplay.presentation.components.subcomps.TightWrapText
 import com.theveloper.pixelplay.presentation.utils.LocalAppHapticsConfig
 import com.theveloper.pixelplay.presentation.utils.performAppCompatHapticFeedback
 
@@ -350,7 +340,7 @@ fun ThemeSelectorItem(
                                 if (isSelected) {
                                     Icon(
                                         imageVector = Icons.Rounded.Check,
-                                        contentDescription = stringResource(R.string.common_selected),
+                                        contentDescription = stringResource(R.string.presentation_batch_f_cd_selected),
                                         tint = contentColor
                                     )
                                 }
@@ -370,184 +360,11 @@ fun ExpressiveSettingsGroup(
 ) {
     Column(
         modifier = modifier
-            .clip(RoundedCornerShape(24.dp))
+            .clip(RoundedCornerShape(24.dp)) // Large corners for the group
             .background(Color.Transparent),
+        //verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
         content()
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun SearchableModelSelector(
-    label: String,
-    description: String,
-    models: List<GeminiModel>,
-    selectedModelName: String,
-    onModelSelected: (String) -> Unit,
-    leadingIcon: @Composable () -> Unit
-) {
-    var showSheet by remember { mutableStateOf(false) }
-    var searchQuery by remember { mutableStateOf("") }
-    val selectedDisplayName = models.find { it.name == selectedModelName }?.displayName ?: selectedModelName
-
-    Surface(
-        color = MaterialTheme.colorScheme.surfaceContainer,
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
-            .clickable { showSheet = true }
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Box(
-                    modifier = Modifier
-                        .padding(end = 16.dp)
-                        .size(24.dp),
-                    contentAlignment = Alignment.Center
-                ) { leadingIcon() }
-
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = label,
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(
-                        text = description,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(modifier = Modifier.height(10.dp))
-                    Surface(
-                        color = MaterialTheme.colorScheme.surfaceContainerLowest,
-                        shape = CircleShape,
-                        modifier = Modifier.align(Alignment.Start)
-                    ) {
-                        Text(
-                            text = selectedDisplayName,
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.primary,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
-                        )
-                    }
-                }
-            }
-        }
-    }
-
-    if (showSheet) {
-        ModalBottomSheet(
-            onDismissRequest = {
-                showSheet = false
-                searchQuery = ""
-            },
-            containerColor = MaterialTheme.colorScheme.surface,
-            contentColor = MaterialTheme.colorScheme.onSurface
-        ) {
-            Column(modifier = Modifier.padding(bottom = 24.dp)) {
-                Text(
-                    text = label,
-                    style = MaterialTheme.typography.headlineSmall,
-                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp),
-                    fontWeight = FontWeight.Bold
-                )
-
-                OutlinedTextField(
-                    value = searchQuery,
-                    onValueChange = { searchQuery = it },
-                    placeholder = { Text("Search models...") },
-                    leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = "Search") },
-                    trailingIcon = {
-                        if (searchQuery.isNotEmpty()) {
-                            IconButton(onClick = { searchQuery = "" }) {
-                                Icon(Icons.Rounded.Clear, contentDescription = "Clear")
-                            }
-                        }
-                    },
-                    singleLine = true,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = MaterialTheme.colorScheme.primary,
-                        unfocusedBorderColor = MaterialTheme.colorScheme.outline
-                    )
-                )
-
-                Spacer(modifier = Modifier.height(4.dp))
-
-                val filteredModels = remember(models, searchQuery) {
-                    if (searchQuery.isBlank()) models
-                    else models.filter {
-                        it.name.contains(searchQuery, ignoreCase = true) ||
-                            it.displayName.contains(searchQuery, ignoreCase = true)
-                    }
-                }
-
-                Text(
-                    text = "${filteredModels.size} model${if (filteredModels.size != 1) "s" else ""} available",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 4.dp)
-                )
-
-                LazyColumn(
-                    modifier = Modifier
-                        .padding(horizontal = 16.dp)
-                        .heightIn(max = 400.dp)
-                ) {
-                    items(filteredModels, key = { it.name }) { model ->
-                        val isSelected = model.name == selectedModelName
-                        Surface(
-                            color = if (isSelected) MaterialTheme.colorScheme.primaryContainer
-                                    else MaterialTheme.colorScheme.surfaceContainerHigh,
-                            shape = RoundedCornerShape(10.dp),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 4.dp)
-                                .clickable {
-                                    onModelSelected(model.name)
-                                    showSheet = false
-                                    searchQuery = ""
-                                }
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(16.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = model.displayName,
-                                        style = MaterialTheme.typography.bodyLarge,
-                                        color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer
-                                                else MaterialTheme.colorScheme.onSurface
-                                    )
-                                    Text(
-                                        text = model.name,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                                if (isSelected) {
-                                    Icon(
-                                        imageVector = Icons.Rounded.CheckCircle,
-                                        contentDescription = "Selected",
-                                        tint = MaterialTheme.colorScheme.primary
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
     }
 }
 
@@ -572,18 +389,14 @@ fun SliderSettingsItem(
             ) {
                 Text(
                         text = label,
-                        modifier = Modifier.weight(1f),
                         style = MaterialTheme.typography.titleMedium,
                         color = MaterialTheme.colorScheme.onSurface
                 )
-                Spacer(modifier = Modifier.width(8.dp))
                 Text(
                         text = valueText(value),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.primary,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                        softWrap = false
+                        fontWeight = FontWeight.Bold
                 )
             }
             Slider(
@@ -630,12 +443,12 @@ fun RefreshLibraryItem(
                         verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     Text(
-                            text = stringResource(R.string.settings_refresh_library_title),
+                            text = stringResource(R.string.presentation_batch_f_refresh_library_title),
                             style = MaterialTheme.typography.titleMedium,
                             color = MaterialTheme.colorScheme.onSurface
                     )
                     Text(
-                            text = stringResource(R.string.settings_refresh_library_subtitle),
+                            text = stringResource(R.string.presentation_batch_f_refresh_library_subtitle),
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -650,24 +463,13 @@ fun RefreshLibraryItem(
                     enabled = !isSyncing,
                     modifier = Modifier.fillMaxWidth()
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.Center,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
+                Icon(
                         imageVector = Icons.Outlined.Refresh,
                         contentDescription = null,
                         modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    TightWrapText(
-                        text = stringResource(R.string.settings_action_full_rescan),
-                        overflow = TextOverflow.Ellipsis,
-                        maxLines = 2,
-                        lineHeight = 22.sp,
-                    )
-                }
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(stringResource(R.string.presentation_batch_f_full_rescan))
             }
              
             Spacer(modifier = Modifier.height(8.dp))
@@ -682,24 +484,13 @@ fun RefreshLibraryItem(
                     ),
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.5f))
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.Center,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
+                Icon(
                         imageVector = Icons.Outlined.DeleteForever,
                         contentDescription = null,
                         modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    TightWrapText(
-                        text = stringResource(R.string.settings_action_rebuild_database),
-                        overflow = TextOverflow.Ellipsis,
-                        maxLines = 2,
-                        lineHeight = 22.sp,
-                    )
-                }
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(stringResource(R.string.presentation_batch_f_rebuild_database))
             }
 
             if (isSyncing) {
@@ -713,7 +504,7 @@ fun RefreshLibraryItem(
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
                             text = stringResource(
-                                R.string.settings_sync_progress_detailed,
+                                R.string.presentation_batch_f_sync_progress_detailed,
                                 phaseLabel,
                                 (syncProgress.progress * 100).toInt(),
                                 syncProgress.currentCount,
@@ -727,7 +518,7 @@ fun RefreshLibraryItem(
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
                             text = stringResource(
-                                R.string.settings_sync_progres_indeterminate,
+                                R.string.presentation_batch_f_sync_progress_indeterminate,
                                 phaseLabel
                             ),
                             style = MaterialTheme.typography.labelMedium,
@@ -743,21 +534,100 @@ fun RefreshLibraryItem(
 private fun syncPhaseLabel(phase: SyncProgress.SyncPhase): String =
         stringResource(
                 when (phase) {
-                    SyncProgress.SyncPhase.IDLE -> R.string.settings_sync_phase_preparing
+                    SyncProgress.SyncPhase.IDLE -> R.string.presentation_batch_f_sync_phase_preparing
                     SyncProgress.SyncPhase.FETCHING_MEDIASTORE ->
-                            R.string.settings_sync_phase_reading_mediastore
+                            R.string.presentation_batch_f_sync_phase_reading_mediastore
                     SyncProgress.SyncPhase.PROCESSING_FILES ->
-                            R.string.settings_sync_phase_reading_processing_tracks
+                            R.string.presentation_batch_f_sync_phase_processing_tracks
                     SyncProgress.SyncPhase.SAVING_TO_DATABASE ->
-                            R.string.settings_sync_phase_saving_db
-                    SyncProgress.SyncPhase.SCANNING_LRC -> R.string.settings_sync_phase_scanning_lrc
+                            R.string.presentation_batch_f_sync_phase_saving_db
+                    SyncProgress.SyncPhase.SCANNING_LRC -> R.string.presentation_batch_f_sync_phase_scanning_lrc
                     SyncProgress.SyncPhase.CLEANING_CACHE ->
-                            R.string.settings_sync_phase_cleaning_cache
+                            R.string.presentation_batch_f_sync_phase_cleaning_cache
                     SyncProgress.SyncPhase.SYNCING_CLOUD ->
-                            R.string.settings_sync_phase_syncing_cloud
-                    SyncProgress.SyncPhase.COMPLETING -> R.string.settings_sync_phase_completing
+                            R.string.presentation_batch_f_sync_phase_syncing_cloud
+                    SyncProgress.SyncPhase.COMPLETING -> R.string.presentation_batch_f_sync_phase_completing
                 }
         )
+
+@Composable
+fun RefreshLyricsItem(
+        isRefreshing: Boolean,
+        progress: LyricsRefreshProgress,
+        onRefresh: () -> Unit
+) {
+    Surface(
+            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
+            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth()
+            ) {
+                Box(
+                        modifier = Modifier.padding(end = 16.dp).size(24.dp),
+                        contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                            painter = painterResource(id = R.drawable.rounded_lyrics_24),
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.secondary
+                    )
+                }
+
+                Column(
+                        modifier = Modifier.weight(1f).padding(end = 8.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(
+                            text = stringResource(R.string.presentation_batch_f_refresh_lyrics_title),
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                            text = stringResource(R.string.presentation_batch_f_refresh_lyrics_subtitle),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
+                FilledIconButton(
+                        onClick = onRefresh,
+                        enabled = !isRefreshing,
+                        colors =
+                                IconButtonDefaults.filledIconButtonColors(
+                                        containerColor = MaterialTheme.colorScheme.primaryContainer
+                                )
+                ) {
+                    Icon(
+                            imageVector = Icons.Outlined.Sync,
+                            contentDescription = stringResource(R.string.presentation_batch_f_cd_refresh_lyrics),
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                }
+            }
+
+            if (isRefreshing && progress.hasProgress) {
+                Spacer(modifier = Modifier.height(12.dp))
+                LinearProgressIndicator(
+                        progress = { progress.progress },
+                        modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                        text = stringResource(
+                            R.string.presentation_batch_f_refresh_lyrics_processing,
+                            progress.currentCount,
+                            progress.totalSongs
+                        ),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+}
 
 @Composable
 fun ActionSettingsItem(
@@ -811,7 +681,7 @@ fun ActionSettingsItem(
                 enabled = enabled,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text(primaryActionLabel, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(primaryActionLabel)
             }
 
             // Secondary Action (Optional)
@@ -822,7 +692,7 @@ fun ActionSettingsItem(
                     enabled = enabled,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text(secondaryActionLabel, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(secondaryActionLabel)
                 }
             }
         }
@@ -867,7 +737,7 @@ fun AiApiKeyItem(
                 value = localApiKey,
                 onValueChange = { localApiKey = it },
                 modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text(stringResource(R.string.settings_enter_api_key_placeholder)) },
+                placeholder = { Text(stringResource(R.string.presentation_batch_f_enter_api_key)) },
                 singleLine = true,
                 visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation()
             )
@@ -884,11 +754,11 @@ fun AiApiKeyItem(
                     },
                     enabled = hasChanges
                 ) {
-                    Text(stringResource(R.string.common_save), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(stringResource(R.string.presentation_batch_f_save))
                 }
                 if (showSaved) {
                     Text(
-                        text = stringResource(R.string.common_saved),
+                        text = stringResource(R.string.presentation_batch_f_saved),
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.primary,
                         fontWeight = FontWeight.Bold
@@ -913,18 +783,18 @@ fun AiSystemPromptItem(
     val isDefault = systemPrompt == defaultPrompt
     var showSaved by remember { mutableStateOf(false) }
     val presets = listOf(
-        stringResource(R.string.settings_preset_professional_curator_name) to
-            stringResource(R.string.settings_preset_professional_curator_prompt),
-        stringResource(R.string.settings_preset_creative_maverick_name) to
-            stringResource(R.string.settings_preset_creative_maverick_prompt),
-        stringResource(R.string.settings_preset_strict_librarian_name) to
-            stringResource(R.string.settings_preset_strict_librarian_prompt),
-        stringResource(R.string.settings_preset_atmospheric_guide_name) to
-            stringResource(R.string.settings_preset_atmospheric_guide_prompt),
-        stringResource(R.string.settings_preset_sonic_enthusiast_name) to
-            stringResource(R.string.settings_preset_sonic_enthusiast_prompt),
-        stringResource(R.string.settings_preset_energy_catalyst_name) to
-            stringResource(R.string.settings_preset_energy_catalyst_prompt)
+        stringResource(R.string.presentation_batch_f_ai_preset_professional_curator_name) to
+            stringResource(R.string.presentation_batch_f_ai_preset_professional_curator_prompt),
+        stringResource(R.string.presentation_batch_f_ai_preset_creative_maverick_name) to
+            stringResource(R.string.presentation_batch_f_ai_preset_creative_maverick_prompt),
+        stringResource(R.string.presentation_batch_f_ai_preset_strict_librarian_name) to
+            stringResource(R.string.presentation_batch_f_ai_preset_strict_librarian_prompt),
+        stringResource(R.string.presentation_batch_f_ai_preset_atmospheric_guide_name) to
+            stringResource(R.string.presentation_batch_f_ai_preset_atmospheric_guide_prompt),
+        stringResource(R.string.presentation_batch_f_ai_preset_sonic_enthusiast_name) to
+            stringResource(R.string.presentation_batch_f_ai_preset_sonic_enthusiast_prompt),
+        stringResource(R.string.presentation_batch_f_ai_preset_energy_catalyst_name) to
+            stringResource(R.string.presentation_batch_f_ai_preset_energy_catalyst_prompt)
     )
 
     LaunchedEffect(showSaved) {
@@ -951,7 +821,7 @@ fun AiSystemPromptItem(
             )
             Spacer(modifier = Modifier.height(12.dp))
             Text(
-                text = stringResource(R.string.settings_preset_prompts),
+                text = stringResource(R.string.presentation_batch_f_preset_prompts),
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.onSurface
             )
@@ -976,7 +846,7 @@ fun AiSystemPromptItem(
                 value = localPrompt,
                 onValueChange = { localPrompt = it },
                 modifier = Modifier.fillMaxWidth().heightIn(min = 100.dp, max = 200.dp),
-                placeholder = { Text(stringResource(R.string.settings_system_prompt_placeholder)) },
+                placeholder = { Text(stringResource(R.string.presentation_batch_f_enter_system_prompt_placeholder)) },
                 minLines = 3,
                 maxLines = 6
             )
@@ -993,18 +863,18 @@ fun AiSystemPromptItem(
                     },
                     enabled = hasChanges
                 ) {
-                    Text(stringResource(R.string.common_save), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(stringResource(R.string.presentation_batch_f_save))
                 }
                 if (!isDefault) {
                     OutlinedButton(onClick = {
                         onReset()
                     }) {
-                        Text(stringResource(R.string.common_reset), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(stringResource(R.string.presentation_batch_f_reset))
                     }
                 }
                 if (showSaved) {
                     Text(
-                        text = stringResource(R.string.common_saved),
+                        text = stringResource(R.string.presentation_batch_f_saved),
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.primary,
                         fontWeight = FontWeight.Bold

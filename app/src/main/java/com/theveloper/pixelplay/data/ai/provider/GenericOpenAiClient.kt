@@ -2,7 +2,6 @@ package com.theveloper.pixelplay.data.ai.provider
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import okhttp3.MediaType.Companion.toMediaType
@@ -28,11 +27,7 @@ class GenericOpenAiClient(
     private data class ChatRequest(
         val model: String,
         val messages: List<ChatMessage>,
-        val temperature: Double = 0.7,
-        @SerialName("top_p") val topP: Double? = null,
-        @SerialName("max_tokens") val maxTokens: Int? = null,
-        @SerialName("presence_penalty") val presencePenalty: Double? = null,
-        @SerialName("frequency_penalty") val frequencyPenalty: Double? = null
+        val temperature: Double = 0.7
     )
     
     @Serializable
@@ -62,12 +57,7 @@ class GenericOpenAiClient(
         model: String, 
         systemPrompt: String, 
         prompt: String,
-        temperature: Float,
-        topP: Float,
-        topK: Int,
-        maxTokens: Int,
-        presencePenalty: Float,
-        frequencyPenalty: Float
+        temperature: Float
     ): String {
         return withContext(Dispatchers.IO) {
             val resolvedModel = model.ifBlank { defaultModelId }
@@ -80,11 +70,7 @@ class GenericOpenAiClient(
             val requestBody = ChatRequest(
                 model = resolvedModel,
                 messages = messagesList,
-                temperature = temperature.toDouble(),
-                topP = topP.toDouble(),
-                maxTokens = maxTokens.takeIf { it > 0 },
-                presencePenalty = presencePenalty.toDouble(),
-                frequencyPenalty = frequencyPenalty.toDouble()
+                temperature = temperature.toDouble()
             )
             
             val jsonBody = json.encodeToString(ChatRequest.serializer(), requestBody)
@@ -104,7 +90,7 @@ class GenericOpenAiClient(
 
             try {
                 client.newCall(request).execute().use { response ->
-                    val responseBody = response.body.string()
+                    val responseBody = response.body?.string()
 
                     if (!response.isSuccessful) {
                         throw AiProviderSupport.createException(
@@ -116,13 +102,22 @@ class GenericOpenAiClient(
                         )
                     }
 
-                    val chatResponse = json.decodeFromString<ChatResponse>(responseBody)
+                    val nonEmptyBody = responseBody
+                        ?: throw AiProviderSupport.createException(
+                            providerName = providerName,
+                            statusCode = response.code,
+                            transportMessage = "Empty response body",
+                            responseBody = null,
+                            requestedModel = resolvedModel
+                        )
+
+                    val chatResponse = json.decodeFromString<ChatResponse>(nonEmptyBody)
                     chatResponse.choices.firstOrNull()?.message?.content
                         ?: throw AiProviderSupport.createException(
                             providerName = providerName,
                             statusCode = response.code,
                             transportMessage = "Response had no content",
-                            responseBody = responseBody,
+                            responseBody = nonEmptyBody,
                             requestedModel = resolvedModel
                         )
                 }
@@ -152,9 +147,11 @@ class GenericOpenAiClient(
                     return@withContext listOf(defaultModelId)
                 }
                 
-                val responseBody = response.body.string()
+                val responseBody = response.body?.string() ?: return@withContext listOf(defaultModelId)
                 val modelsResponse = json.decodeFromString<ModelsResponse>(responseBody)
-                modelsResponse.data.map { it.id }.let { UnifiedModelFilter.filterChatModels(it) }
+                modelsResponse.data.map { it.id }.filter { 
+                    !it.contains("whisper") && !it.contains("embed") && !it.contains("tts")
+                }
             } catch (e: Exception) {
                 listOf(defaultModelId)
             }

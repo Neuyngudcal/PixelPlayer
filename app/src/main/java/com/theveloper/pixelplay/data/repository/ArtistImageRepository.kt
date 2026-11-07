@@ -7,7 +7,6 @@ import android.net.Uri
 import android.util.Log
 import android.util.LruCache
 import com.theveloper.pixelplay.data.database.MusicDao
-import com.theveloper.pixelplay.data.diagnostics.AdvancedPerformanceDiagnostics
 import com.theveloper.pixelplay.data.network.deezer.DeezerApiService
 import com.theveloper.pixelplay.utils.NetworkRetryUtils
 import com.theveloper.pixelplay.utils.isRetryableNetworkError
@@ -75,7 +74,7 @@ class ArtistImageRepository @Inject constructor(
     private val prefetchSemaphore = Semaphore(PREFETCH_CONCURRENCY)
     
     // Set to track artists for whom image fetching failed (e.g. not found), to avoid retrying in the same session
-    private val failedFetches = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+    private val failedFetches = mutableSetOf<String>()
 
     /**
      * Get artist image URL, fetching from Deezer if not cached.
@@ -105,11 +104,7 @@ class ArtistImageRepository @Inject constructor(
                 ?: musicDao.getArtistImageUrlByNormalizedName(artistName)
             canonicalArtistId to cachedUrl
         }
-        if (dbCachedUrl != null) {
-            if (dbCachedUrl.isEmpty()) {
-                // Verified previously that no artist image exists; do not make network calls
-                return null
-            }
+        if (!dbCachedUrl.isNullOrEmpty()) {
             val upgradedDbUrl = upgradeToHighResDeezerUrl(dbCachedUrl)
             memoryCache.put(normalizedName, upgradedDbUrl)
             if (upgradedDbUrl != dbCachedUrl) {
@@ -129,47 +124,28 @@ class ArtistImageRepository @Inject constructor(
      * Useful for batch loading when displaying artist lists.
      */
     suspend fun prefetchArtistImages(artists: List<Pair<Long, String>>) = withContext(Dispatchers.IO) {
-        val startedAt = if (AdvancedPerformanceDiagnostics.isEnabled) System.currentTimeMillis() else 0L
-        AdvancedPerformanceDiagnostics.recordEventIfEnabled(
-            type = AdvancedPerformanceDiagnostics.EventTypes.WORKER,
-            name = "artist_image_prefetch_start"
-        ) {
-            mapOf("artistCount" to artists.size.toString())
-        }
         // Process in small chunks to avoid creating hundreds of coroutines simultaneously.
         // Without this, a library with 500 artists creates 500 coroutine objects at once, all
         // suspended at the semaphore, exhausting the heap and triggering OOM in coroutine machinery.
-        try {
-            artists.chunked(PREFETCH_CONCURRENCY * 4).forEach { chunk ->
-                chunk.map { (artistId, artistName) ->
-                    async {
-                        try {
-                            val normalizedName = artistName.trim().lowercase()
-                            if (memoryCache.get(normalizedName) == null && !failedFetches.contains(normalizedName)) {
-                                prefetchSemaphore.withPermit {
-                                    getArtistImageUrl(artistName, artistId)
-                                }
-                            } else {
-                                Timber.tag(TAG).d("Skipping prefetch for $artistName") //check
+        artists.chunked(PREFETCH_CONCURRENCY * 4).forEach { chunk ->
+            chunk.map { (artistId, artistName) ->
+                async {
+                    try {
+                        val normalizedName = artistName.trim().lowercase()
+                        if (memoryCache.get(normalizedName) == null && !failedFetches.contains(normalizedName)) {
+                            prefetchSemaphore.withPermit {
+                                getArtistImageUrl(artistName, artistId)
                             }
-                        } catch (e: CancellationException) {
-                            throw e
-                        } catch (e: Exception) {
-                            Timber.tag(TAG).w("Failed to prefetch image for $artistName: ${e.message}")
+                        } else {
+                            Timber.tag(TAG).d("Skipping prefetch for $artistName") //check
                         }
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        Timber.tag(TAG).w("Failed to prefetch image for $artistName: ${e.message}")
                     }
-                }.awaitAll()
-            }
-        } finally {
-            AdvancedPerformanceDiagnostics.recordEventIfEnabled(
-                type = AdvancedPerformanceDiagnostics.EventTypes.WORKER,
-                name = "artist_image_prefetch_end"
-            ) {
-                mapOf(
-                    "artistCount" to artists.size.toString(),
-                    "durationMs" to (System.currentTimeMillis() - startedAt).toString()
-                )
-            }
+                }
+            }.awaitAll()
         }
     }
     
@@ -213,42 +189,12 @@ class ArtistImageRepository @Inject constructor(
                         Timber.tag(TAG).d("Fetched and cached image for $artistName: $imageUrl")
                         imageUrl
                     } else {
-                        failedFetches.add(normalizedName)
-                        musicDao.updateArtistImageUrl(artistId, "")
                         null
                     }
                 } else {
-                    // Try searching for the first/primary artist if name contains delimiters (e.g. "Charli xcx, Addison Rae")
-                    val primaryArtist = artistName.split(',', '/', ';', '&').firstOrNull()?.trim()
-                    val fallbackArtist = if (!primaryArtist.isNullOrBlank() && !primaryArtist.equals(artistName, ignoreCase = true)) {
-                        try {
-                            val fallbackResponse = withNetworkRetry("deezer_search:$primaryArtist") {
-                                deezerApiService.searchArtist(primaryArtist, limit = 1)
-                            }
-                            fallbackResponse.data.firstOrNull()
-                        } catch (e: Exception) {
-                            null
-                        }
-                    } else null
-
-                    val fallbackImageUrl = (
-                        fallbackArtist?.pictureXl
-                            ?: fallbackArtist?.pictureBig
-                            ?: fallbackArtist?.pictureMedium
-                            ?: fallbackArtist?.picture
-                    )?.let(::upgradeToHighResDeezerUrl)
-
-                    if (!fallbackImageUrl.isNullOrEmpty()) {
-                        memoryCache.put(normalizedName, fallbackImageUrl)
-                        musicDao.updateArtistImageUrl(artistId, fallbackImageUrl)
-                        Timber.tag(TAG).d("Fetched and cached image for $artistName via primary artist $primaryArtist: $fallbackImageUrl")
-                        fallbackImageUrl
-                    } else {
-                        Timber.tag(TAG).d("No Deezer artist found for: $artistName. Caching empty sentinel in DB.")
-                        failedFetches.add(normalizedName)
-                        musicDao.updateArtistImageUrl(artistId, "")
-                        null
-                    }
+                    Timber.tag(TAG).d("No Deezer artist found for: $artistName")
+                    failedFetches.add(normalizedName) // Mark as failed
+                    null
                 }
             }
         } catch (e: CancellationException) {

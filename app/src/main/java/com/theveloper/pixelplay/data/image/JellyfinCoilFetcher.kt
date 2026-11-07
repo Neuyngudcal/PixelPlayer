@@ -109,7 +109,8 @@ class JellyfinCoilFetcher(
                     return null
                 }
 
-                val bytes = response.body.bytes()
+                val body = response.body ?: return null
+                val bytes = body.bytes()
 
                 if (bytes.isEmpty()) {
                     Timber.w("$TAG: Empty response body for $url")

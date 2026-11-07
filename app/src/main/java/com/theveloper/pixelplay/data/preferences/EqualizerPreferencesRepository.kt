@@ -39,17 +39,17 @@ class EqualizerPreferencesRepository @Inject constructor(
         val PINNED_PRESETS = stringPreferencesKey("pinned_presets_json")
     }
 
-    val equalizerViewModeFlow: Flow<EqualizerViewMode> = dataStore.data.map { preferences ->
+    val equalizerViewModeFlow: Flow<UserPreferencesRepository.EqualizerViewMode> = dataStore.data.map { preferences ->
         val modeString = preferences[Keys.VIEW_MODE]
         if (modeString != null) {
             try {
-                EqualizerViewMode.valueOf(modeString)
+                UserPreferencesRepository.EqualizerViewMode.valueOf(modeString)
             } catch (_: Exception) {
-                EqualizerViewMode.SLIDERS
+                UserPreferencesRepository.EqualizerViewMode.SLIDERS
             }
         } else {
             val isGraph = preferences[booleanPreferencesKey("is_graph_view")] ?: false
-            if (isGraph) EqualizerViewMode.GRAPH else EqualizerViewMode.SLIDERS
+            if (isGraph) UserPreferencesRepository.EqualizerViewMode.GRAPH else UserPreferencesRepository.EqualizerViewMode.SLIDERS
         }
     }
 
@@ -141,7 +141,7 @@ class EqualizerPreferencesRepository @Inject constructor(
         }
     }
 
-    suspend fun setEqualizerViewMode(mode: EqualizerViewMode) =
+    suspend fun setEqualizerViewMode(mode: UserPreferencesRepository.EqualizerViewMode) =
         dataStore.edit { preferences ->
             preferences[Keys.VIEW_MODE] = mode.name
         }

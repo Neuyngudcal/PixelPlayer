@@ -1,7 +1,6 @@
 package com.theveloper.pixelplay.data.telegram
 
 import android.content.Context
-import com.theveloper.pixelplay.BuildConfig
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -109,12 +108,12 @@ class TelegramClientManager @Inject constructor(
                     true, // useChatInfoDatabase
                     true, // useMessageDatabase
                     false, // useSecretChats
-                    BuildConfig.TELEGRAM_API_ID,
-                    BuildConfig.TELEGRAM_API_HASH,
+                    2040, // apiId
+                    "b18441a1ff607e10a989891a5462e627", // apiHash
                     "en", // systemLanguageCode
-                    "PixelPlayer Instance", // deviceModel
+                    android.os.Build.MODEL, // deviceModel
                     android.os.Build.VERSION.RELEASE, // systemVersion
-                    BuildConfig.VERSION_NAME
+                    "1.0" // applicationVersion
                 ), defaultHandler)
             }
             is TdApi.AuthorizationStateWaitPhoneNumber -> {

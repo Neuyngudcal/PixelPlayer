@@ -30,33 +30,21 @@ internal fun LibraryPlaybackAwareSongItem(
     isSelected: Boolean = false,
     selectionIndex: Int? = null,
     isSelectionMode: Boolean = false,
-    useExternalPlaybackState: Boolean = false,
-    currentSongId: String? = null,
-    isPlaying: Boolean = false,
     onLongPress: () -> Unit = {},
     onMoreOptionsClick: (Song) -> Unit,
     onClick: () -> Unit
 ) {
-    val playbackUiState = if (useExternalPlaybackState) {
-        val isCurrent = currentSongId == song.id
-        LibrarySongPlaybackUiState(
-            isCurrentSong = isCurrent,
-            isPlaying = isCurrent && isPlaying
-        )
-    } else {
-        val collectedState by remember(song.id, playerViewModel) {
-            playerViewModel.stablePlayerState
-                .map { state ->
-                    val isCurrentSong = state.currentSong?.id == song.id
-                    LibrarySongPlaybackUiState(
-                        isCurrentSong = isCurrentSong,
-                        isPlaying = isCurrentSong && state.isPlaying
-                    )
-                }
-                .distinctUntilChanged()
-        }.collectAsStateWithLifecycle(initialValue = LibrarySongPlaybackUiState())
-        collectedState
-    }
+    val playbackUiState by remember(song.id, playerViewModel) {
+        playerViewModel.stablePlayerState
+            .map { state ->
+                val isCurrentSong = state.currentSong?.id == song.id
+                LibrarySongPlaybackUiState(
+                    isCurrentSong = isCurrentSong,
+                    isPlaying = isCurrentSong && state.isPlaying
+                )
+            }
+            .distinctUntilChanged()
+    }.collectAsStateWithLifecycle(initialValue = LibrarySongPlaybackUiState())
 
     EnhancedSongListItem(
         song = song,

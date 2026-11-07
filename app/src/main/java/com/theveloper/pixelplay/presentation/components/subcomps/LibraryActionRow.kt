@@ -39,7 +39,6 @@ import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material.icons.rounded.FilterList
 import androidx.compose.material.icons.rounded.Cloud
 import androidx.compose.material.icons.rounded.Dataset
-import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.PhoneAndroid
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -174,12 +173,12 @@ fun LibraryActionRow(
                         val text = if (isPlaylistTab) {
                             stringResource(R.string.library_action_new)
                         } else {
-                            stringResource(R.string.common_shuffle)
+                            stringResource(R.string.shortcut_shuffle_short)
                         }
                         val contentDesc = if (isPlaylistTab) {
-                            stringResource(R.string.library_cd_create_new_playlist)
+                            stringResource(R.string.cd_create_new_playlist)
                         } else {
-                            stringResource(R.string.common_shuffle_play)
+                            stringResource(R.string.cd_shuffle_play)
                         }
 
                         Row(
@@ -205,7 +204,7 @@ fun LibraryActionRow(
                         visible = shouldShowImport,
                         enter = fadeIn() + expandHorizontally(
                             expandFrom = Alignment.Start,
-                            clip = false, // <— evita el 「corte」 durante la expansión
+                            clip = false, // <— evita el “corte” durante la expansión
                             animationSpec = spring(
                                 dampingRatio = Spring.DampingRatioMediumBouncy,
                                 stiffness = Spring.StiffnessLow
@@ -213,7 +212,7 @@ fun LibraryActionRow(
                         ),
                         exit = fadeOut() + shrinkHorizontally(
                             shrinkTowards = Alignment.Start,
-                            clip = false, // <— evita el 「corte」 durante la expansión
+                            clip = false, // <— evita el “corte” durante la expansión
                             animationSpec = spring(
                                 dampingRatio = Spring.DampingRatioNoBouncy,
                                 stiffness = Spring.StiffnessMedium
@@ -251,11 +250,11 @@ fun LibraryActionRow(
                                 ) {
                                     Icon(
                                         painter = painterResource(R.drawable.rounded_upload_file_24),
-                                        contentDescription = stringResource(R.string.library_cd_import_m3u_playlist),
+                                        contentDescription = stringResource(R.string.cd_import_m3u_playlist),
                                         modifier = Modifier.size(20.dp)
                                     )
                                     Text(
-                                        text = stringResource(R.string.common_import),
+                                        text = stringResource(R.string.import_file),
                                         overflow = TextOverflow.Ellipsis,
                                         style = MaterialTheme.typography.labelLarge,
                                         fontWeight = FontWeight.Medium
@@ -327,7 +326,7 @@ fun LibraryActionRow(
                     ) {
                         Icon(
                             imageVector = Icons.Rounded.MyLocation,
-                            contentDescription = stringResource(R.string.library_cd_locate_current_song)
+                            contentDescription = stringResource(R.string.cd_locate_current_song)
                         )
                     }
                 }
@@ -395,7 +394,7 @@ fun LibraryActionRow(
                 ) {
                     Icon(
                         imageVector = Icons.AutoMirrored.Rounded.Sort,
-                        contentDescription = stringResource(R.string.library_cd_sort_options),
+                        contentDescription = stringResource(R.string.cd_sort_options),
                     )
                 }
             }
@@ -452,11 +451,7 @@ fun Breadcrumbs(
             modifier = Modifier.size(36.dp),
             enabled = currentFolder != null
         ) {
-            val icon = if (currentFolder == null) Icons.Rounded.Home else Icons.AutoMirrored.Rounded.ArrowBack
-            Icon(
-                imageVector = icon,
-                contentDescription = stringResource(if (currentFolder == null) R.string.nav_bar_home else R.string.common_back)
-            )
+            Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = stringResource(R.string.auth_cd_back))
         }
         Spacer(Modifier.width(8.dp))
 

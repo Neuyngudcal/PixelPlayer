@@ -1,4 +1,3 @@
-@file:Suppress("DEPRECATION")
 package com.theveloper.pixelplay.data.gdrive
 
 import android.content.Context
@@ -16,7 +15,6 @@ import com.theveloper.pixelplay.data.database.SongEntity
 import com.theveloper.pixelplay.data.database.SourceType
 import com.theveloper.pixelplay.data.database.toSong
 import com.theveloper.pixelplay.data.model.Song
-import com.theveloper.pixelplay.data.stream.CloudMusicUtils
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -31,7 +29,6 @@ import kotlin.math.absoluteValue
 import javax.inject.Inject
 import javax.inject.Singleton
 
-@Suppress("DEPRECATION")
 @Singleton
 class GDriveRepository @Inject constructor(
     private val api: GDriveApiService,
@@ -527,8 +524,14 @@ class GDriveRepository @Inject constructor(
         )
     }
 
-    private fun parseArtistNames(rawArtist: String): List<String> =
-        CloudMusicUtils.parseArtistNames(rawArtist)
+    private fun parseArtistNames(rawArtist: String): List<String> {
+        if (rawArtist.isBlank()) return listOf("Unknown Artist")
+        val parsed = rawArtist.split(Regex("\\s*[,/&;+]\\s*"))
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .distinct()
+        return if (parsed.isEmpty()) listOf("Unknown Artist") else parsed
+    }
 
     private fun toUnifiedSongId(driveFileId: String): Long {
         return -(GDRIVE_SONG_ID_OFFSET + driveFileId.hashCode().toLong().absoluteValue)

@@ -77,7 +77,6 @@ import racra.compose.smooth_corner_rect_library.AbsoluteSmoothCornerShape
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.style.TextOverflow
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -94,8 +93,8 @@ fun ReorderPresetsSheet(
     if (showResetDialog) {
         AlertDialog(
             onDismissRequest = { showResetDialog = false },
-            title = { Text(stringResource(R.string.equalizer_reset_presets_title)) },
-            text = { Text(stringResource(R.string.equalizer_reset_presets_message)) },
+            title = { Text(stringResource(R.string.presentation_batch_e_reset_presets_title)) },
+            text = { Text(stringResource(R.string.presentation_batch_e_reset_presets_message)) },
             confirmButton = {
                 TextButton(
                     onClick = {
@@ -104,11 +103,11 @@ fun ReorderPresetsSheet(
                         onDismiss()
                     }
                 ) {
-                    Text(stringResource(R.string.common_reset), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(stringResource(R.string.cd_reset))
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showResetDialog = false }) { Text(stringResource(R.string.common_cancel), maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                TextButton(onClick = { showResetDialog = false }) { Text(stringResource(R.string.cancel)) }
             }
         )
     }
@@ -180,7 +179,7 @@ fun ReorderPresetsSheet(
                             ),
                             title = {
                                 Text(
-                                    text = stringResource(R.string.equalizer_manage_presets_title),
+                                    text = stringResource(R.string.presentation_batch_e_manage_presets_title),
                                     fontFamily = GoogleSansRounded,
                                     style = MaterialTheme.typography.titleMedium.copy(
                                         fontSize = 22.sp,
@@ -200,7 +199,7 @@ fun ReorderPresetsSheet(
                                 ) {
                                     Icon(
                                         imageVector = Icons.Rounded.Close,
-                                        contentDescription = stringResource(R.string.common_close)
+                                        contentDescription = stringResource(R.string.cd_close)
                                     )
                                 }
                             },
@@ -215,7 +214,7 @@ fun ReorderPresetsSheet(
                                 ) {
                                     Icon(
                                         painter = painterResource(R.drawable.outline_restart_alt_24),
-                                        contentDescription = stringResource(R.string.equalizer_cd_reset_presets_default)
+                                        contentDescription = stringResource(R.string.presentation_batch_e_cd_reset_presets_default)
                                     )
                                 }
                             }
@@ -238,11 +237,11 @@ fun ReorderPresetsSheet(
                         ) {
                             Icon(
                                 imageVector = Icons.Rounded.Check,
-                                contentDescription = stringResource(R.string.common_done),
+                                contentDescription = stringResource(R.string.action_done),
                                 tint = MaterialTheme.colorScheme.onPrimaryContainer
                             )
                             Spacer(modifier = Modifier.width(10.dp))
-                            Text(text = stringResource(R.string.common_done))
+                            Text(text = stringResource(R.string.action_done))
                         }
                     },
                     containerColor = MaterialTheme.colorScheme.surfaceContainerLow
@@ -256,7 +255,7 @@ fun ReorderPresetsSheet(
                         ) {
                             // Description
                             Text(
-                                text = stringResource(R.string.equalizer_presets_drag_hint),
+                                text = stringResource(R.string.presentation_batch_e_presets_drag_hint),
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.padding(horizontal = 18.dp)
@@ -334,7 +333,7 @@ fun ReorderPresetsSheet(
                                                 ) {
                                                     Icon(
                                                         imageVector = Icons.Rounded.DragIndicator,
-                                                        contentDescription = stringResource(R.string.equalizer_cd_reorder),
+                                                        contentDescription = stringResource(R.string.presentation_batch_b_reorder),
                                                         modifier = if (item.isPinned) Modifier.draggableHandle() else Modifier,
                                                         tint = if (item.isPinned)
                                                             MaterialTheme.colorScheme.onSurfaceVariant
@@ -363,9 +362,9 @@ fun ReorderPresetsSheet(
                                                         else
                                                             Icons.Rounded.VisibilityOff,
                                                         contentDescription = if (item.isPinned) {
-                                                            stringResource(R.string.equalizer_cd_visible)
+                                                            stringResource(R.string.presentation_batch_e_cd_visible)
                                                         } else {
-                                                            stringResource(R.string.equalizer_cd_hidden)
+                                                            stringResource(R.string.presentation_batch_e_cd_hidden)
                                                         },
                                                         tint = if (item.isPinned)
                                                             MaterialTheme.colorScheme.primary

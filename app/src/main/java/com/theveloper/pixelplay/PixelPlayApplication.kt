@@ -14,7 +14,6 @@ import androidx.work.Configuration
 import coil.ImageLoader
 import coil.ImageLoaderFactory
 import com.theveloper.pixelplay.data.preferences.UserPreferencesRepository
-import com.theveloper.pixelplay.data.diagnostics.AdvancedPerformanceDiagnosticsController
 import com.theveloper.pixelplay.data.repository.ArtistImageRepository
 import com.theveloper.pixelplay.data.telegram.TelegramRepository
 import com.theveloper.pixelplay.presentation.viewmodel.LibraryStateHolder
@@ -69,27 +68,16 @@ class PixelPlayApplication : Application(), ImageLoaderFactory, Configuration.Pr
     @Inject
     lateinit var userPreferencesRepository: dagger.Lazy<UserPreferencesRepository>
 
-    @Inject
-    lateinit var advancedPerformanceDiagnosticsController: dagger.Lazy<AdvancedPerformanceDiagnosticsController>
-
     private val startupScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-
-    @Volatile
-    private var hasTrimmedLibraryMemory = false
 
     // AÑADE EL COMPANION OBJECT
     companion object {
         const val NOTIFICATION_CHANNEL_ID = "pixelplay_music_channel"
-        lateinit var instance: PixelPlayApplication
-            private set
     }
 
     private val appLifecycleObserver = object : DefaultLifecycleObserver {
         override fun onStart(owner: LifecycleOwner) {
-            if (hasTrimmedLibraryMemory) {
-                hasTrimmedLibraryMemory = false
-                libraryStateHolder.get().restoreAfterTrimIfNeeded()
-            }
+            libraryStateHolder.get().restoreAfterTrimIfNeeded()
         }
     }
 
@@ -98,7 +86,6 @@ class PixelPlayApplication : Application(), ImageLoaderFactory, Configuration.Pr
     }
 
     override fun onCreate() {
-        instance = this
         super.onCreate()
 
         // Benchmark variant intentionally restarts/kills app process during tests.
@@ -125,16 +112,8 @@ class PixelPlayApplication : Application(), ImageLoaderFactory, Configuration.Pr
         }
 
         ProcessLifecycleOwner.get().lifecycle.addObserver(appLifecycleObserver)
-        advancedPerformanceDiagnosticsController.get().start(startupScope)
 
         startupScope.launch {
-            // Pre-warm DataStore & Room singletons on IO thread so MainActivity doesn't block on cold start
-            runCatching {
-                val prefs = userPreferencesRepository.get()
-                prefs.initialSetupDoneFlow.first()
-                prefs.launchTabFlow.first()
-                libraryStateHolder.get()
-            }
             AlbumArtUtils.migrateLegacyCacheLocation(this@PixelPlayApplication)
             val savedLimit = runCatching {
                 userPreferencesRepository.get().albumArtCacheLimitMbFlow.first()
@@ -180,7 +159,6 @@ class PixelPlayApplication : Application(), ImageLoaderFactory, Configuration.Pr
             MediaMetadataRetrieverPool.clear()
         }
 
-        hasTrimmedLibraryMemory = true
         libraryStateHolder.get().trimMemory(level)
 
         if (

@@ -3,16 +3,13 @@ package com.theveloper.pixelplay.presentation.model
 import com.theveloper.pixelplay.data.model.Song
 import com.theveloper.pixelplay.data.stats.PlaybackStatsRepository
 import com.theveloper.pixelplay.data.stats.StatsTimeRange
-import android.os.Parcelable
-import kotlinx.parcelize.Parcelize
 import java.time.ZoneId
 import java.time.temporal.TemporalAdjusters
 
-@Parcelize
 data class RecentlyPlayedSongUiModel(
     val song: Song,
     val lastPlayedTimestamp: Long
-) : Parcelable
+)
 
 fun mapRecentlyPlayedSongs(
     playbackHistory: List<PlaybackStatsRepository.PlaybackHistoryEntry>,

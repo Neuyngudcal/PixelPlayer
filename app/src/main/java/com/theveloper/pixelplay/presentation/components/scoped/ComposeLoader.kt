@@ -13,8 +13,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
-import kotlinx.coroutines.flow.first
-import androidx.compose.runtime.snapshotFlow
 
 // ------------------------------------------------------------
 // 1) Phase loader: compose a subtree only after a threshold, then keep it alive
@@ -64,20 +62,11 @@ fun rememberSmoothProgress(
 
     val latestPositionProvider by rememberUpdatedState(newValue = currentPositionProvider)
     val latestIsPlayingProvider by rememberUpdatedState(newValue = isPlayingProvider)
-    // Read these inside the loop so the LaunchedEffect doesn't restart every time
-    // they change. With the previous keying scheme, crossing the expansion threshold
-    // (which flips `isVisible` at 0.01 and the playing sample rate at 0.995) would
-    // cancel and relaunch this coroutine mid-gesture — the new fresh coroutine
-    // immediately allocated a new Job + had to re-issue its first `sampleNow` and
-    // `delay`, which contributed to the post-interaction gesture lag.
-    val latestSampleWhilePlayingMs by rememberUpdatedState(sampleWhilePlayingMs)
-    val latestSampleWhilePausedMs by rememberUpdatedState(sampleWhilePausedMs)
-    val latestIsVisible by rememberUpdatedState(isVisible)
 
     val safeUpperBound = totalDuration.coerceAtLeast(0L)
     val safeDuration = totalDuration.coerceAtLeast(1L)
 
-    LaunchedEffect(totalDuration) {
+    LaunchedEffect(totalDuration, sampleWhilePlayingMs, sampleWhilePausedMs, isVisible) {
         fun sampleNow() {
             val rawPosition = latestPositionProvider()
             val clampedPosition = rawPosition.coerceIn(0L, safeUpperBound)
@@ -86,24 +75,11 @@ fun rememberSmoothProgress(
         }
 
         sampleNow()
+        if (!isVisible) return@LaunchedEffect
 
         while (isActive) {
-            val isVisible = latestIsVisible
             val isPlaying = latestIsPlayingProvider()
-
-            if (!isVisible || !isPlaying) {
-                val initialPos = latestPositionProvider()
-                snapshotFlow {
-                    latestIsVisible && (latestIsPlayingProvider() || latestPositionProvider() != initialPos)
-                }.first { it }
-
-                sampleNow()
-                if (!latestIsVisible || !latestIsPlayingProvider()) {
-                    continue
-                }
-            }
-
-            val delayMillis = latestSampleWhilePlayingMs
+            val delayMillis = if (isPlaying) sampleWhilePlayingMs else sampleWhilePausedMs
             delay(delayMillis.coerceAtLeast(1L))
             sampleNow()
         }
