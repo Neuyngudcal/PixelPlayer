@@ -1,5 +1,21 @@
 # IntelliJ IDEA / Android Studio
-.idea/
+# Shared project settings in .idea/ are committed so they sync across devices;
+# only per-machine state and caches stay ignored.
+.idea/workspace.xml
+.idea/tasks.xml
+.idea/usage.statistics.xml
+.idea/shelf/
+.idea/caches/
+.idea/libraries/
+.idea/modules.xml
+.idea/modules/
+.idea/gradle.xml
+.idea/deploymentTargetDropDown.xml
+.idea/deploymentTargetSelector.xml
+.idea/androidTestResultsUserPreferences.xml
+.idea/assetWizardSettings.xml
+.idea/navEditor.xml
+.idea/sonarlint/
 *.iml
 *.iws
 *.ipr
@@ -39,11 +55,9 @@ wear/release/
 shared/build/
 baselineprofile/build/
 
-misc.xml
-CLAUDE.md
-markdown.xml
-.vscode/
-.agents/
+# Editor / AI agent config (.vscode/, .agents/, .agent/, .claude/) is committed
+# so it syncs across devices. Only machine-local agent settings stay ignored.
+.claude/settings.local.json
 
 # Node/tooling dependencies and local env files
 **/node_modules/
