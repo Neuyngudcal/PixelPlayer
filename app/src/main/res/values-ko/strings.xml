@@ -1,7 +1,5 @@
 <resources>
     <string name="app_name">PixelPlayer</string>
-    <string name="app_name_change_title">앱 이름 변경</string>
-    <string name="app_name_change_message">상표권 관련 문제로 인해 앱 이름을 PixelPlayer에서 PixelPlayer로 변경했습니다. 계속해서 음악을 즐겨보세요!</string>
     <string name="do_not_show_again">다시 보지 않기</string>
     <string name="dismiss">닫기</string>
     <string name="all_files_access_title">특별 권한 필요</string>

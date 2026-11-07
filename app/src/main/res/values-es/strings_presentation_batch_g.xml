@@ -204,10 +204,7 @@ Backslash (\) can be used to escape character delimiters.</string>
     <string name="presentation_batch_g_artist_rescan_banner_body">Artist settings have changed. Rescan your library to apply.</string>
     <string name="presentation_batch_g_artist_rescan_scanning">Scanning…</string>
     <string name="presentation_batch_g_artist_rescan">Rescan</string>
-    <string name="presentation_batch_g_topbar_beta_letter">β</string>
-    <string name="presentation_batch_g_topbar_beta">Beta</string>
     <string name="presentation_batch_g_topbar_cd_telegram">Telegram</string>
-    <string name="presentation_batch_g_topbar_cd_changelog">Changelog</string>
     <string name="presentation_batch_g_topbar_cd_settings">Settings</string>
     <string name="presentation_batch_g_lyrics_mode_synced">Synced</string>
     <string name="presentation_batch_g_lyrics_mode_static">Static</string>
@@ -264,14 +261,6 @@ Backslash (\) can be used to escape character delimiters.</string>
     <string name="presentation_batch_g_lyrics_offset_zero">0s</string>
     <!-- Formatted with getString(..., floatSeconds) -->
     <string name="presentation_batch_g_lyrics_offset_seconds_fmt">%1$+.1fs</string>
-    <string name="presentation_batch_g_playstore_open">Open Play Store</string>
-    <string name="presentation_batch_g_playstore_continue_beta">Continue beta</string>
-    <string name="presentation_batch_g_playstore_link_pending">The Play Store link will be enabled from GitHub config.</string>
-    <string name="presentation_batch_g_playstore_title">PixelPlayer is now available on Google Play</string>
-    <string name="presentation_batch_g_playstore_body">Use the stable channel on Google Play for release updates while we keep beta builds active.</string>
-    <string name="presentation_batch_g_playstore_app_name">PixelPlayer</string>
-    <string name="presentation_batch_g_playstore_release_announcement">Release announcement</string>
-    <string name="presentation_batch_g_playstore_coming_soon">Coming soon</string>
     <string name="presentation_batch_g_genre_sort_title">Sort &amp; Play</string>
     <string name="presentation_batch_g_genre_sort_shuffle">Shuffle</string>
     <string name="presentation_batch_g_genre_sort_by">Sort By</string>
@@ -279,26 +268,12 @@ Backslash (\) can be used to escape character delimiters.</string>
     <string name="presentation_batch_g_genre_sort_album">Album</string>
     <string name="presentation_batch_g_genre_sort_title_opt">Title</string>
     <string name="presentation_batch_g_cd_selected">Selected</string>
-    <string name="presentation_batch_g_changelog_title">Changelog</string>
-    <string name="presentation_batch_g_changelog_view_github">View on GitHub</string>
     <string name="presentation_batch_g_presets_saved_title">Saved Presets</string>
     <string name="presentation_batch_g_presets_empty">No custom presets saved yet.</string>
     <string name="presentation_batch_g_presets_cd_unpin">Unpin</string>
     <string name="presentation_batch_g_presets_cd_pin">Pin</string>
     <string name="presentation_batch_g_presets_cd_rename">Rename</string>
     <string name="presentation_batch_g_presets_cd_delete">Delete</string>
-    <string name="presentation_batch_g_beta_sheet_version">Beta 0.6.0</string>
-    <string name="presentation_batch_g_beta_sheet_welcome_title">Welcome to PixelPlayer 0.6.0-beta</string>
-    <string name="presentation_batch_g_beta_sheet_welcome_body">This beta is now focused on stability, performance, and cross-device playback while shipping major new integrations.</string>
-    <string name="presentation_batch_g_beta_sheet_expect_title">What to expect</string>
-    <string name="presentation_batch_g_beta_sheet_expect_1">Faster daily use: smoother startup, navigation, and player interactions across the app.</string>
-    <string name="presentation_batch_g_beta_sheet_expect_2">Broader device support: Android Auto, Wear OS upgrades, and stronger Cast reliability.</string>
-    <string name="presentation_batch_g_beta_sheet_expect_3">Expanded cloud ecosystem: Telegram playlists, NetEase sync, QQ Music, and Google Drive streaming updates.</string>
-    <string name="presentation_batch_g_beta_sheet_expect_4">Large reliability pass: queue/shuffle logic, background playback behavior, and many UI fixes.</string>
-    <string name="presentation_batch_g_beta_sheet_report_title">Report an issue</string>
-    <string name="presentation_batch_g_beta_sheet_report_body">Share steps to reproduce, expected result, actual result, and your device/OS details. A short screen recording is very helpful.</string>
-    <string name="presentation_batch_g_beta_sheet_open_issues">Open GitHub issues</string>
-    <string name="presentation_batch_g_beta_sheet_report_bug">Report a bug</string>
     <string name="presentation_batch_g_beta05_title">Beta 0.5.0 upgrade</string>
     <string name="presentation_batch_g_beta05_clean_install_title">Clean install recommended</string>
     <string name="presentation_batch_g_beta05_clean_install_body">If you\'re coming from beta 0.5.0, this update may need fresh library data instead of older cached state.</string>
@@ -406,114 +381,4 @@ Backslash (\) can be used to escape character delimiters.</string>
     <string name="presentation_batch_g_cast_cd_disconnect_icon">Disconnect</string>
     <string name="presentation_batch_g_cast_connecting_ellipsis">Connecting...</string>
 
-    <string name="presentation_batch_g_changelog_sec_whats_new">What\'s New</string>
-    <string name="presentation_batch_g_changelog_sec_improvements">Improvements</string>
-    <string name="presentation_batch_g_changelog_sec_fixes">Fixes</string>
-    <string name="presentation_batch_g_changelog_sec_highlights">Highlights</string>
-    <string name="presentation_batch_g_changelog_sec_whats_new_lower">What\'s new</string>
-    <string name="presentation_batch_g_changelog_sec_added">Added</string>
-    <string name="presentation_batch_g_changelog_sec_changed">Changed</string>
-    <string name="presentation_batch_g_changelog_sec_fixed">Fixed</string>
-    <string-array name="presentation_batch_g_changelog_060_whats_new">
-        <item>Android Auto support is now available for in-car playback.</item>
-        <item>Wear OS support is live, including better watch-to-phone playback controls.</item>
-        <item>Cloud integrations expanded with Telegram, NetEase, QQ Music, and Google Drive improvements.</item>
-        <item>Recently Played and persistent queue restoration keep your listening session ready.</item>
-        <item>Backup &amp; Restore v3 and account management tools are now included.</item>
-        <item>Lyrics got smarter with manual search fallback and storage improvements.</item>
-    </string-array>
-    <string-array name="presentation_batch_g_changelog_060_improvements">
-        <item>Big performance pass across startup, library, queue, and player interactions.</item>
-        <item>Player, Cast, Lyrics, Artist, and Genre surfaces were redesigned for smoother use.</item>
-        <item>Navigation and search flows are more reliable, with safer route handling.</item>
-        <item>Audio playback compatibility improved for more devices and formats.</item>
-        <item>Multi-selection workflows were expanded across songs, albums, and playlists.</item>
-    </string-array>
-    <string-array name="presentation_batch_g_changelog_060_fixes">
-        <item>Queue and shuffle behavior is now more stable and predictable.</item>
-        <item>Several background playback and casting edge cases were fixed.</item>
-        <item>Sleep Timer, Files tab navigation, and album artist crash issues were fixed.</item>
-        <item>Widget loading and service stability were improved to reduce overheating/memory issues.</item>
-        <item>General bug fixes and UI polish across the app.</item>
-    </string-array>
-    <string-array name="presentation_batch_g_changelog_050_highlights">
-        <item>Material 3 Expressive UI Update</item>
-        <item>10-band Equalizer &amp; Effects</item>
-        <item>New Library Sync Flow</item>
-        <item>AI Integration (Gemini Models)</item>
-        <item>M3U Playlist Import/Export</item>
-        <item>Deezer Artist Artwork Integration</item>
-        <item>Custom Playlist Covers</item>
-    </string-array>
-    <string-array name="presentation_batch_g_changelog_050_improvements">
-        <item>Settings Architecture Refactor</item>
-        <item>Queue &amp; Player Animations</item>
-        <item>Baseline Profiles &amp; Performance</item>
-        <item>Better Lyrics System with Sync Offset</item>
-    </string-array>
-    <string-array name="presentation_batch_g_changelog_050_fixes">
-        <item>Casting Stability Improvements</item>
-        <item>Player Sheet Stability</item>
-        <item>General Bug Fixes &amp; Cleanup</item>
-    </string-array>
-    <string-array name="presentation_batch_g_changelog_040_highlights">
-        <item>Major navigation redesign</item>
-        <item>New file explorer for choosing source directories</item>
-        <item>New Connectivity and casting functionalities</item>
-        <item>Seamless continuity between remote devices</item>
-        <item>Gapless transition between songs</item>
-        <item>Crossfade control</item>
-        <item>New Custom Transitions feature (only for playlists)</item>
-        <item>Keep playing after closed the app</item>
-        <item>UI Optimizations</item>
-        <item>Improved stats feature</item>
-        <item>Redesigned Queue control with more features</item>
-        <item>Improved different filetypes support for playing and metadata editing</item>
-        <item>Improved permission controller</item>
-        <item>Minor bug fixes</item>
-    </string-array>
-    <string-array name="presentation_batch_g_changelog_030_whats_new">
-        <item>Introduced a richer listening stats hub with deeper insights into your sessions.</item>
-        <item>Launched a floating quick player to instantly open and preview local files.</item>
-        <item>Added a folders tab with a tree-style navigator and playlist-ready view.</item>
-    </string-array>
-    <string-array name="presentation_batch_g_changelog_030_improvements">
-        <item>Refined the overall Material 3 UI for a cleaner and more cohesive experience.</item>
-        <item>Metadata editing now supports cover art change.</item>
-        <item>Smoothed out animations and transitions across the app for more fluid navigation.</item>
-        <item>Enhanced the artist screen layout with richer details and polish.</item>
-        <item>Upgraded DailyMix and YourMix generation with smarter, more diverse selections.</item>
-        <item>Strengthened the AI playlist generation.</item>
-        <item>Improved search relevance and presentation for faster discovery.</item>
-        <item>Expanded support for a broader range of audio file formats.</item>
-    </string-array>
-    <string-array name="presentation_batch_g_changelog_030_fixes">
-        <item>Resolved metadata quirks so song details stay accurate everywhere.</item>
-        <item>Restored notification shortcuts so they reliably jump back into playback.</item>
-    </string-array>
-    <string-array name="presentation_batch_g_changelog_020_added">
-        <item>Chromecast support for casting audio from your device.</item>
-        <item>In-app changelog to keep you updated on the latest features.</item>
-        <item>Support for .LRC files, both embedded and external.</item>
-        <item>Offline lyrics support.</item>
-        <item>Synchronized lyrics (synced with the song).</item>
-        <item>New screen to view the full queue.</item>
-        <item>Reorder and remove songs from the queue.</item>
-        <item>Mini-player gestures (swipe down to close).</item>
-        <item>Added more material animations.</item>
-        <item>New settings to customize the look and feel.</item>
-        <item>New settings to clear the cache.</item>
-    </string-array>
-    <string-array name="presentation_batch_g_changelog_020_changed">
-        <item>Complete redesign of the user interface.</item>
-        <item>Complete redesign of the player.</item>
-        <item>Performance improvements in the library.</item>
-        <item>Improved application startup speed.</item>
-        <item>The AI now provides better results.</item>
-    </string-array>
-    <string-array name="presentation_batch_g_changelog_020_fixed">
-        <item>Fixed various bugs in the tag editor.</item>
-        <item>Fixed a bug where the playback notification was not clearing.</item>
-        <item>Fixed several bugs that caused the app to crash.</item>
-    </string-array>
 </resources>

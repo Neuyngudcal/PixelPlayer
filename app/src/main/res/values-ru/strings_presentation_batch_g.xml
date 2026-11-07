@@ -204,10 +204,7 @@
     <string name="presentation_batch_g_artist_rescan_banner_body">Настройки артистов изменились. Пересканируйте фонотеку.</string>
     <string name="presentation_batch_g_artist_rescan_scanning">Сканирование…</string>
     <string name="presentation_batch_g_artist_rescan">Пересканировать</string>
-    <string name="presentation_batch_g_topbar_beta_letter">β</string>
-    <string name="presentation_batch_g_topbar_beta">Бета</string>
     <string name="presentation_batch_g_topbar_cd_telegram">Telegram</string>
-    <string name="presentation_batch_g_topbar_cd_changelog">Список изменений</string>
     <string name="presentation_batch_g_topbar_cd_settings">Настройки</string>
     <string name="presentation_batch_g_lyrics_mode_synced">Синхронно</string>
     <string name="presentation_batch_g_lyrics_mode_static">Текст</string>
@@ -264,14 +261,6 @@
     <string name="presentation_batch_g_lyrics_offset_zero">0с</string>
     <!-- Formatted with getString(..., floatSeconds) -->
     <string name="presentation_batch_g_lyrics_offset_seconds_fmt">%1$+.1fс</string>
-    <string name="presentation_batch_g_playstore_open">Открыть Play Store</string>
-    <string name="presentation_batch_g_playstore_continue_beta">Продолжить бету</string>
-    <string name="presentation_batch_g_playstore_link_pending">Ссылка на Play Store будет доступна из конфига GitHub.</string>
-    <string name="presentation_batch_g_playstore_title">PixelPlayer теперь в Google Play</string>
-    <string name="presentation_batch_g_playstore_body">Используйте стабильный канал в Google Play для обновлений релиза, пока бета-версии остаются активными.</string>
-    <string name="presentation_batch_g_playstore_app_name">PixelPlayer</string>
-    <string name="presentation_batch_g_playstore_release_announcement">Анонс релиза</string>
-    <string name="presentation_batch_g_playstore_coming_soon">Скоро</string>
     <string name="presentation_batch_g_genre_sort_title">Сортировка и игра</string>
     <string name="presentation_batch_g_genre_sort_shuffle">Перемешать</string>
     <string name="presentation_batch_g_genre_sort_by">Сорт. по</string>
@@ -279,26 +268,12 @@
     <string name="presentation_batch_g_genre_sort_album">Альбому</string>
     <string name="presentation_batch_g_genre_sort_title_opt">Названию</string>
     <string name="presentation_batch_g_cd_selected">Выбрано</string>
-    <string name="presentation_batch_g_changelog_title">Список изменений</string>
-    <string name="presentation_batch_g_changelog_view_github">На GitHub</string>
     <string name="presentation_batch_g_presets_saved_title">Сохраненные пресеты</string>
     <string name="presentation_batch_g_presets_empty">Своих пресетов пока нет.</string>
     <string name="presentation_batch_g_presets_cd_unpin">Открепить</string>
     <string name="presentation_batch_g_presets_cd_pin">Закрепить</string>
     <string name="presentation_batch_g_presets_cd_rename">Переименовать</string>
     <string name="presentation_batch_g_presets_cd_delete">Удалить</string>
-    <string name="presentation_batch_g_beta_sheet_version">Бета 0.6.0</string>
-    <string name="presentation_batch_g_beta_sheet_welcome_title">Добро пожаловать в PixelPlayer 0.6.0-beta</string>
-    <string name="presentation_batch_g_beta_sheet_welcome_body">Эта бета сфокусирована на стабильности, скорости и кросс-девайс воспроизведении.</string>
-    <string name="presentation_batch_g_beta_sheet_expect_title">Что нового</string>
-    <string name="presentation_batch_g_beta_sheet_expect_1">Быстрая работа: плавный запуск, навигация и работа плеера.</string>
-    <string name="presentation_batch_g_beta_sheet_expect_2">Поддержка устройств: Android Auto, обновления Wear OS и надежный Cast.</string>
-    <string name="presentation_batch_g_beta_sheet_expect_3">Облака: Telegram, NetEase, QQ Music и стриминг Google Drive.</string>
-    <string name="presentation_batch_g_beta_sheet_expect_4">Стабильность: логика очереди и перемешивания, фоновая работа и фиксы UI.</string>
-    <string name="presentation_batch_g_beta_sheet_report_title">Сообщить о проблеме</string>
-    <string name="presentation_batch_g_beta_sheet_report_body">Опишите шаги, результат и детали вашего устройства. Запись экрана очень поможет.</string>
-    <string name="presentation_batch_g_beta_sheet_open_issues">Список проблем на GitHub</string>
-    <string name="presentation_batch_g_beta_sheet_report_bug">Сообщить о баге</string>
     <string name="presentation_batch_g_beta05_title">Обновление Бета 0.5.0</string>
     <string name="presentation_batch_g_beta05_clean_install_title">Рекомендуется чистая установка</string>
     <string name="presentation_batch_g_beta05_clean_install_body">Если вы обновляетесь с 0.5.0, может потребоваться полная очистка данных фонотеки.</string>
@@ -406,34 +381,4 @@
     <string name="presentation_batch_g_cast_cd_disconnect_icon">Отключить</string>
     <string name="presentation_batch_g_cast_connecting_ellipsis">Подключение...</string>
 
-    <string name="presentation_batch_g_changelog_sec_whats_new">Что нового</string>
-    <string name="presentation_batch_g_changelog_sec_improvements">Улучшения</string>
-    <string name="presentation_batch_g_changelog_sec_fixes">Исправления</string>
-    <string name="presentation_batch_g_changelog_sec_highlights">Главное</string>
-    <string name="presentation_batch_g_changelog_sec_whats_new_lower">Что нового</string>
-    <string name="presentation_batch_g_changelog_sec_added">Добавлено</string>
-    <string name="presentation_batch_g_changelog_sec_changed">Изменено</string>
-    <string name="presentation_batch_g_changelog_sec_fixed">Исправлено</string>
-    <string-array name="presentation_batch_g_changelog_060_whats_new">
-        <item>Поддержка Android Auto для прослушивания в машине.</item>
-        <item>Поддержка Wear OS с улучшенным управлением с часов.</item>
-        <item>Расширение облаков: Telegram, NetEase, QQ Music и Google Drive.</item>
-        <item>История прослушивания и восстановление очереди.</item>
-        <item>Бэкап и восстановление v3 и управление аккаунтами.</item>
-        <item>Умные тексты с ручным поиском и улучшениями хранения.</item>
-    </string-array>
-    <string-array name="presentation_batch_g_changelog_060_improvements">
-        <item>Оптимизация запуска, фонотеки, очереди и плеера.</item>
-        <item>Редизайн экранов плеера, Cast, текстов, артистов и жанров.</item>
-        <item>Надежная навигация и поиск.</item>
-        <item>Улучшена совместимость форматов аудио.</item>
-        <item>Расширен мульти-выбор для песен, альбомов и плейлистов.</item>
-    </string-array>
-    <string-array name="presentation_batch_g_changelog_060_fixes">
-        <item>Стабильная работа очереди и перемешивания.</item>
-        <item>Исправлены ошибки фонового воспроизведения и Cast.</item>
-        <item>Поправлен таймер сна, навигация по папкам и вылеты альбомов.</item>
-        <item>Улучшена стабильность виджетов и сервисов.</item>
-        <item>Общие исправления и полировка UI.</item>
-    </string-array>
 </resources>

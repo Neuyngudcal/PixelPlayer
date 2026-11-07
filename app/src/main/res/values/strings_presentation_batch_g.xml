@@ -204,10 +204,7 @@ Backslash (\) can be used to escape character delimiters.</string>
     <string name="presentation_batch_g_artist_rescan_banner_body">Artist settings have changed. Rescan your library to apply.</string>
     <string name="presentation_batch_g_artist_rescan_scanning">Scanning…</string>
     <string name="presentation_batch_g_artist_rescan">Rescan</string>
-    <string name="presentation_batch_g_topbar_beta_letter">β</string>
-    <string name="presentation_batch_g_topbar_beta">Beta</string>
     <string name="presentation_batch_g_topbar_cd_telegram">Telegram</string>
-    <string name="presentation_batch_g_topbar_cd_changelog">Changelog</string>
     <string name="presentation_batch_g_topbar_cd_settings">Settings</string>
     <string name="presentation_batch_g_lyrics_mode_synced">Synced</string>
     <string name="presentation_batch_g_lyrics_mode_static">Static</string>
@@ -264,14 +261,6 @@ Backslash (\) can be used to escape character delimiters.</string>
     <string name="presentation_batch_g_lyrics_offset_zero">0s</string>
     <!-- Formatted with getString(..., floatSeconds) -->
     <string name="presentation_batch_g_lyrics_offset_seconds_fmt">%1$+.1fs</string>
-    <string name="presentation_batch_g_playstore_open">Open Play Store</string>
-    <string name="presentation_batch_g_playstore_continue_beta">Continue beta</string>
-    <string name="presentation_batch_g_playstore_link_pending">The Play Store link will be enabled from GitHub config.</string>
-    <string name="presentation_batch_g_playstore_title">PixelPlayer is now available on Google Play</string>
-    <string name="presentation_batch_g_playstore_body">Use the stable channel on Google Play for release updates while we keep beta builds active.</string>
-    <string name="presentation_batch_g_playstore_app_name">PixelPlayer</string>
-    <string name="presentation_batch_g_playstore_release_announcement">Release announcement</string>
-    <string name="presentation_batch_g_playstore_coming_soon">Coming soon</string>
     <string name="presentation_batch_g_genre_sort_title">Sort &amp; Play</string>
     <string name="presentation_batch_g_genre_sort_shuffle">Shuffle</string>
     <string name="presentation_batch_g_genre_sort_by">Sort By</string>
@@ -279,79 +268,12 @@ Backslash (\) can be used to escape character delimiters.</string>
     <string name="presentation_batch_g_genre_sort_album">Album</string>
     <string name="presentation_batch_g_genre_sort_title_opt">Title</string>
     <string name="presentation_batch_g_cd_selected">Selected</string>
-    <string name="presentation_batch_g_changelog_title">Changelog</string>
-    <string name="presentation_batch_g_changelog_view_github">View on GitHub</string>
     <string name="presentation_batch_g_presets_saved_title">Saved Presets</string>
     <string name="presentation_batch_g_presets_empty">No custom presets saved yet.</string>
     <string name="presentation_batch_g_presets_cd_unpin">Unpin</string>
     <string name="presentation_batch_g_presets_cd_pin">Pin</string>
     <string name="presentation_batch_g_presets_cd_rename">Rename</string>
     <string name="presentation_batch_g_presets_cd_delete">Delete</string>
-    <string name="presentation_batch_g_beta_sheet_version">Beta 0.7.0</string>
-    <string name="presentation_batch_g_beta_sheet_welcome_title">Welcome to PixelPlayer 0.7.0-beta</string>
-    <string name="presentation_batch_g_beta_sheet_welcome_body">You\'re using a beta build that may contain bugs, crashes, or experimental features. Help us improve by reporting issues.</string>
-    <string name="presentation_batch_g_beta_sheet_expect_title">What to expect</string>
-    <string name="presentation_batch_g_beta_sheet_expect_1">Bugs, crashes, or incomplete features may occur unexpectedly.</string>
-    <string name="presentation_batch_g_beta_sheet_expect_2">Some features may change or be removed without notice.</string>
-    <string name="presentation_batch_g_beta_sheet_expect_3">Beta builds may be more unstable than release versions.</string>
-    <string name="presentation_batch_g_beta_sheet_expect_4">Always check for updates before reporting a known issue.</string>
-    <string name="presentation_batch_g_beta_sheet_expect_summary">What beta builds can change, break, or improve while testing.</string>
-    <string name="presentation_batch_g_beta_sheet_github_title">GitHub issue shortcut</string>
-    <string name="presentation_batch_g_beta_sheet_github_body">Search first, then open a focused report for bugs, crashes, requests, or questions.</string>
-    <string name="presentation_batch_g_beta_sheet_open_issues">Open existing issues</string>
-    <string name="presentation_batch_g_beta_sheet_report_bug">Report issue or crash</string>
-    <string name="presentation_batch_g_beta_sheet_report_title">How to report</string>
-    <string name="presentation_batch_g_beta_sheet_report_summary">A quick checklist before opening a new issue.</string>
-    <string name="presentation_batch_g_beta_sheet_before_title">Before opening an issue</string>
-    <string name="presentation_batch_g_beta_sheet_before_1">Search existing open and closed issues to avoid duplicates.</string>
-    <string name="presentation_batch_g_beta_sheet_before_2">Update to the latest PixelPlayer version and confirm the problem still happens.</string>
-    <string name="presentation_batch_g_beta_sheet_before_3">Restart the app and confirm the problem persists.</string>
-    <string name="presentation_batch_g_beta_sheet_before_4">Try to reproduce it and write down the exact steps.</string>
-    <string name="presentation_batch_g_beta_sheet_issue_type_title">Which issue type?</string>
-    <string name="presentation_batch_g_beta_sheet_issue_type_bug">Bug report: Something behaves incorrectly.</string>
-    <string name="presentation_batch_g_beta_sheet_issue_type_feature">Feature request: Add a new feature or improvement.</string>
-    <string name="presentation_batch_g_beta_sheet_issue_type_question">Question: Use Discussions if enabled, or open an issue with a question label.</string>
-    <string name="presentation_batch_g_beta_sheet_bug_title">Bug report</string>
-    <string name="presentation_batch_g_beta_sheet_bug_summary_text">Copy these fields when something behaves incorrectly or crashes.</string>
-    <string name="presentation_batch_g_beta_sheet_bug_template_title">Bug Report</string>
-    <string name="presentation_batch_g_beta_sheet_bug_summary">Short summary:</string>
-    <string name="presentation_batch_g_beta_sheet_bug_expected">Expected behavior:</string>
-    <string name="presentation_batch_g_beta_sheet_bug_actual">Current behavior:</string>
-    <string name="presentation_batch_g_beta_sheet_bug_steps">Steps to play/reproduce: 1. 2. 3.</string>
-    <string name="presentation_batch_g_beta_sheet_bug_frequency">How often does it happen? Always / Sometimes / Rarely.</string>
-    <string name="presentation_batch_g_beta_sheet_bug_screenshot">Screenshot / video: if available.</string>
-    <string name="presentation_batch_g_beta_sheet_bug_logs">Logs / stack trace: if available.</string>
-    <string name="presentation_batch_g_beta_sheet_env_title">Environment</string>
-    <string name="presentation_batch_g_beta_sheet_env_version">PixelPlayer version:</string>
-    <string name="presentation_batch_g_beta_sheet_env_source">Install source: GitHub Release, debug build, nightly build, etc.</string>
-    <string name="presentation_batch_g_beta_sheet_env_android">Android version:</string>
-    <string name="presentation_batch_g_beta_sheet_env_device">Device model:</string>
-    <string name="presentation_batch_g_beta_sheet_env_extra">Extra context: SD card usage, special settings, permissions, etc.</string>
-    <string name="presentation_batch_g_beta_sheet_feature_title">Feature request</string>
-    <string name="presentation_batch_g_beta_sheet_feature_summary">Copy these fields when you want a new feature or improvement.</string>
-    <string name="presentation_batch_g_beta_sheet_feature_problem">Problem statement: What problem are you trying to solve?</string>
-    <string name="presentation_batch_g_beta_sheet_feature_solution">Proposed solution: How should it work?</string>
-    <string name="presentation_batch_g_beta_sheet_feature_alternatives">Alternatives considered: Any other approaches?</string>
-    <string name="presentation_batch_g_beta_sheet_feature_scope">Scope: Which screens or flows are affected?</string>
-    <string name="presentation_batch_g_beta_sheet_feature_mockup">Mockup or reference image if available.</string>
-    <string name="presentation_batch_g_beta_sheet_quality_title">Titles, privacy, and scope</string>
-    <string name="presentation_batch_g_beta_sheet_quality_summary">Make the report easy to triage and safe to share.</string>
-    <string name="presentation_batch_g_beta_sheet_title_examples_title">Good issue titles</string>
-    <string name="presentation_batch_g_beta_sheet_title_example_1">Equalizer: Indicator shifts when switching preset tabs</string>
-    <string name="presentation_batch_g_beta_sheet_title_example_2">Search: History list does not appear for empty query</string>
-    <string name="presentation_batch_g_beta_sheet_title_example_3">Feature: Add \"Recently Added\" playlist sort option</string>
-    <string name="presentation_batch_g_beta_sheet_avoid_title">Please avoid</string>
-    <string name="presentation_batch_g_beta_sheet_avoid_1">Generic reports like \"It doesn\'t work\".</string>
-    <string name="presentation_batch_g_beta_sheet_avoid_2">Multiple unrelated problems in one issue.</string>
-    <string name="presentation_batch_g_beta_sheet_avoid_3">Unredacted logs or screenshots with private data.</string>
-    <string name="presentation_batch_g_beta_sheet_privacy_title">Privacy note</string>
-    <string name="presentation_batch_g_beta_sheet_privacy_body">Before posting logs, screenshots, or videos, remove personal or private information.</string>
-    <string name="presentation_batch_g_beta_sheet_nightly_title">Nightly builds</string>
-    <string name="presentation_batch_g_beta_sheet_nightly_summary">How nightlies differ from releases, and what to include when they break.</string>
-    <string name="presentation_batch_g_beta_sheet_nightly_body">Nightly builds are generated from the latest commit and may contain unfinished changes, temporary bugs, or regressions. They are more experimental than official releases.</string>
-    <string name="presentation_batch_g_beta_sheet_nightly_access">Access them from the repository\'s GitHub Actions workflow artifacts if available.</string>
-    <string name="presentation_batch_g_beta_sheet_nightly_report_title">Reporting nightly issues</string>
-    <string name="presentation_batch_g_beta_sheet_nightly_report_body">When reporting an issue from a nightly build, always mention that it happened on a nightly build, not on the official release. Include the build date, workflow run name or number, or commit SHA if possible. Also check if the same problem happens on the latest official release.</string>
     <string name="presentation_batch_g_beta05_title">Beta 0.5.0 upgrade</string>
     <string name="presentation_batch_g_beta05_clean_install_title">Clean install recommended</string>
     <string name="presentation_batch_g_beta05_clean_install_body">If you\'re coming from beta 0.5.0, this update may need fresh library data instead of older cached state.</string>
@@ -461,28 +383,4 @@ Backslash (\) can be used to escape character delimiters.</string>
     <string name="presentation_batch_g_cast_cd_disconnect_icon">Disconnect</string>
     <string name="presentation_batch_g_cast_connecting_ellipsis">Connecting...</string>
 
-    <string name="presentation_batch_g_changelog_sec_highlights">Highlights</string>
-    <string name="presentation_batch_g_changelog_sec_improvements">Improvements</string>
-    <string name="presentation_batch_g_changelog_sec_fixes">Fixes</string>
-    <string name="presentation_batch_g_changelog_sec_whats_new_lower">What\'s new</string>
-    <string name="presentation_batch_g_changelog_sec_added">Added</string>
-    <string name="presentation_batch_g_changelog_sec_changed">Changed</string>
-    <string name="presentation_batch_g_changelog_sec_fixed">Fixed</string>
-    <string-array name="presentation_batch_g_changelog_070_highlights">
-        <item>AI integration improvements and smarter playlist generation.</item>
-        <item>Enhanced listening stats with deeper insights and new visualizations.</item>
-        <item>Improved library sync flow across all cloud providers.</item>
-        <item>Better metadata editing with cover art support.</item>
-    </string-array>
-    <string-array name="presentation_batch_g_changelog_070_improvements">
-        <item>Performance improvements across startup, library, queue, and player interactions.</item>
-        <item>Refined Material 3 UI for a cleaner and more cohesive experience.</item>
-        <item>Smoother animations and transitions throughout the app.</item>
-        <item>Better search relevance and faster discovery.</item>
-    </string-array>
-    <string-array name="presentation_batch_g_changelog_070_fixes">
-        <item>Fixed queue and shuffle behavior for more stable playback.</item>
-        <item>Resolved background playback and notification issues.</item>
-        <item>General bug fixes and UI polish.</item>
-    </string-array>
 </resources>

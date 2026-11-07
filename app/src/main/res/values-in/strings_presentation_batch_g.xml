@@ -202,10 +202,7 @@
     <string name="presentation_batch_g_artist_rescan_banner_body">Pengaturan artis telah berubah. Pindai ulang pustaka Anda untuk menerapkannya.</string>
     <string name="presentation_batch_g_artist_rescan_scanning">Memindai…</string>
     <string name="presentation_batch_g_artist_rescan">Pindai Ulang</string>
-    <string name="presentation_batch_g_topbar_beta_letter">β</string>
-    <string name="presentation_batch_g_topbar_beta">Beta</string>
     <string name="presentation_batch_g_topbar_cd_telegram">Telegram</string>
-    <string name="presentation_batch_g_topbar_cd_changelog">Log Perubahan</string>
     <string name="presentation_batch_g_topbar_cd_settings">Pengaturan</string>
     <string name="presentation_batch_g_lyrics_mode_synced">Synced</string>
     <string name="presentation_batch_g_lyrics_mode_static">Statis</string>
@@ -262,14 +259,6 @@
     <string name="presentation_batch_g_lyrics_offset_zero">0 d</string>
     <!-- Formatted with getString(..., floatSeconds) -->
     <string name="presentation_batch_g_lyrics_offset_seconds_fmt">%1$+.1f d</string>
-    <string name="presentation_batch_g_playstore_open">Buka Play Store</string>
-    <string name="presentation_batch_g_playstore_continue_beta">Lanjutkan beta</string>
-    <string name="presentation_batch_g_playstore_link_pending">Tautan Play Store akan diaktifkan dari konfigurasi GitHub.</string>
-    <string name="presentation_batch_g_playstore_title">PixelPlayer kini tersedia di Google Play</string>
-    <string name="presentation_batch_g_playstore_body">Gunakan saluran stabil di Google Play untuk pembaruan rilis sementara kami tetap mengaktifkan build beta.</string>
-    <string name="presentation_batch_g_playstore_app_name">PixelPlayer</string>
-    <string name="presentation_batch_g_playstore_release_announcement">Pengumuman rilis</string>
-    <string name="presentation_batch_g_playstore_coming_soon">Segera hadir</string>
     <string name="presentation_batch_g_genre_sort_title">Urutkan &amp; Putar</string>
     <string name="presentation_batch_g_genre_sort_shuffle">Acak</string>
     <string name="presentation_batch_g_genre_sort_by">Urutkan Berdasarkan</string>
@@ -277,26 +266,12 @@
     <string name="presentation_batch_g_genre_sort_album">Album</string>
     <string name="presentation_batch_g_genre_sort_title_opt">Judul</string>
     <string name="presentation_batch_g_cd_selected">Terpilih</string>
-    <string name="presentation_batch_g_changelog_title">Log Perubahan</string>
-    <string name="presentation_batch_g_changelog_view_github">Lihat di GitHub</string>
     <string name="presentation_batch_g_presets_saved_title">Preset Tersimpan</string>
     <string name="presentation_batch_g_presets_empty">Belum ada preset kustom yang tersimpan.</string>
     <string name="presentation_batch_g_presets_cd_unpin">Lepas semat</string>
     <string name="presentation_batch_g_presets_cd_pin">Sematkan</string>
     <string name="presentation_batch_g_presets_cd_rename">Ubah nama</string>
     <string name="presentation_batch_g_presets_cd_delete">Hapus</string>
-    <string name="presentation_batch_g_beta_sheet_version">Beta 0.6.0</string>
-    <string name="presentation_batch_g_beta_sheet_welcome_title">Selamat datang di PixelPlayer 0.6.0-beta</string>
-    <string name="presentation_batch_g_beta_sheet_welcome_body">Beta ini sekarang difokuskan pada stabilitas, performa, dan pemutaran lintas perangkat sambil merilis integrasi baru yang besar.</string>
-    <string name="presentation_batch_g_beta_sheet_expect_title">Apa yang diharapkan</string>
-    <string name="presentation_batch_g_beta_sheet_expect_1">Penggunaan harian yang lebih cepat: startup, navigasi, dan interaksi pemutar yang lebih lancar di seluruh aplikasi.</string>
-    <string name="presentation_batch_g_beta_sheet_expect_2">Dukungan perangkat yang lebih luas: Android Auto, peningkatan Wear OS, dan keandalan Cast yang lebih kuat.</string>
-    <string name="presentation_batch_g_beta_sheet_expect_3">Ekosistem cloud yang diperluas: daftar putar Telegram, sinkronisasi NetEase, QQ Music, dan pembaruan streaming Google Drive.</string>
-    <string name="presentation_batch_g_beta_sheet_expect_4">Peningkatan keandalan besar-besaran: logika antrean/acak, perilaku pemutaran latar belakang, dan banyak perbaikan UI.</string>
-    <string name="presentation_batch_g_beta_sheet_report_title">Laporkan masalah</string>
-    <string name="presentation_batch_g_beta_sheet_report_body">Bagikan langkah-langkah untuk mereproduksi, hasil yang diharapkan, hasil aktual, dan detail perangkat/OS Anda. Rekaman layar singkat sangat membantu.</string>
-    <string name="presentation_batch_g_beta_sheet_open_issues">Buka issue GitHub</string>
-    <string name="presentation_batch_g_beta_sheet_report_bug">Laporkan bug</string>
     <string name="presentation_batch_g_beta05_title">Peningkatan Beta 0.5.0</string>
     <string name="presentation_batch_g_beta05_clean_install_title">Instal bersih direkomendasikan</string>
     <string name="presentation_batch_g_beta05_clean_install_body">Jika Anda datang dari beta 0.5.0, pembaruan ini mungkin memerlukan data pustaka baru alih-alih status cache lama.</string>
@@ -404,114 +379,4 @@
     <string name="presentation_batch_g_cast_cd_disconnect_icon">Putuskan</string>
     <string name="presentation_batch_g_cast_connecting_ellipsis">Menghubungkan...</string>
 
-    <string name="presentation_batch_g_changelog_sec_whats_new">Apa yang Baru</string>
-    <string name="presentation_batch_g_changelog_sec_improvements">Peningkatan</string>
-    <string name="presentation_batch_g_changelog_sec_fixes">Perbaikan</string>
-    <string name="presentation_batch_g_changelog_sec_highlights">Sorotan</string>
-    <string name="presentation_batch_g_changelog_sec_whats_new_lower">Apa yang baru</string>
-    <string name="presentation_batch_g_changelog_sec_added">Ditambahkan</string>
-    <string name="presentation_batch_g_changelog_sec_changed">Diubah</string>
-    <string name="presentation_batch_g_changelog_sec_fixed">Diperbaiki</string>
-    <string-array name="presentation_batch_g_changelog_060_whats_new">
-        <item>Dukungan Android Auto kini tersedia untuk pemutaran di dalam mobil.</item>
-        <item>Dukungan Wear OS telah hadir, termasuk kontrol pemutaran jam-ke-ponsel yang lebih baik.</item>
-        <item>Integrasi cloud diperluas dengan peningkatan Telegram, NetEase, QQ Music, dan Google Drive.</item>
-        <item>Baru-baru ini Diputar dan pemulihan antrean persisten menjaga sesi mendengarkan Anda tetap siap.</item>
-        <item>Cadangkan &amp; Pulihkan v3 dan alat manajemen akun kini disertakan.</item>
-        <item>Lirik menjadi lebih pintar dengan pencarian manual cadangan dan peningkatan penyimpanan.</item>
-    </string-array>
-    <string-array name="presentation_batch_g_changelog_060_improvements">
-        <item>Peningkatan performa besar-besaran pada startup, pustaka, antrean, dan interaksi pemutar.</item>
-        <item>Tampilan Pemutar, Cast, Lirik, Artis, dan Genre didesain ulang untuk penggunaan yang lebih lancar.</item>
-        <item>Alur navigasi dan pencarian lebih andal, dengan penanganan rute yang lebih aman.</item>
-        <item>Kompatibilitas pemutaran audio ditingkatkan untuk lebih banyak perangkat dan format.</item>
-        <item>Alur kerja multi-pilihan diperluas untuk lagu, album, dan daftar putar.</item>
-    </string-array>
-    <string-array name="presentation_batch_g_changelog_060_fixes">
-        <item>Perilaku antrean dan acak kini lebih stabil dan mudah diprediksi.</item>
-        <item>Beberapa kasus tepi pada pemutaran latar belakang dan casting telah diperbaiki.</item>
-        <item>Masalah pada Sleep Timer, navigasi tab File, dan crash pada artis album telah diperbaiki.</item>
-        <item>Pemuatan widget dan stabilitas layanan ditingkatkan untuk mengurangi masalah panas berlebih/memori.</item>
-        <item>Perbaikan bug umum dan penghalusan UI di seluruh aplikasi.</item>
-    </string-array>
-    <string-array name="presentation_batch_g_changelog_050_highlights">
-        <item>Pembaruan UI Material 3 Expressive</item>
-        <item>Equalizer 10-band &amp; Efek</item>
-        <item>Alur Sinkronisasi Pustaka Baru</item>
-        <item>Integrasi AI (Model Gemini)</item>
-        <item>Impor/Ekspor Daftar Putar M3U</item>
-        <item>Integrasi Sampul Artis Deezer</item>
-        <item>Sampul Daftar Putar Kustom</item>
-    </string-array>
-    <string-array name="presentation_batch_g_changelog_050_improvements">
-        <item>Refaktor Arsitektur Pengaturan</item>
-        <item>Animasi Antrean &amp; Pemutar</item>
-        <item>Profil Dasar &amp; Performa</item>
-        <item>Sistem Lirik Lebih Baik dengan Offset Sinkronisasi</item>
-    </string-array>
-    <string-array name="presentation_batch_g_changelog_050_fixes">
-        <item>Peningkatan Stabilitas Casting</item>
-        <item>Stabilitas Panel Pemutar</item>
-        <item>Perbaikan Bug Umum &amp; Pembersihan</item>
-    </string-array>
-    <string-array name="presentation_batch_g_changelog_040_highlights">
-        <item>Redesain navigasi utama</item>
-        <item>Penjelajah file baru untuk memilih direktori sumber</item>
-        <item>Fungsionalitas Konektivitas dan casting baru</item>
-        <item>Kontinuitas mulus antara perangkat jarak jauh</item>
-        <item>Transisi tanpa jeda antar lagu</item>
-        <item>Kontrol Crossfade</item>
-        <item>Fitur Transisi Kustom Baru (hanya untuk daftar putar)</item>
-        <item>Tetap putar setelah menutup aplikasi</item>
-        <item>Optimalisasi UI</item>
-        <item>Fitur statistik yang ditingkatkan</item>
-        <item>Kontrol Antrean yang didesain ulang dengan lebih banyak fitur</item>
-        <item>Peningkatan dukungan berbagai tipe file untuk pemutaran dan pengeditan metadata</item>
-        <item>Peningkatan pengontrol izin</item>
-        <item>Perbaikan bug minor</item>
-    </string-array>
-    <string-array name="presentation_batch_g_changelog_030_whats_new">
-        <item>Memperkenalkan hub statistik yang lebih kaya dengan wawasan lebih dalam tentang sesi Anda.</item>
-        <item>Meluncurkan pemutar cepat melayang untuk membuka dan melihat pratinjau file lokal secara instan.</item>
-        <item>Menambahkan tab folder dengan navigator gaya pohon dan tampilan siap-daftar-putar.</item>
-    </string-array>
-    <string-array name="presentation_batch_g_changelog_030_improvements">
-        <item>Menyempurnakan UI Material 3 secara keseluruhan untuk pengalaman yang lebih bersih dan kohesif.</item>
-        <item>Metadata editing now supports cover art change.</item>
-        <item>Menghaluskan animasi dan transisi di seluruh aplikasi untuk navigasi yang lebih cair.</item>
-        <item>Meningkatkan tata letak layar artis dengan detail dan polesan yang lebih kaya.</item>
-        <item>Meningkatkan pembuatan DailyMix dan YourMix dengan pilihan yang lebih pintar dan beragam.</item>
-        <item>Memperkuat pembuatan daftar putar AI.</item>
-        <item>Meningkatkan relevansi pencarian dan presentasi untuk penemuan yang lebih cepat.</item>
-        <item>Memperluas dukungan untuk rentang format file audio yang lebih luas.</item>
-    </string-array>
-    <string-array name="presentation_batch_g_changelog_030_fixes">
-        <item>Menyelesaikan masalah metadata sehingga detail lagu tetap akurat di mana saja.</item>
-        <item>Memulihkan pintasan notifikasi sehingga melompat kembali ke pemutaran dengan andal.</item>
-    </string-array>
-    <string-array name="presentation_batch_g_changelog_020_added">
-        <item>Dukungan Chromecast untuk melakukan cast audio dari perangkat Anda.</item>
-        <item>Log perubahan dalam aplikasi untuk membuat Anda tetap terinformasi tentang fitur terbaru.</item>
-        <item>Dukungan untuk file .LRC, baik yang tertanam maupun eksternal.</item>
-        <item>Dukungan lirik offline.</item>
-        <item>Lirik yang disinkronkan (sinkron dengan lagu).</item>
-        <item>Layar baru untuk melihat antrean lengkap.</item>
-        <item>Urutkan ulang dan hapus lagu dari antrean.</item>
-        <item>Gerakan mini-player (geser ke bawah untuk menutup).</item>
-        <item>Menambahkan lebih banyak animasi material.</item>
-        <item>Pengaturan baru untuk menyesuaikan tampilan dan nuansa.</item>
-        <item>Pengaturan baru untuk membersihkan cache.</item>
-    </string-array>
-    <string-array name="presentation_batch_g_changelog_020_changed">
-        <item>Redesain total antarmuka pengguna.</item>
-        <item>Redesain total pemutar.</item>
-        <item>Peningkatan performa di pustaka.</item>
-        <item>Peningkatan kecepatan startup aplikasi.</item>
-        <item>AI kini memberikan hasil yang lebih baik.</item>
-    </string-array>
-    <string-array name="presentation_batch_g_changelog_020_fixed">
-        <item>Memperbaiki berbagai bug di editor tag.</item>
-        <item>Memperbaiki bug di mana notifikasi pemutaran tidak bisa dihapus.</item>
-        <item>Memperbaiki beberapa bug yang menyebabkan aplikasi crash.</item>
-    </string-array>
 </resources>

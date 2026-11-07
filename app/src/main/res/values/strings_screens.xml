@@ -178,7 +178,6 @@
     <string name="no_genres_available">No genres available.</string>
 
     <!-- About -->
-    <string name="about_no_contributors">No contributors found right now. Please try again later.</string>
     <string name="about_app_name">PixelPlayer</string>
     <string name="about_tagline">Open source music player built with its community.</string>
     <string name="about_version_format">Version v%1$s</string>
@@ -186,15 +185,15 @@
     <string name="screen_about">About</string>
     <string name="about_maintainer_title">Maintainer</string>
     <string name="about_maintainer_subtitle">The person behind PixelPlayer.</string>
-    <string name="about_spotlight_title">Community spotlight</string>
-    <string name="about_spotlight_subtitle">Recognition for collaborators with major impact.</string>
-    <string name="about_contributors_section_title">Open source contributors</string>
-    <string name="about_contributors_section_subtitle">Live contributor list from GitHub.</string>
+    <string name="about_maintainer_role">Creator and maintainer</string>
+    <string name="about_maintainer_detail">Building PixelPlayer for everyday listening.</string>
+    <string name="about_credits_title">Open source credits</string>
+    <string name="about_credits_subtitle">Licenses and attribution.</string>
+    <string name="about_credits_body">Based on the open source PixelPlayer project (MIT License). Copyright © 2024–2026 Theo Vilardo and PixelPlayer contributors.</string>
     <string name="about_signal_open_source">Open source</string>
     <string name="about_signal_community_first">Community-first</string>
     <string name="about_signal_material3">Material 3 expressive</string>
     <string name="cd_open_github_profile">Open GitHub profile</string>
-    <string name="cd_open_telegram">Open Telegram</string>
     <string name="cd_contributor_avatar">Avatar of %1$s</string>
     <string name="cd_contributor_icon">Icon of %1$s</string>
 

@@ -175,7 +175,6 @@
     <string name="no_genres_available">Nessun genere disponibile.</string>
 
     <!-- About -->
-    <string name="about_no_contributors">Nessun contributore trovato al momento. Riprova più tardi.</string>
     <string name="about_app_name">PixelPlayer</string>
     <string name="about_tagline">Lettore musicale open source costruito con la sua community.</string>
     <string name="about_version_format">Versione v%1$s</string>
@@ -183,15 +182,10 @@
     <string name="screen_about">Informazioni</string>
     <string name="about_maintainer_title">Maintainer</string>
     <string name="about_maintainer_subtitle">La persona dietro PixelPlayer.</string>
-    <string name="about_spotlight_title">Riconoscimenti community</string>
-    <string name="about_spotlight_subtitle">Riconoscimento per i collaboratori con impatto maggiore.</string>
-    <string name="about_contributors_section_title">Contributori open source</string>
-    <string name="about_contributors_section_subtitle">Lista contributori live da GitHub.</string>
     <string name="about_signal_open_source">Open source</string>
     <string name="about_signal_community_first">Community-first</string>
     <string name="about_signal_material3">Material 3 expressive</string>
     <string name="cd_open_github_profile">Apri profilo GitHub</string>
-    <string name="cd_open_telegram">Apri Telegram</string>
     <string name="cd_contributor_avatar">Avatar di %1$s</string>
     <string name="cd_contributor_icon">Icona di %1$s</string>
 

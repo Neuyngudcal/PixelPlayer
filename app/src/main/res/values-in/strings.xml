@@ -1,7 +1,5 @@
 <resources>
     <string name="app_name">PixelPlayer</string>
-    <string name="app_name_change_title">Perubahan Nama Aplikasi</string>
-    <string name="app_name_change_message">Kami telah mengubah nama aplikasi kami dari PixelPlay menjadi PixelPlayer karena masalah terkait merek dagang. Teruslah mendengarkan!</string>
     <string name="do_not_show_again">Jangan tampilkan lagi</string>
     <string name="dismiss">Tutup</string>
     <string name="all_files_access_title">Izin Khusus Diperlukan</string>

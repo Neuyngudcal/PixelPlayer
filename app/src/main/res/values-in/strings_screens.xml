@@ -175,7 +175,6 @@
     <string name="no_genres_available">Tidak ada genre yang tersedia.</string>
 
     <!-- About -->
-    <string name="about_no_contributors">Tidak ditemukan kontributor saat ini. Silakan coba lagi nanti.</string>
     <string name="about_app_name">PixelPlayer</string>
     <string name="about_tagline">Pemutar musik open source yang dibangun bersama komunitasnya.</string>
     <string name="about_version_format">Versi v%1$s</string>
@@ -183,15 +182,10 @@
     <string name="screen_about">Tentang</string>
     <string name="about_maintainer_title">Pemelihara</string>
     <string name="about_maintainer_subtitle">Orang di balik PixelPlayer.</string>
-    <string name="about_spotlight_title">Sorotan komunitas</string>
-    <string name="about_spotlight_subtitle">Penghargaan untuk kolaborator dengan dampak besar.</string>
-    <string name="about_contributors_section_title">Kontributor open source</string>
-    <string name="about_contributors_section_subtitle">Daftar kontributor langsung dari GitHub.</string>
     <string name="about_signal_open_source">Open source</string>
     <string name="about_signal_community_first">Community-first</string>
     <string name="about_signal_material3">Material 3 expressive</string>
     <string name="cd_open_github_profile">Buka profil GitHub</string>
-    <string name="cd_open_telegram">Buka Telegram</string>
     <string name="cd_contributor_avatar">Avatar %1$s</string>
     <string name="cd_contributor_icon">Ikon %1$s</string>
 

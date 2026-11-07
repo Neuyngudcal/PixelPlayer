@@ -172,7 +172,6 @@
     <string name="browse_by_genre">Explorar por género</string>
     <string name="no_genres_available">No hay géneros disponibles.</string>
 
-    <string name="about_no_contributors">No hay colaboradores por ahora. Inténtalo más tarde.</string>
     <string name="about_app_name">PixelPlayer</string>
     <string name="about_tagline">Reproductor de música open source construido con su comunidad.</string>
     <string name="about_version_format">Versión v%1$s</string>
@@ -180,15 +179,10 @@
     <string name="screen_about">Acerca de</string>
     <string name="about_maintainer_title">Mantenedor</string>
     <string name="about_maintainer_subtitle">La persona detrás de PixelPlayer.</string>
-    <string name="about_spotlight_title">Destacados de la comunidad</string>
-    <string name="about_spotlight_subtitle">Reconocimiento a colaboradores con gran impacto.</string>
-    <string name="about_contributors_section_title">Colaboradores open source</string>
-    <string name="about_contributors_section_subtitle">Lista en vivo desde GitHub.</string>
     <string name="about_signal_open_source">Código abierto</string>
     <string name="about_signal_community_first">Comunidad primero</string>
     <string name="about_signal_material3">Material 3 expresivo</string>
     <string name="cd_open_github_profile">Abrir perfil de GitHub</string>
-    <string name="cd_open_telegram">Abrir Telegram</string>
     <string name="cd_contributor_avatar">Avatar de %1$s</string>
     <string name="cd_contributor_icon">Icono de %1$s</string>
 

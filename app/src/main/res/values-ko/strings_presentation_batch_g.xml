@@ -204,10 +204,7 @@
     <string name="presentation_batch_g_artist_rescan_banner_body">아티스트 설정이 변경되었습니다. 적용하려면 라이브러리를 다시 스캔하세요.</string>
     <string name="presentation_batch_g_artist_rescan_scanning">스캔 중…</string>
     <string name="presentation_batch_g_artist_rescan">재스캔</string>
-    <string name="presentation_batch_g_topbar_beta_letter">β</string>
-    <string name="presentation_batch_g_topbar_beta">베타</string>
     <string name="presentation_batch_g_topbar_cd_telegram">Telegram</string>
-    <string name="presentation_batch_g_topbar_cd_changelog">변경 사항</string>
     <string name="presentation_batch_g_topbar_cd_settings">설정</string>
     <string name="presentation_batch_g_lyrics_mode_synced">동기화됨</string>
     <string name="presentation_batch_g_lyrics_mode_static">정적</string>
@@ -264,14 +261,6 @@
     <string name="presentation_batch_g_lyrics_offset_zero">0초</string>
     <!-- Formatted with getString(..., floatSeconds) -->
     <string name="presentation_batch_g_lyrics_offset_seconds_fmt">%1$+.1f초</string>
-    <string name="presentation_batch_g_playstore_open">Play 스토어 열기</string>
-    <string name="presentation_batch_g_playstore_continue_beta">베타 계속하기</string>
-    <string name="presentation_batch_g_playstore_link_pending">Play 스토어 링크는 GitHub 설정을 통해 활성화됩니다.</string>
-    <string name="presentation_batch_g_playstore_title">PixelPlayer를 이제 Google Play에서 만나보세요</string>
-    <string name="presentation_batch_g_playstore_body">정식 업데이트는 Google Play의 정식 채널을 이용해 주시고, 베타 빌드는 계속 유지됩니다.</string>
-    <string name="presentation_batch_g_playstore_app_name">PixelPlayer</string>
-    <string name="presentation_batch_g_playstore_release_announcement">출시 공지</string>
-    <string name="presentation_batch_g_playstore_coming_soon">출시 예정</string>
     <string name="presentation_batch_g_genre_sort_title">정렬 및 재생</string>
     <string name="presentation_batch_g_genre_sort_shuffle">셔플</string>
     <string name="presentation_batch_g_genre_sort_by">정렬 기준</string>
@@ -279,26 +268,12 @@
     <string name="presentation_batch_g_genre_sort_album">앨범</string>
     <string name="presentation_batch_g_genre_sort_title_opt">제목</string>
     <string name="presentation_batch_g_cd_selected">선택됨</string>
-    <string name="presentation_batch_g_changelog_title">변경 사항</string>
-    <string name="presentation_batch_g_changelog_view_github">GitHub에서 보기</string>
     <string name="presentation_batch_g_presets_saved_title">저장된 프리셋</string>
     <string name="presentation_batch_g_presets_empty">저장된 사용자 지정 프리셋이 없습니다.</string>
     <string name="presentation_batch_g_presets_cd_unpin">고정 해제</string>
     <string name="presentation_batch_g_presets_cd_pin">고정</string>
     <string name="presentation_batch_g_presets_cd_rename">이름 변경</string>
     <string name="presentation_batch_g_presets_cd_delete">삭제</string>
-    <string name="presentation_batch_g_beta_sheet_version">베타 0.6.0</string>
-    <string name="presentation_batch_g_beta_sheet_welcome_title">PixelPlayer 0.6.0-beta에 오신 것을 환영합니다</string>
-    <string name="presentation_batch_g_beta_sheet_welcome_body">이번 베타 버전은 주요 새로운 연동 기능을 출시하는 동시에 안정성, 성능 및 기기간 재생 기능에 중점을 두었습니다.</string>
-    <string name="presentation_batch_g_beta_sheet_expect_title">주요 변경 사항</string>
-    <string name="presentation_batch_g_beta_sheet_expect_1">더 빠른 일상 사용: 앱 전반의 시작, 탐색 및 플레이어 상호작용이 더욱 부드러워졌습니다.</string>
-    <string name="presentation_batch_g_beta_sheet_expect_2">더 넓은 기기 지원: Android Auto 지원, Wear OS 업그레이드 및 Cast 안정성이 강화되었습니다.</string>
-    <string name="presentation_batch_g_beta_sheet_expect_3">클라우드 생태계 확장: Telegram 플레이리스트, NetEase 동기화, QQ Music 및 Google Drive 스트리밍 업데이트가 포함되었습니다.</string>
-    <string name="presentation_batch_g_beta_sheet_expect_4">신뢰성 대폭 개선: 대기열/셔플 로직, 백그라운드 재생 동작 및 다양한 UI 수정이 이루어졌습니다.</string>
-    <string name="presentation_batch_g_beta_sheet_report_title">문제 보고</string>
-    <string name="presentation_batch_g_beta_sheet_report_body">재현 단계, 예상 결과, 실제 결과 및 기기/OS 상세 정보를 공유해 주세요. 짧은 화면 녹화가 큰 도움이 됩니다.</string>
-    <string name="presentation_batch_g_beta_sheet_open_issues">GitHub 이슈 열기</string>
-    <string name="presentation_batch_g_beta_sheet_report_bug">버그 보고</string>
     <string name="presentation_batch_g_beta05_title">베타 0.5.0 업그레이드</string>
     <string name="presentation_batch_g_beta05_clean_install_title">재설정 권장</string>
     <string name="presentation_batch_g_beta05_clean_install_body">베타 0.5.0 버전에서 업데이트하는 경우, 이전 캐시 대신 라이브러리 데이터를 새로고침해야 할 수 있습니다.</string>
@@ -406,12 +381,4 @@
     <string name="presentation_batch_g_cast_cd_disconnect_icon">연결 해제</string>
     <string name="presentation_batch_g_cast_connecting_ellipsis">연결 중...</string>
 
-    <string name="presentation_batch_g_changelog_sec_whats_new">새로운 기능</string>
-    <string name="presentation_batch_g_changelog_sec_improvements">개선 사항</string>
-    <string name="presentation_batch_g_changelog_sec_fixes">수정 사항</string>
-    <string name="presentation_batch_g_changelog_sec_highlights">주요 기능</string>
-    <string name="presentation_batch_g_changelog_sec_whats_new_lower">새로운 기능</string>
-    <string name="presentation_batch_g_changelog_sec_added">추가됨</string>
-    <string name="presentation_batch_g_changelog_sec_changed">변경됨</string>
-    <string name="presentation_batch_g_changelog_sec_fixed">수정됨</string>
 </resources>
