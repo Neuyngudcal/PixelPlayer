@@ -27,5 +27,6 @@ của tài liệu chi tiết. Nếu file này mâu thuẫn với `AGENTS.md`, `A
   tương thích ngược.
 - Không đổi dependency/version, không refactor ngoài phạm vi task.
 - Kết thúc: chạy `scripts/check-standards.sh`; chạy Gradle nếu có SDK (`:app:assembleDebug`,
-  `:app:testDebugUnitTest`); báo cáo trung thực nếu không chạy được.
+  `:app:testDebugUnitTest`); báo cáo trung thực nếu không chạy được. PR vào `main` phải qua workflow
+  **PR Checks**; không merge khi CI đỏ.
 - Comment trong code bằng tiếng Anh; commit `type(scope): summary`.

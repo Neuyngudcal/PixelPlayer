@@ -126,6 +126,8 @@ app/src/main/java/com/theveloper/pixelplay/
       `./gradlew :app:assembleDebug` · `./gradlew :app:testDebugUnitTest` · (đụng `:shared`/`:wear`) `./gradlew :wear:assembleDebug`.
       Nếu không chạy được, nói rõ điều đó trong báo cáo — không khẳng định "đã build OK".
 - [ ] Tính năng/thay đổi đáng kể → thêm dòng vào `CHANGELOG.md` mục `## [Unreleased]` (Keep a Changelog).
+- [ ] PR vào `main` phải qua workflow **PR Checks** (`.github/workflows/pr-checks.yml`: standards + build phone/Wear
+      + unit test). Không merge khi CI đỏ; không tắt/skip test để CI xanh.
 
 ## 6. Git
 
