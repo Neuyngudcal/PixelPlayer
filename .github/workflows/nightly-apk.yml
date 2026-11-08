@@ -25,7 +25,7 @@ jobs:
       short-sha: ${{ steps.nightly-changes.outputs.short-sha }}
 
     steps:
-      - name: Check for new master changes
+      - name: Check for new main changes
         id: nightly-changes
         uses: actions/github-script@v9
         with:
@@ -52,7 +52,7 @@ jobs:
               owner,
               repo,
               workflow_id,
-              branch: 'master',
+              branch: 'main',
               status: 'success',
               per_page: 20,
             });
@@ -70,11 +70,11 @@ jobs:
             if (shouldBuild) {
               summary.addRaw(
                 previousSha
-                  ? `master moved from ${previousSha} to ${currentSha}. Building APKs.`
+                  ? `main moved from ${previousSha} to ${currentSha}. Building APKs.`
                   : `No previous successful nightly was found. Building APKs for ${currentSha}.`
               );
             } else {
-              summary.addRaw(`master is still at ${currentSha}. Skipping APK build.`);
+              summary.addRaw(`main is still at ${currentSha}. Skipping APK build.`);
             }
             await summary.write();
 
@@ -117,14 +117,13 @@ jobs:
           echo "keyPassword=994273" >> keystore.properties
 
       - name: Build Phone nightly release APKs
-        run: gradle :app:assembleRelease -Ppixelplay.enableAbiSplits=true
+        run: ./gradlew :app:assembleRelease -Ppixelplay.enableAbiSplits=true
 
       - name: Verify Phone nightly split APKs
         run: |
           BUILD_TOOLS_VERSION="$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -n 1)"
           for apk in \
-            app/build/outputs/apk/release/app-arm64-v8a-release.apk \
-            app/build/outputs/apk/release/app-armeabi-v7a-release.apk
+            app/build/outputs/apk/release/app-arm64-v8a-release.apk
           do
             "$ANDROID_HOME/build-tools/$BUILD_TOOLS_VERSION/aapt2" dump badging "$apk" >/dev/null
             "$ANDROID_HOME/build-tools/$BUILD_TOOLS_VERSION/apksigner" verify --verbose "$apk"
@@ -136,7 +135,6 @@ jobs:
           name: PixelPlay-phone-nightly-${{ needs.changes.outputs.short-sha }}
           path: |
             app/build/outputs/apk/release/app-arm64-v8a-release.apk
-            app/build/outputs/apk/release/app-armeabi-v7a-release.apk
           if-no-files-found: error
           compression-level: 0
           retention-days: 14
