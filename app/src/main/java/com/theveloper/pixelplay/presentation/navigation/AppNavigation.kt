@@ -4,9 +4,9 @@ import DelimiterConfigScreen
 import com.theveloper.pixelplay.presentation.screens.WordDelimiterConfigScreen
 import android.annotation.SuppressLint
 import androidx.annotation.OptIn
+import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
-import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -26,6 +26,7 @@ import com.theveloper.pixelplay.R
 import androidx.compose.ui.unit.IntOffset
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.media3.common.util.UnstableApi
+import androidx.navigation.NavBackStackEntry
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -96,34 +97,10 @@ fun AppNavigation(
         ) {
             composable(
                 Screen.Home.route,
-                enterTransition = {
-                    mainRootEnterTransition(
-                        fromRoute = initialState.destination.route,
-                        toRoute = targetState.destination.route,
-                        fallback = enterTransition()
-                    )
-                },
-                exitTransition = {
-                    mainRootExitTransition(
-                        fromRoute = initialState.destination.route,
-                        toRoute = targetState.destination.route,
-                        fallback = exitTransition()
-                    )
-                },
-                popEnterTransition = {
-                    mainRootEnterTransition(
-                        fromRoute = initialState.destination.route,
-                        toRoute = targetState.destination.route,
-                        fallback = popEnterTransition()
-                    )
-                },
-                popExitTransition = {
-                    mainRootExitTransition(
-                        fromRoute = initialState.destination.route,
-                        toRoute = targetState.destination.route,
-                        fallback = popExitTransition()
-                    )
-                },
+                enterTransition = { mainRootEnterTransition(fallback = aospSharedAxisEnter()) },
+                exitTransition = { mainRootExitTransition(fallback = aospSharedAxisExit()) },
+                popEnterTransition = { mainRootEnterTransition(fallback = aospSharedAxisPopEnter()) },
+                popExitTransition = { mainRootExitTransition(fallback = aospSharedAxisPopExit()) },
             ) {
                 ScreenWrapper(navController = navController, playerViewModel = playerViewModel, animatedVisibilityScope = this) {
                     HomeScreen(
@@ -136,34 +113,10 @@ fun AppNavigation(
             }
             composable(
                 Screen.Search.route,
-                enterTransition = {
-                    mainRootEnterTransition(
-                        fromRoute = initialState.destination.route,
-                        toRoute = targetState.destination.route,
-                        fallback = enterTransition()
-                    )
-                },
-                exitTransition = {
-                    mainRootExitTransition(
-                        fromRoute = initialState.destination.route,
-                        toRoute = targetState.destination.route,
-                        fallback = exitTransition()
-                    )
-                },
-                popEnterTransition = {
-                    mainRootEnterTransition(
-                        fromRoute = initialState.destination.route,
-                        toRoute = targetState.destination.route,
-                        fallback = popEnterTransition()
-                    )
-                },
-                popExitTransition = {
-                    mainRootExitTransition(
-                        fromRoute = initialState.destination.route,
-                        toRoute = targetState.destination.route,
-                        fallback = popExitTransition()
-                    )
-                },
+                enterTransition = { mainRootEnterTransition(fallback = aospSharedAxisEnter()) },
+                exitTransition = { mainRootExitTransition(fallback = aospSharedAxisExit()) },
+                popEnterTransition = { mainRootEnterTransition(fallback = aospSharedAxisPopEnter()) },
+                popExitTransition = { mainRootExitTransition(fallback = aospSharedAxisPopExit()) },
             ) {
                 ScreenWrapper(navController = navController, playerViewModel = playerViewModel, animatedVisibilityScope = this) {
                     SearchScreen(
@@ -176,34 +129,10 @@ fun AppNavigation(
             }
             composable(
                 Screen.Library.route,
-                enterTransition = {
-                    mainRootEnterTransition(
-                        fromRoute = initialState.destination.route,
-                        toRoute = targetState.destination.route,
-                        fallback = enterTransition()
-                    )
-                },
-                exitTransition = {
-                    mainRootExitTransition(
-                        fromRoute = initialState.destination.route,
-                        toRoute = targetState.destination.route,
-                        fallback = exitTransition()
-                    )
-                },
-                popEnterTransition = {
-                    mainRootEnterTransition(
-                        fromRoute = initialState.destination.route,
-                        toRoute = targetState.destination.route,
-                        fallback = popEnterTransition()
-                    )
-                },
-                popExitTransition = {
-                    mainRootExitTransition(
-                        fromRoute = initialState.destination.route,
-                        toRoute = targetState.destination.route,
-                        fallback = popExitTransition()
-                    )
-                },
+                enterTransition = { mainRootEnterTransition(fallback = aospSharedAxisEnter()) },
+                exitTransition = { mainRootExitTransition(fallback = aospSharedAxisExit()) },
+                popEnterTransition = { mainRootEnterTransition(fallback = aospSharedAxisPopEnter()) },
+                popExitTransition = { mainRootExitTransition(fallback = aospSharedAxisPopExit()) },
             ) {
                 ScreenWrapper(navController = navController, playerViewModel = playerViewModel, animatedVisibilityScope = this) {
                     LibraryScreen(navController = navController, playerViewModel = playerViewModel)
@@ -217,7 +146,7 @@ fun AppNavigation(
                         navController = navController,
                         playerViewModel = playerViewModel,
                         onNavigationIconClick = {
-                            navController.popBackStack()
+                            navController.popBackStackSafely()
                         }
                     )
                 }
@@ -233,7 +162,7 @@ fun AppNavigation(
                             categoryId = categoryId,
                             navController = navController,
                             playerViewModel = playerViewModel,
-                            onBackClick = { navController.popBackStack() }
+                            onBackClick = { navController.popBackStackSafely() }
                         )
                     }
                 }
@@ -244,7 +173,7 @@ fun AppNavigation(
                 ScreenWrapper(navController = navController, playerViewModel = playerViewModel, animatedVisibilityScope = this, wrapInTabletFloatingPane = true) {
                     PaletteStyleSettingsScreen(
                         playerViewModel = playerViewModel,
-                        onBackClick = { navController.popBackStack() }
+                        onBackClick = { navController.popBackStackSafely() }
                     )
                 }
             }
@@ -289,8 +218,8 @@ fun AppNavigation(
                             playlistId = playlistId,
                             playerViewModel = playerViewModel,
                             playlistViewModel = playlistViewModel,
-                            onBackClick = { navController.popBackStack() },
-                            onDeletePlayListClick = { navController.popBackStack() },
+                            onBackClick = { navController.popBackStackSafely() },
+                            onDeletePlayListClick = { navController.popBackStackSafely() },
                             navController = navController
                         )
                     }
@@ -369,7 +298,7 @@ fun AppNavigation(
                     AboutScreen(
                         navController = navController,
                         viewModel = playerViewModel,
-                        onNavigationIconClick = { navController.popBackStack() }
+                        onNavigationIconClick = { navController.popBackStackSafely() }
                     )
                 }
             }
@@ -378,7 +307,7 @@ fun AppNavigation(
             ) {
                 ScreenWrapper(navController = navController, playerViewModel = playerViewModel, animatedVisibilityScope = this, wrapInTabletFloatingPane = true) {
                     OpenSourceLicensesScreen(
-                        onBackClick = { navController.popBackStack() },
+                        onBackClick = { navController.popBackStackSafely() },
                     )
                 }
             }
@@ -437,17 +366,13 @@ private enum class MainRootDirection {
     BACKWARD
 }
 
-// Base duration for bottom-nav switches at 1x — at 0.5x system scale = ~190 ms.
-private const val BOTTOM_NAV_TRANSITION_DURATION = 380
-
-// MD3 Expressive easing for bottom-nav switches
-private val BottomNavEasing = CubicBezierEasing(0.2f, 0f, 0f, 1f)
-
+// Bottom-nav (Home / Search / Library) switches share the AOSP push duration and emphasized easing
+// so they stay in phase with ScreenWrapper's depth effects, which run on the same timeline.
 private val MAIN_ROOT_TRANSITION_SPEC =
-    tween<IntOffset>(durationMillis = BOTTOM_NAV_TRANSITION_DURATION, easing = BottomNavEasing)
+    tween<IntOffset>(durationMillis = AOSP_TRANSITION_DURATION, easing = M3EmphasizedEasing)
 
 private val MAIN_ROOT_FADE_SPEC =
-    tween<Float>(durationMillis = BOTTOM_NAV_TRANSITION_DURATION / 2, easing = BottomNavEasing)
+    tween<Float>(durationMillis = AOSP_TRANSITION_DURATION / 2, easing = M3EmphasizedEasing)
 
 private fun mainRootDirection(
     fromRoute: String?,
@@ -459,11 +384,11 @@ private fun mainRootDirection(
     return if (toIndex > fromIndex) MainRootDirection.FORWARD else MainRootDirection.BACKWARD
 }
 
-private fun mainRootEnterTransition(
-    fromRoute: String?,
-    toRoute: String?,
+private fun AnimatedContentTransitionScope<NavBackStackEntry>.mainRootEnterTransition(
     fallback: EnterTransition
-): EnterTransition = when (mainRootDirection(fromRoute, toRoute)) {
+): EnterTransition = when (
+    mainRootDirection(initialState.destination.route, targetState.destination.route)
+) {
     MainRootDirection.FORWARD -> {
         slideInHorizontally(
             animationSpec = MAIN_ROOT_TRANSITION_SPEC,
@@ -479,11 +404,11 @@ private fun mainRootEnterTransition(
     null -> fallback
 }
 
-private fun mainRootExitTransition(
-    fromRoute: String?,
-    toRoute: String?,
+private fun AnimatedContentTransitionScope<NavBackStackEntry>.mainRootExitTransition(
     fallback: ExitTransition
-): ExitTransition = when (mainRootDirection(fromRoute, toRoute)) {
+): ExitTransition = when (
+    mainRootDirection(initialState.destination.route, targetState.destination.route)
+) {
     MainRootDirection.FORWARD -> {
         slideOutHorizontally(
             animationSpec = MAIN_ROOT_TRANSITION_SPEC,

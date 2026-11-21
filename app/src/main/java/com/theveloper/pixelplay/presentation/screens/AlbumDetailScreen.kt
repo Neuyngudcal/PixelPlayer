@@ -2,6 +2,7 @@
 
 package com.theveloper.pixelplay.presentation.screens
 
+import com.theveloper.pixelplay.presentation.navigation.popBackStackSafely
 import com.theveloper.pixelplay.presentation.components.AdaptiveMediaDetailSplitLayout
 import com.theveloper.pixelplay.ui.theme.LocalPixelPlayWindowInfo
 import com.theveloper.pixelplay.ui.theme.LocalSpacing
@@ -350,7 +351,7 @@ fun AlbumDetailScreen(
                     AdaptiveMediaDetailSplitLayout(
                         title = album.title,
                         subtitle = "${album.artist} • ${songs.size}",
-                        onBackClick = { navController.popBackStack() },
+                        onBackClick = { navController.popBackStackSafely() },
                         onPlayClick = {
                             songs.firstOrNull()?.let { firstSong ->
                                 playerViewModel.showAndPlaySong(firstSong, songs)
@@ -459,7 +460,7 @@ fun AlbumDetailScreen(
                                             headerArtworkLoaded = true
                                         }
                                     },
-                                    onBackPressed = { navController.popBackStack() },
+                                    onBackPressed = { navController.popBackStackSafely() },
                                     onPlayClick = {
                                         if (songs.isNotEmpty()) {
                                             val randomSong = songs.random()
@@ -479,7 +480,7 @@ fun AlbumDetailScreen(
                                             headerArtworkLoaded = true
                                         }
                                     },
-                                    onBackPressed = { navController.popBackStack() },
+                                    onBackPressed = { navController.popBackStackSafely() },
                                     onPlayClick = {
                                         if (songs.isNotEmpty()) {
                                             val randomSong = songs.random()

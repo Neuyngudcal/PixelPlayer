@@ -1,6 +1,7 @@
 package com.theveloper.pixelplay
 
 import com.theveloper.pixelplay.presentation.navigation.navigateSafely
+import com.theveloper.pixelplay.presentation.navigation.navigateToTopLevelSafely
 
 // import androidx.compose.ui.platform.LocalView // No longer needed for this
 // import androidx.core.view.WindowInsetsCompat // No longer needed for this
@@ -774,9 +775,9 @@ class MainActivity : ComponentActivity() {
                 onDestinationSelected = { destination ->
                     scope.launch { drawerState.close() }
                     when (destination) {
-                        DrawerDestination.Home -> navController.navigateSafely(Screen.Home.route) {
-                            popUpTo(Screen.Home.route) { inclusive = true }
-                        }
+                        // Same top-level semantics as the bottom bar: keeps Home's saved state and
+                        // never stacks a second Home on top of Settings/Equalizer.
+                        DrawerDestination.Home -> navController.navigateToTopLevelSafely(Screen.Home.route)
                         DrawerDestination.Equalizer -> navController.navigateSafely(Screen.Equalizer.route)
                         DrawerDestination.Settings -> navController.navigateSafely(Screen.Settings.route)
                     }

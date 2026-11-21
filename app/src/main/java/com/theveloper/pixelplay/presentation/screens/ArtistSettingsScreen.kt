@@ -1,5 +1,6 @@
 package com.theveloper.pixelplay.presentation.screens
 
+import com.theveloper.pixelplay.presentation.navigation.popBackStackSafely
 import com.theveloper.pixelplay.presentation.navigation.navigateSafely
 
 import androidx.compose.animation.AnimatedVisibility
@@ -352,7 +353,7 @@ fun ArtistSettingsScreen(
                 title = stringResource(R.string.settings_artists_title),
                 collapseFraction = collapseFraction,
                 headerHeight = currentTopBarHeightDp,
-                onBackClick = { navController.popBackStack() },
+                onBackClick = { navController.popBackStackSafely() },
                 expandedTitleStartPadding = 20.dp
             )
         }

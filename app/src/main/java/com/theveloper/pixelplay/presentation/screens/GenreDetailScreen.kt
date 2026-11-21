@@ -1,5 +1,6 @@
 package com.theveloper.pixelplay.presentation.screens
 
+import com.theveloper.pixelplay.presentation.navigation.popBackStackSafely
 import com.theveloper.pixelplay.presentation.components.AdaptiveMediaDetailSplitLayout
 import com.theveloper.pixelplay.ui.theme.LocalPixelPlayWindowInfo
 import com.theveloper.pixelplay.ui.theme.LocalSpacing
@@ -398,7 +399,7 @@ fun GenreDetailScreen(
                 AdaptiveMediaDetailSplitLayout(
                     title = genreDisplayName,
                     subtitle = "${uiState.songs.size}",
-                    onBackClick = { navController.popBackStack() },
+                    onBackClick = { navController.popBackStackSafely() },
                     onPlayClick = {
                         uiState.sortedSongs.firstOrNull()?.let { firstSong ->
                             playerViewModel.showAndPlaySong(firstSong, uiState.sortedSongs, genreDisplayName)
@@ -509,7 +510,7 @@ fun GenreDetailScreen(
                             title = genreDisplayName,
                             collapseFraction = collapseFraction,
                             headerHeight = currentTopBarHeightDp,
-                            onBackPressed = { navController.popBackStack() },
+                            onBackPressed = { navController.popBackStackSafely() },
                             startColor = startColor,
                             contentColor = contentColor,
                             containerColor = MaterialTheme.colorScheme.surfaceContainer,

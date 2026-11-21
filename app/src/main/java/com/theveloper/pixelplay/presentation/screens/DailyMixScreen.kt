@@ -1,5 +1,6 @@
 package com.theveloper.pixelplay.presentation.screens
 
+import com.theveloper.pixelplay.presentation.navigation.popBackStackSafely
 import com.theveloper.pixelplay.presentation.navigation.navigateSafely
 
 import androidx.compose.foundation.background
@@ -379,7 +380,7 @@ fun DailyMixScreen(
         }
 
         FilledIconButton(
-            onClick = { navController.popBackStack() },
+            onClick = { navController.popBackStackSafely() },
             colors = IconButtonDefaults.filledIconButtonColors(
                 containerColor = MaterialTheme.colorScheme.surface,
                 contentColor = MaterialTheme.colorScheme.onSurface

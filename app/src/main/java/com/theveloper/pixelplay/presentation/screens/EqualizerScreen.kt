@@ -1,5 +1,6 @@
 package com.theveloper.pixelplay.presentation.screens
 
+import com.theveloper.pixelplay.presentation.navigation.popBackStackSafely
 import android.annotation.SuppressLint
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -454,7 +455,7 @@ fun EqualizerScreen(
                 title = stringResource(R.string.settings_category_equalizer_title),
                 collapseFraction = collapseFraction,
                 headerHeight = currentTopBarHeightDp,
-                onBackClick = { navController.popBackStack() },
+                onBackClick = { navController.popBackStackSafely() },
                 showBackButton = !windowInfo.useNavigationRail,
                 expandedTitleStartPadding = 20.dp,
                 collapsedTitleStartPadding = if (windowInfo.useNavigationRail) 20.dp else 72.dp,

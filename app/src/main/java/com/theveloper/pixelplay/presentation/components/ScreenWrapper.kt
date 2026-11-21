@@ -4,7 +4,6 @@ import androidx.annotation.OptIn
 import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.EnterExitState
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.animateFloat
@@ -26,7 +25,6 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.CompositingStrategy
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.draw.blur
@@ -34,11 +32,17 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.media3.common.util.UnstableApi
 import androidx.navigation.compose.currentBackStackEntryAsState
 import com.theveloper.pixelplay.presentation.viewmodel.PlayerViewModel
+import com.theveloper.pixelplay.presentation.navigation.AOSP_TRANSITION_DURATION
+import com.theveloper.pixelplay.presentation.navigation.M3EmphasizedEasing
 import com.theveloper.pixelplay.presentation.navigation.isMainRootRoute
 import com.theveloper.pixelplay.ui.theme.LocalPixelPlayWindowInfo
 import com.theveloper.pixelplay.ui.theme.PixelPlayStatusBarStyle
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.compose.currentStateAsState
 
+
+// Dim/blur ramp in late (accelerate) so the screen behind stays readable at the start of a push.
+private val DepthEffectEasing = CubicBezierEasing(0.5f, 0f, 0.8f, 0.2f)
 
 @OptIn(UnstableApi::class)
 @Composable
@@ -72,10 +76,8 @@ fun ScreenWrapper(
     // stack (navigate / pop commit) emits currentBackStackEntry, so reading these here is what
     // triggers recomposition; the synchronous navController properties below are then re-read
     // with frame-perfect values.
-    val visibleEntriesState by navController.visibleEntries.collectAsState()
+    val syncVisibleEntries by navController.visibleEntries.collectAsStateWithLifecycle()
     val currentBackStackEntryState by navController.currentBackStackEntryAsState()
-
-    val syncVisibleEntries = navController.visibleEntries.collectAsState().value.also { _ -> visibleEntriesState }
 
     val useNavigationRail = LocalPixelPlayWindowInfo.current.useNavigationRail
     val myEntry = lifecycleOwner as? androidx.navigation.NavBackStackEntry
@@ -115,7 +117,8 @@ fun ScreenWrapper(
     val targetRadius = if (shouldRunDepthEffects && !isResumed) 32f else 0f
     val animatedCornerRadius = if (transition != null) {
         val animatedValue by transition.animateFloat(
-            transitionSpec = { tween(durationMillis = 350, easing = FastOutSlowInEasing) },
+            // Same duration + easing as the AOSP slide/scale so the rounded corners never lag the motion.
+            transitionSpec = { tween(durationMillis = AOSP_TRANSITION_DURATION, easing = M3EmphasizedEasing) },
             label = "cornerRadius"
         ) { state ->
             if (shouldRunDepthEffects && (state == EnterExitState.PostExit || state == EnterExitState.PreEnter)) {
@@ -128,7 +131,7 @@ fun ScreenWrapper(
     } else {
         val fallbackCornerRadius = remember { Animatable(targetRadius) }
         LaunchedEffect(targetRadius) {
-            fallbackCornerRadius.animateTo(targetRadius, animationSpec = tween(durationMillis = 350, easing = FastOutSlowInEasing))
+            fallbackCornerRadius.animateTo(targetRadius, animationSpec = tween(durationMillis = AOSP_TRANSITION_DURATION, easing = M3EmphasizedEasing))
         }
         fallbackCornerRadius.value
     }
@@ -141,7 +144,7 @@ fun ScreenWrapper(
     }
     val animatedDimAlpha = if (transition != null) {
         val animatedValue by transition.animateFloat(
-            transitionSpec = { tween(durationMillis = 350, easing = CubicBezierEasing(0.5f, 0f, 0.8f, 0.2f)) },
+            transitionSpec = { tween(durationMillis = AOSP_TRANSITION_DURATION, easing = DepthEffectEasing) },
             label = "dimAlpha"
         ) { state ->
             if (shouldRunDepthEffects && shouldDim && (state == EnterExitState.PostExit || state == EnterExitState.PreEnter)) {
@@ -154,7 +157,7 @@ fun ScreenWrapper(
     } else {
         val fallbackDimAlpha = remember { Animatable(targetDim) }
         LaunchedEffect(targetDim) {
-            fallbackDimAlpha.animateTo(targetDim, animationSpec = tween(durationMillis = 350, easing = FastOutSlowInEasing))
+            fallbackDimAlpha.animateTo(targetDim, animationSpec = tween(durationMillis = AOSP_TRANSITION_DURATION, easing = DepthEffectEasing))
         }
         fallbackDimAlpha.value
     }
@@ -163,7 +166,7 @@ fun ScreenWrapper(
     val targetBlur = if (shouldRunDepthEffects && shouldDim && !disableBlurAllOver) 24f else 0f
     val animatedBlurRadius = if (transition != null) {
         val animatedValue by transition.animateDp(
-            transitionSpec = { tween(durationMillis = 350, easing = CubicBezierEasing(0.5f, 0f, 0.8f, 0.2f)) },
+            transitionSpec = { tween(durationMillis = AOSP_TRANSITION_DURATION, easing = DepthEffectEasing) },
             label = "blurRadius"
         ) { state ->
             if (shouldRunDepthEffects && shouldDim && !disableBlurAllOver && (state == EnterExitState.PostExit || state == EnterExitState.PreEnter)) {
@@ -176,10 +179,12 @@ fun ScreenWrapper(
     } else {
         val fallbackBlurRadius = remember { Animatable(targetBlur) }
         LaunchedEffect(targetBlur) {
-            fallbackBlurRadius.animateTo(targetBlur, animationSpec = tween(durationMillis = 350, easing = FastOutSlowInEasing))
+            fallbackBlurRadius.animateTo(targetBlur, animationSpec = tween(durationMillis = AOSP_TRANSITION_DURATION, easing = DepthEffectEasing))
         }
         fallbackBlurRadius.value.dp
     }
+
+    val scrimColor = MaterialTheme.colorScheme.scrim
 
     if (useNavigationRail) {
         PixelPlayStatusBarStyle(color = MaterialTheme.colorScheme.surfaceContainerLow)
@@ -230,7 +235,7 @@ fun ScreenWrapper(
             modifier = Modifier
                 .fillMaxSize()
                 .graphicsLayer { alpha = animatedDimAlpha }
-                .background(Color.Black)
+                .background(scrimColor)
         )
     }
 }

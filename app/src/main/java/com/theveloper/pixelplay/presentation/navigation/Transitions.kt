@@ -3,18 +3,19 @@ package com.theveloper.pixelplay.presentation.navigation
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.CubicBezierEasing
-import androidx.compose.animation.core.Easing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.ui.graphics.TransformOrigin
 
 // Curva Emphasized oficial de Material 3 (la que usan los Pixel contemporáneos)
 val M3EmphasizedEasing = CubicBezierEasing(0.2f, 0.0f, 0.0f, 1.0f)
+
+// MotionTokens.EasingEmphasizedAccelerateCubicBezier: arranca lento y acelera al salir. Durante el
+// gesto de predictive back la pantalla apenas se desplaza y, al confirmarse, sale por completo.
+val M3EmphasizedAccelerateEasing = CubicBezierEasing(0.3f, 0.0f, 0.8f, 0.15f)
 const val AOSP_TRANSITION_DURATION = 350
 
 // Equivale a sud_slide_next_in
@@ -54,65 +55,10 @@ fun aospSharedAxisPopExit(): ExitTransition {
         targetOffsetX = { it }, // Se desliza completamente fuera de la pantalla
         animationSpec = tween(
             durationMillis = AOSP_TRANSITION_DURATION,
-            easing = Easing { f -> f * f * f } // Durante el arrastre se desplaza muy poco, y al completarse se desliza por completo
+            easing = M3EmphasizedAccelerateEasing // Durante el arrastre se desplaza muy poco, y al completarse se desliza por completo
         )
     ) + scaleOut(
         targetScale = 0.85f, // Se achica más (efecto de profundidad más pronunciado)
         animationSpec = tween(durationMillis = AOSP_TRANSITION_DURATION, easing = M3EmphasizedEasing)
     )
 }
-
-// MD3 Expressive – Emphasized easing (matches Material Motion spec)
-// cubic-bezier(0.2, 0, 0, 1.0) — fast start, smooth settle
-private val EmphasizedEasing = CubicBezierEasing(0.2f, 0f, 0f, 1f)
-
-// Decelerate for elements entering the screen — mirror of EmphasizedAccelerateEasing
-// so the entry feels as weighty/grounded as the pop-exit
-private val EmphasizedDecelerateEasing = CubicBezierEasing(0.05f, 0.7f, 0.1f, 1.0f)
-
-// Accelerate for elements leaving the screen
-private val EmphasizedAccelerateEasing = CubicBezierEasing(0.3f, 0f, 0.8f, 0.15f)
-
-// MotionTokens.DurationLong1 = 450ms
-const val TRANSITION_DURATION = 450
-fun enterTransition() = slideInHorizontally(
-    animationSpec = tween(TRANSITION_DURATION, easing = EmphasizedDecelerateEasing),
-    initialOffsetX = { (it * 0.5f).toInt() }
-) + scaleIn(
-    animationSpec = tween(TRANSITION_DURATION, easing = EmphasizedDecelerateEasing),
-    initialScale = 0.92f,
-    transformOrigin = TransformOrigin(0.5f, 0.5f)
-) + fadeIn(
-    animationSpec = tween(TRANSITION_DURATION / 2, easing = EmphasizedDecelerateEasing)
-)
-
-// Push: Exit to Left — recedes 25% (parallax, barely moves)
-fun exitTransition() = slideOutHorizontally(
-    animationSpec = tween(TRANSITION_DURATION, easing = EmphasizedAccelerateEasing),
-    targetOffsetX = { -(it * 0.25f).toInt() }
-) + fadeOut(
-    animationSpec = tween(TRANSITION_DURATION / 2, easing = EmphasizedAccelerateEasing)
-)
-
-// Pop: Enter from Left — parallax slide-in 25% + subtle scale up
-fun popEnterTransition() = slideInHorizontally(
-    animationSpec = tween(TRANSITION_DURATION, easing = EmphasizedDecelerateEasing),
-    initialOffsetX = { -(it * 0.25f).toInt() }
-) + scaleIn(
-    animationSpec = tween(TRANSITION_DURATION, easing = EmphasizedDecelerateEasing),
-    initialScale = 0.95f
-) + fadeIn(
-    animationSpec = tween(TRANSITION_DURATION / 2, easing = EmphasizedDecelerateEasing)
-)
-
-// Pop: Exit to Right — slides out 50% + slight scale down
-fun popExitTransition() = slideOutHorizontally(
-    animationSpec = tween(TRANSITION_DURATION, easing = EmphasizedAccelerateEasing),
-    targetOffsetX = { (it * 0.5f).toInt() }
-) + scaleOut(
-    animationSpec = tween(TRANSITION_DURATION, easing = EmphasizedAccelerateEasing),
-    targetScale = 0.92f,
-    transformOrigin = TransformOrigin(0.5f, 0.5f)
-) + fadeOut(
-    animationSpec = tween(TRANSITION_DURATION / 2, easing = EmphasizedAccelerateEasing)
-)

@@ -1542,7 +1542,7 @@ fun SettingsCategoryScreen(
             // Block interaction during transition
             var isTransitioning by remember { mutableStateOf(true) }
             LaunchedEffect(Unit) {
-                kotlinx.coroutines.delay(com.theveloper.pixelplay.presentation.navigation.TRANSITION_DURATION.toLong())
+                kotlinx.coroutines.delay(com.theveloper.pixelplay.presentation.navigation.AOSP_TRANSITION_DURATION.toLong())
                 isTransitioning = false
             }
 
