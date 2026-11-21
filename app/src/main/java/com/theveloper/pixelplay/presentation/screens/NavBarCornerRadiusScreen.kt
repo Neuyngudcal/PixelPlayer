@@ -1,5 +1,6 @@
 package com.theveloper.pixelplay.presentation.screens
 
+import androidx.lifecycle.compose.dropUnlessResumed
 import com.theveloper.pixelplay.presentation.navigation.popBackStackSafely
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -85,7 +86,7 @@ fun NavBarCornerRadiusScreen(
     val uiState by settingsViewModel.uiState.collectAsStateWithLifecycle()
     val useSmoothCorners by settingsViewModel.useSmoothCorners.collectAsStateWithLifecycle()
     val isFullWidth = uiState.navBarStyle == NavBarStyle.FULL_WIDTH
-    val backAction: () -> Unit = onBackClick ?: { navController.popBackStackSafely() }
+    val backAction: () -> Unit = onBackClick ?: dropUnlessResumed { navController.popBackStackSafely() }
 
     NavBarCornerRadiusContent(
         initialRadius = uiState.navBarCornerRadius.toFloat(),

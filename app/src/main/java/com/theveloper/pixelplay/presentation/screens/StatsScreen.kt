@@ -2,6 +2,7 @@
 
 package com.theveloper.pixelplay.presentation.screens
 
+import androidx.lifecycle.compose.dropUnlessResumed
 import com.theveloper.pixelplay.presentation.navigation.popBackStackSafely
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
@@ -447,7 +448,7 @@ fun StatsScreen(
                         title = stringResource(R.string.stats_title),
                         collapseFraction = collapseFraction,
                         headerHeight = currentTopBarHeightDp,
-                        onBackClick = { navController.popBackStackSafely() },
+                        onBackClick = dropUnlessResumed { navController.popBackStackSafely() },
                         containerColor = Color.Transparent,
                         actions = {
                             FilledIconButton(

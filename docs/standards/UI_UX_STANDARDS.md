@@ -93,7 +93,13 @@
 
 - **Điều hướng màn hình:** chỉ dùng helper trong `presentation/navigation/Transitions.kt`
   (`aospSharedAxisEnter/Exit/PopEnter/PopExit`, `M3EmphasizedEasing`, `AOSP_TRANSITION_DURATION = 350`).
-  Không tự viết transition riêng cho từng route.
+  Không tự viết transition riêng cho từng route. Ngoại lệ duy nhất: đích top-level (Home/Search/Library;
+  trên navigation rail thêm Equalizer/Settings) dùng `mainRootEnter/Exit` trong `AppNavigation.kt`
+  — thêm đích top-level mới thì cập nhật `mainRootRouteIndex` trong `MainRootRoutes.kt`.
+- **Gọi điều hướng:** chỉ qua helper trong `NavControllerExtensions.kt` (`navigateSafely`,
+  `navigateSafelyReplacing`, `navigateToTopLevelSafely`, `popBackStackSafely`) — không gọi
+  `navController.navigate(...)`/`popBackStack()` trực tiếp. Nút Back trên toolbar bọc theo cách Google
+  khuyến nghị: `onBackClick = dropUnlessResumed { navController.popBackStackSafely() }`.
 - **Component:** ưu tiên spring / `MotionScheme.expressive()` (`fastSpatialSpec`, `defaultSpatialSpec`,
   `defaultEffectsSpec`). Dùng `tween` chỉ khi cần thời lượng xác định (fade, đồng bộ với nhạc).
   - Spatial (vị trí, kích thước, scale): spring có độ nảy nhẹ.

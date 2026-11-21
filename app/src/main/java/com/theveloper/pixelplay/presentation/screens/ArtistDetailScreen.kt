@@ -2,6 +2,7 @@
 
 package com.theveloper.pixelplay.presentation.screens
 
+import androidx.lifecycle.compose.dropUnlessResumed
 import com.theveloper.pixelplay.presentation.navigation.popBackStackSafely
 import com.theveloper.pixelplay.presentation.components.AdaptiveMediaDetailSplitLayout
 import com.theveloper.pixelplay.ui.theme.LocalPixelPlayWindowInfo
@@ -410,7 +411,7 @@ fun ArtistDetailScreen(
                         AdaptiveMediaDetailSplitLayout(
                             title = artist.name,
                             subtitle = "${albumSections.size} • ${songs.size}",
-                            onBackClick = { navController.popBackStackSafely() },
+                            onBackClick = dropUnlessResumed { navController.popBackStackSafely() },
                             onPlayClick = {
                                 songs.firstOrNull()?.let { firstSong ->
                                     playerViewModel.showAndPlaySong(firstSong, songs, artist.name)
@@ -527,7 +528,7 @@ fun ArtistDetailScreen(
                                         headerHeight = currentTopBarHeightDp,
                                         headerImageRequestSize = headerImageRequestSize,
                                         hasCustomImage = !artist.customImageUri.isNullOrBlank(),
-                                        onBackPressed = { navController.popBackStackSafely() },
+                                        onBackPressed = dropUnlessResumed { navController.popBackStackSafely() },
                                         onPlayClick = {
                                             if (songs.isNotEmpty()) {
                                                 playerViewModel.playSongsShuffled(
@@ -549,7 +550,7 @@ fun ArtistDetailScreen(
                                         collapseFraction = collapseFraction,
                                         headerHeight = currentTopBarHeightDp,
                                         headerImageRequestSize = headerImageRequestSize,
-                                        onBackPressed = { navController.popBackStackSafely() },
+                                        onBackPressed = dropUnlessResumed { navController.popBackStackSafely() },
                                         onPlayClick = {
                                             if (songs.isNotEmpty()) {
                                                 playerViewModel.playSongsShuffled(

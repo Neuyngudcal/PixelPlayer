@@ -1,3 +1,4 @@
+import androidx.lifecycle.compose.dropUnlessResumed
 import com.theveloper.pixelplay.presentation.navigation.popBackStackSafely
 import android.widget.Toast
 import androidx.compose.animation.core.Animatable
@@ -403,7 +404,7 @@ fun DelimiterConfigScreen(
                 title = stringResource(R.string.delimiters_screen_title),
                 collapseFraction = collapseFraction,
                 headerHeight = currentTopBarHeightDp,
-                onBackClick = { navController.popBackStackSafely() },
+                onBackClick = dropUnlessResumed { navController.popBackStackSafely() },
                 actions = {
                     Box(
                         modifier = Modifier

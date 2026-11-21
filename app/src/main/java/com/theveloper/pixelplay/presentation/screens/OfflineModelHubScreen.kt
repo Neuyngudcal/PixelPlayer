@@ -1,5 +1,6 @@
 package com.theveloper.pixelplay.presentation.screens
 
+import androidx.lifecycle.compose.dropUnlessResumed
 import com.theveloper.pixelplay.presentation.navigation.popBackStackSafely
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -329,7 +330,7 @@ fun OfflineModelHubScreen(
                 title = "Quản lý Mô hình AI Offline",
                 collapseFraction = collapseFraction,
                 headerHeight = currentTopBarHeightDp,
-                onBackClick = { navController.popBackStackSafely() },
+                onBackClick = dropUnlessResumed { navController.popBackStackSafely() },
                 expandedTitleStartPadding = 20.dp,
                 collapsedTitleStartPadding = 68.dp,
                 maxLines = 2

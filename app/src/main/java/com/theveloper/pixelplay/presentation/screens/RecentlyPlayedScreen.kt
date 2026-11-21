@@ -1,5 +1,6 @@
 package com.theveloper.pixelplay.presentation.screens
 
+import androidx.lifecycle.compose.dropUnlessResumed
 import com.theveloper.pixelplay.presentation.navigation.popBackStackSafely
 import com.theveloper.pixelplay.presentation.navigation.navigateSafely
 
@@ -362,7 +363,7 @@ fun RecentlyPlayedScreen(
         }
 
         FilledIconButton(
-            onClick = { navController.popBackStackSafely() },
+            onClick = dropUnlessResumed { navController.popBackStackSafely() },
             colors = IconButtonDefaults.filledIconButtonColors(
                 containerColor = MaterialTheme.colorScheme.surface,
                 contentColor = MaterialTheme.colorScheme.onSurface

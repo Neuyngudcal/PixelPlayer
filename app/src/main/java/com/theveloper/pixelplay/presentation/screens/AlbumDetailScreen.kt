@@ -2,6 +2,7 @@
 
 package com.theveloper.pixelplay.presentation.screens
 
+import androidx.lifecycle.compose.dropUnlessResumed
 import com.theveloper.pixelplay.presentation.navigation.popBackStackSafely
 import com.theveloper.pixelplay.presentation.components.AdaptiveMediaDetailSplitLayout
 import com.theveloper.pixelplay.ui.theme.LocalPixelPlayWindowInfo
@@ -351,7 +352,7 @@ fun AlbumDetailScreen(
                     AdaptiveMediaDetailSplitLayout(
                         title = album.title,
                         subtitle = "${album.artist} • ${songs.size}",
-                        onBackClick = { navController.popBackStackSafely() },
+                        onBackClick = dropUnlessResumed { navController.popBackStackSafely() },
                         onPlayClick = {
                             songs.firstOrNull()?.let { firstSong ->
                                 playerViewModel.showAndPlaySong(firstSong, songs)
@@ -460,7 +461,7 @@ fun AlbumDetailScreen(
                                             headerArtworkLoaded = true
                                         }
                                     },
-                                    onBackPressed = { navController.popBackStackSafely() },
+                                    onBackPressed = dropUnlessResumed { navController.popBackStackSafely() },
                                     onPlayClick = {
                                         if (songs.isNotEmpty()) {
                                             val randomSong = songs.random()
@@ -480,7 +481,7 @@ fun AlbumDetailScreen(
                                             headerArtworkLoaded = true
                                         }
                                     },
-                                    onBackPressed = { navController.popBackStackSafely() },
+                                    onBackPressed = dropUnlessResumed { navController.popBackStackSafely() },
                                     onPlayClick = {
                                         if (songs.isNotEmpty()) {
                                             val randomSong = songs.random()

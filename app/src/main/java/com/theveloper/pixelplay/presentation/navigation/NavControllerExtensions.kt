@@ -85,9 +85,12 @@ fun NavController.navigateToTopLevelSafely(route: String): Boolean {
 }
 
 /**
- * Back from a toolbar button. Ignored while a transition is still running (double tap would pop two
- * screens) and when there is nothing below the current entry (popping the start destination leaves
- * the NavHost empty, i.e. a blank screen).
+ * Back from a toolbar button. Never pops the start destination (that leaves the NavHost empty, i.e. a
+ * blank screen) and is ignored while a transition is still running (a double tap would pop two screens).
+ *
+ * In composables, wrap the click in Google's `dropUnlessResumed { navController.popBackStackSafely() }`
+ * so the tap is dropped against the screen's own entry lifecycle; the RESUMED check here also covers
+ * callers outside the NavHost (player sheet, effects).
  */
 fun NavController.popBackStackSafely(): Boolean {
     if (!isCurrentEntryAtLeast(Lifecycle.State.RESUMED)) return false

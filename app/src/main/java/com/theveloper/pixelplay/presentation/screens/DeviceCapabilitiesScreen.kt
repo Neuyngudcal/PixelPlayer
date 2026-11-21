@@ -1,5 +1,6 @@
 package com.theveloper.pixelplay.presentation.screens
 
+import androidx.lifecycle.compose.dropUnlessResumed
 import com.theveloper.pixelplay.presentation.navigation.popBackStackSafely
 import android.content.Intent
 import android.text.format.Formatter
@@ -219,7 +220,7 @@ fun DeviceCapabilitiesScreen(
                 title = stringResource(R.string.settings_category_device_capabilities_title),
                 collapseFraction = collapseFraction,
                 headerHeight = currentTopBarHeightDp,
-                onBackClick = { navController.popBackStackSafely() },
+                onBackClick = dropUnlessResumed { navController.popBackStackSafely() },
                 expandedTitleStartPadding = 20.dp,
                 collapsedTitleStartPadding = 68.dp,
                 maxLines = 2

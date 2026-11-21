@@ -1,5 +1,6 @@
 package com.theveloper.pixelplay.presentation.screens
 
+import androidx.lifecycle.compose.dropUnlessResumed
 import com.theveloper.pixelplay.presentation.navigation.popBackStackSafely
 import android.widget.Toast
 import androidx.compose.ui.res.stringResource
@@ -398,7 +399,7 @@ fun WordDelimiterConfigScreen(
                 title = stringResource(R.string.word_delimiters_screen_title),
                 collapseFraction = collapseFraction,
                 headerHeight = currentTopBarHeightDp,
-                onBackClick = { navController.popBackStackSafely() },
+                onBackClick = dropUnlessResumed { navController.popBackStackSafely() },
                 actions = {
                     Box(
                         modifier = Modifier

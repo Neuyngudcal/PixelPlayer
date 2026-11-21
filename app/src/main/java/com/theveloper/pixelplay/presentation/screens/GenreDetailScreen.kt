@@ -1,5 +1,6 @@
 package com.theveloper.pixelplay.presentation.screens
 
+import androidx.lifecycle.compose.dropUnlessResumed
 import com.theveloper.pixelplay.presentation.navigation.popBackStackSafely
 import com.theveloper.pixelplay.presentation.components.AdaptiveMediaDetailSplitLayout
 import com.theveloper.pixelplay.ui.theme.LocalPixelPlayWindowInfo
@@ -399,7 +400,7 @@ fun GenreDetailScreen(
                 AdaptiveMediaDetailSplitLayout(
                     title = genreDisplayName,
                     subtitle = "${uiState.songs.size}",
-                    onBackClick = { navController.popBackStackSafely() },
+                    onBackClick = dropUnlessResumed { navController.popBackStackSafely() },
                     onPlayClick = {
                         uiState.sortedSongs.firstOrNull()?.let { firstSong ->
                             playerViewModel.showAndPlaySong(firstSong, uiState.sortedSongs, genreDisplayName)
@@ -510,7 +511,7 @@ fun GenreDetailScreen(
                             title = genreDisplayName,
                             collapseFraction = collapseFraction,
                             headerHeight = currentTopBarHeightDp,
-                            onBackPressed = { navController.popBackStackSafely() },
+                            onBackPressed = dropUnlessResumed { navController.popBackStackSafely() },
                             startColor = startColor,
                             contentColor = contentColor,
                             containerColor = MaterialTheme.colorScheme.surfaceContainer,
