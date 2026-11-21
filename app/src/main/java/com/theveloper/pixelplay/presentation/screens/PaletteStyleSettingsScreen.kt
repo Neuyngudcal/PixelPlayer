@@ -1,11 +1,11 @@
 package com.theveloper.pixelplay.presentation.screens
 
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -28,25 +29,23 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.MotionScheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Slider
-import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -55,30 +54,34 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.res.stringResource
-import com.theveloper.pixelplay.R
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.common.util.UnstableApi
-import com.theveloper.pixelplay.data.preferences.AlbumArtColorAccuracy
+import com.theveloper.pixelplay.R
 import com.theveloper.pixelplay.data.preferences.AlbumArtPaletteStyle
+import com.theveloper.pixelplay.data.preferences.ThemeContrastLevel
+import com.theveloper.pixelplay.presentation.components.LocalInsideFloatingPane
 import com.theveloper.pixelplay.presentation.components.MiniPlayerHeight
-import com.theveloper.pixelplay.presentation.viewmodel.ColorSchemePair
 import com.theveloper.pixelplay.presentation.viewmodel.PlayerViewModel
 import com.theveloper.pixelplay.presentation.viewmodel.SettingsViewModel
 import com.theveloper.pixelplay.ui.theme.LocalPixelPlayDarkTheme
+import com.theveloper.pixelplay.ui.theme.LocalSpacing
+import com.theveloper.pixelplay.ui.theme.PixelPlayGroupShapes
 import com.theveloper.pixelplay.ui.theme.generateColorSchemeFromSeed
-import kotlin.math.roundToInt
 
 @androidx.annotation.OptIn(UnstableApi::class)
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun PaletteStyleSettingsScreen(
     playerViewModel: PlayerViewModel,
     settingsViewModel: SettingsViewModel = hiltViewModel(),
-    onBackClick: () -> Unit
+    onBackClick: () -> Unit,
+    embeddedInPane: Boolean = false
 ) {
     val uiState by settingsViewModel.uiState.collectAsStateWithLifecycle()
     val stablePlayerState by playerViewModel.stablePlayerState.collectAsStateWithLifecycle()
@@ -91,185 +94,238 @@ fun PaletteStyleSettingsScreen(
     }
 
     val currentSong = stablePlayerState.currentSong
+    val artUriString = currentSong?.albumArtUriString?.takeIf { it.isNotBlank() }
     val isMiniPlayerVisible = currentSong != null
-    val seedKey = currentSong?.albumArtUriString ?: currentSong?.id ?: "system"
-    var seedColor by remember(seedKey) { mutableStateOf<Color?>(null) }
 
-    LaunchedEffect(seedKey, albumSchemePair, baseScheme.primary) {
-        if (currentSong == null) {
-            seedColor = baseScheme.primary
-        } else if (seedColor == null && albumSchemePair != null) {
-            seedColor = albumScheme.primary
+    // Extract the true artwork seed color (never double-processed through albumScheme.primary)
+    var extractedSeedColor by remember(artUriString) { mutableStateOf<Color?>(null) }
+    LaunchedEffect(artUriString) {
+        extractedSeedColor = if (artUriString != null) {
+            settingsViewModel.getAlbumArtSeedColor(artUriString)
+        } else {
+            null
         }
     }
 
-    val resolvedSeed = seedColor ?: if (currentSong != null) albumScheme.primary else baseScheme.primary
+    val resolvedSeed = extractedSeedColor ?: baseScheme.primary
 
-    val styleSchemes = remember(resolvedSeed, isDarkTheme) {
+    var pendingStyle by remember { mutableStateOf(uiState.albumArtPaletteStyle) }
+    var pendingContrastLevel by remember { mutableStateOf(uiState.themeContrastLevel) }
+    LaunchedEffect(uiState.albumArtPaletteStyle) {
+        pendingStyle = uiState.albumArtPaletteStyle
+    }
+    LaunchedEffect(uiState.themeContrastLevel) {
+        pendingContrastLevel = uiState.themeContrastLevel
+    }
+
+    val effectivePreviewContrast = remember(pendingContrastLevel, uiState.systemContrastLevel) {
+        pendingContrastLevel.resolve(uiState.systemContrastLevel)
+    }
+
+    // All 8 Google palette variants synthesize synchronously (< 0.15ms each) from the true seed.
+    val styleSchemes = remember(resolvedSeed, isDarkTheme, effectivePreviewContrast) {
         AlbumArtPaletteStyle.entries.associateWith { style ->
             val pair = generateColorSchemeFromSeed(
                 seedColor = resolvedSeed,
-                paletteStyle = style
+                paletteStyle = style,
+                contrastLevel = effectivePreviewContrast
             )
             if (isDarkTheme) pair.dark else pair.light
         }
     }
 
-    var pendingStyle by remember { mutableStateOf(uiState.albumArtPaletteStyle) }
-    var pendingAccuracy by remember { mutableStateOf(uiState.albumArtColorAccuracy) }
-    LaunchedEffect(uiState.albumArtPaletteStyle) {
-        pendingStyle = uiState.albumArtPaletteStyle
-    }
-    LaunchedEffect(uiState.albumArtColorAccuracy) {
-        pendingAccuracy = uiState.albumArtColorAccuracy
-    }
-
-    var previewSchemePair by remember(currentSong?.albumArtUriString) {
-        mutableStateOf<ColorSchemePair?>(albumSchemePair)
-    }
-    LaunchedEffect(
-        currentSong?.albumArtUriString,
-        pendingStyle,
-        pendingAccuracy,
-        uiState.albumArtPaletteStyle,
-        uiState.albumArtColorAccuracy,
-        albumSchemePair
-    ) {
-        val artUriString = currentSong?.albumArtUriString
-        if (artUriString.isNullOrBlank()) {
-            previewSchemePair = albumSchemePair
-            return@LaunchedEffect
-        }
-
-        val matchesApplied =
-            pendingStyle == uiState.albumArtPaletteStyle &&
-                pendingAccuracy == uiState.albumArtColorAccuracy
-        previewSchemePair = if (matchesApplied && albumSchemePair != null) {
-            albumSchemePair
-        } else {
-            settingsViewModel.getAlbumArtPalettePreview(
-                uriString = artUriString,
-                style = pendingStyle,
-                accuracyLevel = pendingAccuracy
-            ) ?: albumSchemePair
-        }
-    }
-
     val hasPendingChanges =
         pendingStyle != uiState.albumArtPaletteStyle ||
-            pendingAccuracy != uiState.albumArtColorAccuracy
-    val previewScheme = previewSchemePair?.let { pair ->
-        if (isDarkTheme) pair.dark else pair.light
-    } ?: styleSchemes[pendingStyle] ?: albumScheme
+            pendingContrastLevel != uiState.themeContrastLevel
+    val previewScheme = styleSchemes[pendingStyle] ?: albumScheme
     val bottomInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     val contentBottomPadding = bottomInset + if (isMiniPlayerVisible) MiniPlayerHeight + 12.dp else 16.dp
 
-    Scaffold(
-        containerColor = previewScheme.background,
-        topBar = {
-            PaletteStyleHeader(
-                scheme = previewScheme,
-                onBackClick = onBackClick,
-                onApplyClick = {
-                    settingsViewModel.setAlbumArtPaletteSettings(
-                        style = pendingStyle,
-                        accuracyLevel = pendingAccuracy
-                    )
-                },
-                applyEnabled = hasPendingChanges
-            )
-        }
-    ) { innerPadding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-                .padding(horizontal = 16.dp)
-                .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+    val spacing = LocalSpacing.current
+    val previewSurfaceColor = if (embeddedInPane) Color.Transparent else previewScheme.background
+
+    val controlsCard: @Composable (Modifier) -> Unit = { cardModifier ->
+        Surface(
+            color = previewScheme.surfaceContainer,
+            shape = RoundedCornerShape(PixelPlayGroupShapes.PaneContainerRadius),
+            modifier = cardModifier
         ) {
-            MiniFullPlayerSkeletonPreview(
-                scheme = previewScheme,
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(vertical = 2.dp)
-            )
-
-            Surface(
-                color = previewScheme.surfaceContainer,
-                shape = RoundedCornerShape(34.dp),
-                modifier = Modifier.fillMaxWidth()
+                    .padding(horizontal = 18.dp, vertical = 20.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 18.dp, vertical = 20.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Text(
                         text = stringResource(R.string.settings_palette_style_title),
-                        style = MaterialTheme.typography.titleLarge,
+                        style = MaterialTheme.typography.titleLargeEmphasized,
                         color = previewScheme.onSurface,
-                        fontWeight = FontWeight.SemiBold
+                        modifier = Modifier.weight(1f)
                     )
-                    Text(
-                        text = stringResource(R.string.settings_palette_style_subtitle),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = previewScheme.onSurfaceVariant
-                    )
-
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 4.dp),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        AlbumArtPaletteStyle.entries.forEach { style ->
-                            PaletteSwatchSquare(
-                                scheme = styleSchemes[style] ?: previewScheme,
-                                selected = style == pendingStyle,
-                                onClick = { pendingStyle = style },
-                                modifier = Modifier.weight(1f)
+                    if (embeddedInPane) {
+                        FilledTonalButton(
+                            onClick = {
+                                settingsViewModel.setAlbumArtPaletteSettings(
+                                    style = pendingStyle,
+                                    contrastLevel = pendingContrastLevel
+                                )
+                            },
+                            enabled = hasPendingChanges,
+                            shape = CircleShape,
+                            contentPadding = PaddingValues(horizontal = 18.dp, vertical = 8.dp),
+                            colors = ButtonDefaults.filledTonalButtonColors(
+                                containerColor = previewScheme.secondaryContainer,
+                                contentColor = previewScheme.onSecondaryContainer,
+                                disabledContainerColor = previewScheme.surfaceContainerHigh,
+                                disabledContentColor = previewScheme.onSurfaceVariant
+                            )
+                        ) {
+                            Text(
+                                text = stringResource(R.string.common_apply),
+                                style = MaterialTheme.typography.labelLargeEmphasized
                             )
                         }
                     }
+                }
+                Text(
+                    text = stringResource(R.string.settings_palette_style_subtitle),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = previewScheme.onSurfaceVariant
+                )
 
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = albumArtPaletteStyleLabel(pendingStyle),
-                        style = MaterialTheme.typography.titleMedium,
-                        color = previewScheme.onSurface,
-                        fontWeight = FontWeight.Medium
-                    )
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(
-                                color = previewScheme.tertiaryContainer,
-                                shape = CircleShape
-                            )
-                    ) {
-                        Text(
-                            modifier = Modifier
-                                .padding(8.dp)
-                                .padding(start = 4.dp),
-                            text = albumArtPaletteStyleDescription(pendingStyle),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = previewScheme.onTertiaryContainer
-                        )
+                // 4x2 grid covering all 8 official Google Material Color Utilities variants
+                val styleRows = remember { AlbumArtPaletteStyle.entries.chunked(4) }
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 4.dp)
+                ) {
+                    styleRows.forEach { rowStyles ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            rowStyles.forEach { style ->
+                                PaletteSwatchSquare(
+                                    scheme = styleSchemes[style] ?: previewScheme,
+                                    selected = style == pendingStyle,
+                                    onClick = { pendingStyle = style },
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                        }
                     }
+                }
 
-                    Spacer(modifier = Modifier.height(2.dp))
-                    PaletteAccuracySlider(
-                        scheme = previewScheme,
-                        value = pendingAccuracy,
-                        hapticsEnabled = uiState.hapticsEnabled,
-                        onValueChange = { pendingAccuracy = it }
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = albumArtPaletteStyleLabel(pendingStyle),
+                    style = MaterialTheme.typography.titleMediumEmphasized,
+                    color = previewScheme.onSurface
+                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(
+                            color = previewScheme.tertiaryContainer,
+                            shape = RoundedCornerShape(PixelPlayGroupShapes.GroupOuterRadius)
+                        )
+                ) {
+                    Text(
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                        text = albumArtPaletteStyleDescription(pendingStyle),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = previewScheme.onTertiaryContainer
                     )
                 }
-            }
 
-            Spacer(modifier = Modifier.height(contentBottomPadding))
+                Spacer(modifier = Modifier.height(4.dp))
+                PaletteContrastSelector(
+                    scheme = previewScheme,
+                    selectedLevel = pendingContrastLevel,
+                    systemContrastLevel = uiState.systemContrastLevel,
+                    hapticsEnabled = uiState.hapticsEnabled,
+                    onSelect = { pendingContrastLevel = it }
+                )
+            }
+        }
+    }
+
+    Scaffold(
+        containerColor = previewSurfaceColor,
+        contentWindowInsets = if (embeddedInPane) WindowInsets(0, 0, 0, 0) else WindowInsets.navigationBars,
+        topBar = {
+            if (!embeddedInPane) {
+                PaletteStyleHeader(
+                    scheme = previewScheme,
+                    onBackClick = onBackClick,
+                    onApplyClick = {
+                        settingsViewModel.setAlbumArtPaletteSettings(
+                            style = pendingStyle,
+                            contrastLevel = pendingContrastLevel
+                        )
+                    },
+                    applyEnabled = hasPendingChanges
+                )
+            }
+        }
+    ) { innerPadding ->
+        BoxWithConstraints(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+        ) {
+            val useTwoColumn = maxWidth >= 680.dp
+            if (useTwoColumn) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = spacing.screenHorizontal, vertical = spacing.md)
+                        .verticalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(spacing.xl),
+                    verticalAlignment = Alignment.Top
+                ) {
+                    MiniFullPlayerSkeletonPreview(
+                        scheme = previewScheme,
+                        modifier = Modifier
+                            .weight(0.42f)
+                            .padding(bottom = contentBottomPadding)
+                    )
+                    Column(
+                        modifier = Modifier
+                            .weight(0.58f)
+                            .padding(bottom = contentBottomPadding)
+                    ) {
+                        controlsCard(Modifier.fillMaxWidth())
+                    }
+                }
+            } else {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = spacing.screenHorizontal)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    if (embeddedInPane) {
+                        Spacer(modifier = Modifier.height(spacing.xs))
+                    }
+                    MiniFullPlayerSkeletonPreview(
+                        scheme = previewScheme,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 2.dp)
+                    )
+                    controlsCard(Modifier.fillMaxWidth())
+                    Spacer(modifier = Modifier.height(contentBottomPadding))
+                }
+            }
         }
     }
 }
@@ -281,11 +337,12 @@ private fun PaletteStyleHeader(
     onApplyClick: () -> Unit,
     applyEnabled: Boolean
 ) {
-    Surface(color = scheme.background) {
+    val insideFloatingPane = LocalInsideFloatingPane.current
+    Surface(color = if (insideFloatingPane) Color.Transparent else scheme.background) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .statusBarsPadding()
+                .then(if (!insideFloatingPane) Modifier.statusBarsPadding() else Modifier)
                 .padding(horizontal = 12.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -341,8 +398,8 @@ private fun MiniFullPlayerSkeletonPreview(
     fun scaled(dp: Dp): Dp = (dp.value * sizeFactor).dp
     val cardWidthFraction = 0.72f * sizeFactor
 
-    val placeholderColor = scheme.onPrimaryContainer.copy(alpha = 0.1f)
-    val placeholderOnColor = scheme.onPrimaryContainer.copy(alpha = 0.2f)
+    val placeholderColor = scheme.onPrimaryContainer.copy(alpha = 0.12f)
+    val placeholderOnColor = scheme.onPrimaryContainer.copy(alpha = 0.24f)
     val chipColor = scheme.onPrimary.copy(alpha = 0.8f)
     val topBarButtonColor = scheme.onPrimary.copy(alpha = 0.7f)
     val inactiveTrackColor = scheme.onPrimaryContainer.copy(alpha = 0.2f)
@@ -379,14 +436,6 @@ private fun MiniFullPlayerSkeletonPreview(
                             .background(topBarButtonColor)
                     )
                 }
-
-//                Box(
-//                    modifier = Modifier
-//                        .fillMaxWidth(0.5f)
-//                        .height(scaled(12.dp))
-//                        .clip(RoundedCornerShape(scaled(6.dp)))
-//                        .background(placeholderOnColor)
-//                )
 
                 Box(
                     modifier = Modifier
@@ -448,7 +497,6 @@ private fun MiniFullPlayerSkeletonPreview(
                             .clip(RoundedCornerShape(scaled(99.dp)))
                             .background(scheme.primary.copy(alpha = 0.35f))
                     )
-
                     Box(
                         modifier = Modifier
                             .fillMaxWidth(0.12f)
@@ -468,13 +516,13 @@ private fun MiniFullPlayerSkeletonPreview(
                             .height(scaled(50.dp))
                             .width(scaled(58.dp))
                             .clip(CircleShape)
-                            .background(scheme.onPrimary)
+                            .background(scheme.primaryFixed)
                     )
                     Box(
                         modifier = Modifier
                             .height(scaled(50.dp))
                             .width(scaled(58.dp))
-                            .clip(CircleShape)
+                            .clip(RoundedCornerShape(scaled(20.dp)))
                             .background(scheme.primary)
                     )
                     Box(
@@ -482,7 +530,7 @@ private fun MiniFullPlayerSkeletonPreview(
                             .height(scaled(50.dp))
                             .width(scaled(58.dp))
                             .clip(CircleShape)
-                            .background(scheme.onPrimary)
+                            .background(scheme.primaryFixed)
                     )
                 }
 
@@ -504,9 +552,7 @@ private fun MiniFullPlayerSkeletonPreview(
                             )
                     ) {
                         Row(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(horizontal = 0.dp),
+                            modifier = Modifier.fillMaxSize(),
                             horizontalArrangement = Arrangement.spacedBy(scaled(6.dp)),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
@@ -515,21 +561,21 @@ private fun MiniFullPlayerSkeletonPreview(
                                     .weight(1f)
                                     .height(scaled(40.dp))
                                     .clip(RoundedCornerShape(scaled(18.dp)))
-                                    .background(scheme.primary)
+                                    .background(scheme.primaryFixedDim)
                             )
                             Box(
                                 modifier = Modifier
                                     .weight(1f)
                                     .height(scaled(40.dp))
                                     .clip(RoundedCornerShape(scaled(18.dp)))
-                                    .background(scheme.secondary)
+                                    .background(scheme.secondaryFixedDim)
                             )
                             Box(
                                 modifier = Modifier
                                     .weight(1f)
                                     .height(scaled(40.dp))
                                     .clip(RoundedCornerShape(scaled(18.dp)))
-                                    .background(scheme.tertiary)
+                                    .background(scheme.tertiaryFixedDim)
                             )
                         }
                     }
@@ -539,7 +585,7 @@ private fun MiniFullPlayerSkeletonPreview(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun PaletteSwatchSquare(
     scheme: ColorScheme,
@@ -547,43 +593,47 @@ private fun PaletteSwatchSquare(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val spatialSpec = remember { MotionScheme.expressive().fastSpatialSpec<Dp>() }
     BoxWithConstraints(
-        modifier = modifier
-            .aspectRatio(1f)
+        modifier = modifier.aspectRatio(1f)
     ) {
         val circleRadius = maxWidth / 2
         val innerCorner by animateDpAsState(
             targetValue = if (selected) 12.dp else circleRadius,
+            animationSpec = spatialSpec,
             label = "paletteInnerCorner"
         )
         val outerCorner by animateDpAsState(
             targetValue = if (selected) 16.dp else circleRadius,
+            animationSpec = spatialSpec,
             label = "paletteOuterCorner"
         )
         val outlinePadding by animateDpAsState(
             targetValue = if (selected) 4.dp else 0.dp,
+            animationSpec = spatialSpec,
             label = "paletteOutlinePadding"
         )
         val borderWidth by animateDpAsState(
             targetValue = if (selected) 2.dp else 0.dp,
+            animationSpec = spatialSpec,
             label = "paletteBorderWidth"
         )
 
         Surface(
             onClick = onClick,
             color = scheme.surfaceContainerHighest,
-            shape = RoundedCornerShape(outerCorner),
+            shape = RoundedCornerShape(outerCorner.coerceAtLeast(0.dp)),
             border = if (borderWidth > 0.dp) BorderStroke(borderWidth, scheme.primary) else null,
-            modifier = Modifier.fillMaxSize() 
+            modifier = Modifier.fillMaxSize()
         ) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(outlinePadding)
+                    .padding(outlinePadding.coerceAtLeast(0.dp))
             ) {
                 Surface(
                     color = scheme.surface,
-                    shape = RoundedCornerShape(innerCorner),
+                    shape = RoundedCornerShape(innerCorner.coerceAtLeast(0.dp)),
                     modifier = Modifier.fillMaxSize()
                 ) {
                     Column(modifier = Modifier.fillMaxSize()) {
@@ -622,21 +672,18 @@ private fun PaletteSwatchSquare(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-private fun PaletteAccuracySlider(
+private fun PaletteContrastSelector(
     scheme: ColorScheme,
-    value: Int,
+    selectedLevel: ThemeContrastLevel,
+    systemContrastLevel: Double,
     hapticsEnabled: Boolean,
-    onValueChange: (Int) -> Unit
+    onSelect: (ThemeContrastLevel) -> Unit
 ) {
-    val clampedValue = AlbumArtColorAccuracy.clamp(value)
     val hapticFeedback = LocalHapticFeedback.current
-    var lastDispatchedValue by remember { mutableIntStateOf(clampedValue) }
-
-    LaunchedEffect(clampedValue) {
-        lastDispatchedValue = clampedValue
-    }
+    val spatialSpec = remember { MotionScheme.expressive().fastSpatialSpec<Dp>() }
+    val effectsSpec = remember { MotionScheme.expressive().defaultEffectsSpec<Color>() }
 
     Column(
         verticalArrangement = Arrangement.spacedBy(10.dp)
@@ -651,13 +698,13 @@ private fun PaletteAccuracySlider(
                 modifier = Modifier.weight(1f)
             ) {
                 Text(
-                    text = stringResource(R.string.settings_palette_style_color_accuracy_title),
+                    text = stringResource(R.string.settings_palette_contrast_title),
                     style = MaterialTheme.typography.titleMedium,
                     color = scheme.onSurface,
                     fontWeight = FontWeight.Medium
                 )
                 Text(
-                    text = stringResource(R.string.settings_palette_style_color_accuracy_subtitle),
+                    text = stringResource(R.string.settings_palette_contrast_subtitle),
                     style = MaterialTheme.typography.bodyMedium,
                     color = scheme.onSurfaceVariant
                 )
@@ -674,7 +721,7 @@ private fun PaletteAccuracySlider(
             ) {
                 Text(
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                    text = accuracySummaryText(clampedValue),
+                    text = contrastSummaryText(selectedLevel, systemContrastLevel),
                     style = MaterialTheme.typography.labelLarge,
                     color = scheme.onPrimaryContainer,
                     fontWeight = FontWeight.SemiBold
@@ -682,77 +729,112 @@ private fun PaletteAccuracySlider(
             }
         }
 
-        Slider(
-            value = clampedValue.toFloat(),
-            onValueChange = {
-                val nextValue = AlbumArtColorAccuracy.clamp(it.roundToInt())
-                if (nextValue == lastDispatchedValue) return@Slider
-
-                if (hapticsEnabled) {
-                    hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                }
-                lastDispatchedValue = nextValue
-                onValueChange(nextValue)
-            },
-            valueRange = AlbumArtColorAccuracy.MIN.toFloat()..AlbumArtColorAccuracy.MAX.toFloat(),
-            steps = AlbumArtColorAccuracy.STEPS,
-            colors = SliderDefaults.colors(
-                thumbColor = scheme.primary,
-                activeTrackColor = scheme.primary,
-                inactiveTrackColor = scheme.surfaceContainerHighest,
-                activeTickColor = scheme.primary,
-                inactiveTickColor = scheme.onSurfaceVariant.copy(alpha = 0.22f)
-            )
-        )
-
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Text(
-                text = stringResource(R.string.settings_palette_style_accuracy_current),
-                style = MaterialTheme.typography.bodySmall,
-                color = scheme.onSurfaceVariant
-            )
-            Text(
-                text = stringResource(R.string.settings_palette_style_accuracy_more_accurate),
-                style = MaterialTheme.typography.bodySmall,
-                color = scheme.onSurfaceVariant
-            )
+            ThemeContrastLevel.entries.forEach { level ->
+                val isSelected = level == selectedLevel
+                val cornerRadius by animateDpAsState(
+                    targetValue = if (isSelected) 50.dp else 14.dp,
+                    animationSpec = spatialSpec,
+                    label = "contrastSegmentCorner"
+                )
+                val containerColor by animateColorAsState(
+                    targetValue = if (isSelected) scheme.primary else scheme.surfaceContainerHigh,
+                    animationSpec = effectsSpec,
+                    label = "contrastSegmentBg"
+                )
+                val contentColor by animateColorAsState(
+                    targetValue = if (isSelected) scheme.onPrimary else scheme.onSurfaceVariant,
+                    animationSpec = effectsSpec,
+                    label = "contrastSegmentFg"
+                )
+
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(42.dp)
+                        .clip(RoundedCornerShape(cornerRadius))
+                        .background(containerColor)
+                        .clickable {
+                            if (!isSelected) {
+                                if (hapticsEnabled) {
+                                    hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                }
+                                onSelect(level)
+                            }
+                        }
+                        .padding(horizontal = 6.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = contrastLevelLabel(level),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = contentColor,
+                        fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
         }
     }
 }
 
 @Composable
-private fun albumArtPaletteStyleDescription(style: AlbumArtPaletteStyle): String =
+internal fun albumArtPaletteStyleDescription(style: AlbumArtPaletteStyle): String =
     stringResource(
         when (style) {
+            AlbumArtPaletteStyle.CONTENT -> R.string.settings_palette_style_content_desc
+            AlbumArtPaletteStyle.FIDELITY -> R.string.settings_palette_style_fidelity_desc
             AlbumArtPaletteStyle.TONAL_SPOT -> R.string.settings_palette_style_tonal_spot_desc
             AlbumArtPaletteStyle.VIBRANT -> R.string.settings_palette_style_vibrant_desc
             AlbumArtPaletteStyle.EXPRESSIVE -> R.string.settings_palette_style_expressive_desc
             AlbumArtPaletteStyle.FRUIT_SALAD -> R.string.settings_palette_style_fruit_salad_desc
+            AlbumArtPaletteStyle.MONOCHROME -> R.string.settings_palette_style_monochrome_desc
+            AlbumArtPaletteStyle.NEUTRAL -> R.string.settings_palette_style_neutral_desc
         }
     )
 
 @Composable
-private fun albumArtPaletteStyleLabel(style: AlbumArtPaletteStyle): String =
+internal fun albumArtPaletteStyleLabel(style: AlbumArtPaletteStyle): String =
     stringResource(
         when (style) {
+            AlbumArtPaletteStyle.CONTENT -> R.string.settings_palette_style_content
+            AlbumArtPaletteStyle.FIDELITY -> R.string.settings_palette_style_fidelity
             AlbumArtPaletteStyle.TONAL_SPOT -> R.string.settings_palette_style_tonal_spot
             AlbumArtPaletteStyle.VIBRANT -> R.string.settings_palette_style_vibrant
             AlbumArtPaletteStyle.EXPRESSIVE -> R.string.settings_palette_style_expressive
             AlbumArtPaletteStyle.FRUIT_SALAD -> R.string.settings_palette_style_fruit_salad
+            AlbumArtPaletteStyle.MONOCHROME -> R.string.settings_palette_style_monochrome
+            AlbumArtPaletteStyle.NEUTRAL -> R.string.settings_palette_style_neutral
         }
     )
 
 @Composable
-private fun accuracySummaryText(value: Int): String {
-    val clamped = AlbumArtColorAccuracy.clamp(value)
-    return when {
-        clamped == 0 -> stringResource(R.string.settings_palette_style_accuracy_summary_current)
-        clamped in 1..3 -> stringResource(R.string.settings_palette_style_accuracy_summary_subtle, clamped)
-        clamped in 4..7 -> stringResource(R.string.settings_palette_style_accuracy_summary_balanced, clamped)
-        else -> stringResource(R.string.settings_palette_style_accuracy_summary_precise, clamped)
+private fun contrastLevelLabel(level: ThemeContrastLevel): String =
+    stringResource(
+        when (level) {
+            ThemeContrastLevel.SYSTEM -> R.string.settings_palette_contrast_system
+            ThemeContrastLevel.STANDARD -> R.string.settings_palette_contrast_standard
+            ThemeContrastLevel.MEDIUM -> R.string.settings_palette_contrast_medium
+            ThemeContrastLevel.HIGH -> R.string.settings_palette_contrast_high
+        }
+    )
+
+@Composable
+private fun contrastSummaryText(
+    selectedLevel: ThemeContrastLevel,
+    systemContrastLevel: Double
+): String {
+    if (selectedLevel != ThemeContrastLevel.SYSTEM) {
+        return contrastLevelLabel(selectedLevel)
     }
+    val detectedTier = when {
+        systemContrastLevel >= 0.75 -> stringResource(R.string.settings_palette_contrast_high)
+        systemContrastLevel >= 0.25 -> stringResource(R.string.settings_palette_contrast_medium)
+        else -> stringResource(R.string.settings_palette_contrast_standard)
+    }
+    return stringResource(R.string.settings_palette_contrast_system_summary, detectedTier)
 }

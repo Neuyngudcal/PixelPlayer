@@ -1,9 +1,13 @@
 package com.theveloper.pixelplay.presentation.components.subcomps
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -14,12 +18,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CloudUpload
+import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.ErrorOutline
+import androidx.compose.material.icons.rounded.LowPriority
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.SearchOff
@@ -28,8 +34,10 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularWavyProgressIndicator
 import androidx.compose.material3.ElevatedCard
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -37,6 +45,7 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -45,6 +54,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -52,10 +62,13 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.theveloper.pixelplay.R
 import com.theveloper.pixelplay.data.model.Song
+import com.theveloper.pixelplay.data.network.lyrics.LyricsProviderPreferences
 import com.theveloper.pixelplay.data.network.lyrics.LyricsProviderType
 import com.theveloper.pixelplay.data.repository.LyricsSearchResult
+import com.theveloper.pixelplay.presentation.components.player.PlayerCardOverlayDialog
 import com.theveloper.pixelplay.presentation.viewmodel.LyricsSearchUiState
 import com.theveloper.pixelplay.utils.ProviderText
 import com.theveloper.pixelplay.utils.shapes.RoundedStarShape
@@ -68,67 +81,123 @@ fun FetchLyricsDialog(
     onPickResult: (LyricsSearchResult) -> Unit,
     onManualSearch: (String, String?) -> Unit,
     onDismiss: () -> Unit,
-    onImport: () -> Unit
+    onImport: () -> Unit,
+    onOpenProvidersClick: (() -> Unit)? = null,
+    isContainedInCard: Boolean = false
 ) {
     if (uiState is LyricsSearchUiState.Success) return
 
     var forcePickResults by rememberSaveable { mutableStateOf(false) }
+    var showManualSearchForm by rememberSaveable { mutableStateOf(false) }
 
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
-    ) {
-        Surface(
-            modifier = Modifier
-                .padding(24.dp)
-                .fillMaxWidth(),
-            shape = RoundedCornerShape(32.dp), // Forma muy redondeada (Expressive)
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            tonalElevation = 6.dp
+    LaunchedEffect(uiState) {
+        if (uiState is LyricsSearchUiState.Loading || uiState is LyricsSearchUiState.PickResult) {
+            showManualSearchForm = false
+        }
+    }
+
+    val dialogBody: @Composable (Modifier) -> Unit = { contentModifier ->
+        Column(
+            modifier = contentModifier,
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Column(
-                modifier = Modifier.padding(24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                when (uiState) {
-                    LyricsSearchUiState.Idle -> {
-                        IdleContent(
-                            currentSong = currentSong,
-                            forcePickResults = forcePickResults,
-                            onToggleForcePickResults = { forcePickResults = it },
-                            onSearch = { onConfirm(forcePickResults) },
-                            onImport = onImport,
-                            onCancel = onDismiss
+            when {
+                showManualSearchForm && (uiState is LyricsSearchUiState.Idle || uiState is LyricsSearchUiState.PickResult) -> {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .verticalScroll(rememberScrollState()),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        NotFoundContent(
+                            message = "",
+                            initialTitle = currentSong?.title.orEmpty(),
+                            initialArtist = currentSong?.displayArtist,
+                            isManualEditMode = true,
+                            onManualSearch = { title, artist ->
+                                showManualSearchForm = false
+                                onManualSearch(title, artist)
+                            },
+                            onOpenProvidersClick = onOpenProvidersClick,
+                            onCancel = { showManualSearchForm = false }
                         )
                     }
-                    LyricsSearchUiState.Loading -> {
-                        LoadingContent()
-                    }
-                    is LyricsSearchUiState.PickResult -> {
-                        PickResultContent(
-                            results = uiState.results,
-                            onPickResult = onPickResult,
-                            onCancel = onDismiss // Usamos botón cancelar en lugar de X
-                        )
-                    }
-                    is LyricsSearchUiState.NotFound -> {
+                }
+                uiState is LyricsSearchUiState.Idle -> {
+                    IdleContent(
+                        currentSong = currentSong,
+                        forcePickResults = forcePickResults,
+                        onToggleForcePickResults = { forcePickResults = it },
+                        onSearch = { onConfirm(forcePickResults) },
+                        onManualSearchClick = { showManualSearchForm = true },
+                        onOpenProvidersClick = onOpenProvidersClick,
+                        onImport = onImport,
+                        onCancel = onDismiss
+                    )
+                }
+                uiState is LyricsSearchUiState.Loading -> {
+                    LoadingContent()
+                }
+                uiState is LyricsSearchUiState.PickResult -> {
+                    PickResultContent(
+                        results = uiState.results,
+                        onPickResult = onPickResult,
+                        onManualSearchClick = { showManualSearchForm = true },
+                        onOpenProvidersClick = onOpenProvidersClick,
+                        onCancel = onDismiss // Usamos botón cancelar en lugar de X
+                    )
+                }
+                uiState is LyricsSearchUiState.NotFound -> {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .verticalScroll(rememberScrollState()),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
                         NotFoundContent(
                             message = uiState.message,
                             initialTitle = currentSong?.title.orEmpty(),
                             initialArtist = currentSong?.displayArtist,
+                            isManualEditMode = false,
                             onManualSearch = { title, artist ->
                                 onManualSearch(title, artist)
                             },
+                            onOpenProvidersClick = onOpenProvidersClick,
                             onCancel = onDismiss
                         )
                     }
-                    is LyricsSearchUiState.Error -> {
-                        ErrorContent(
-                            message = uiState.message,
-                            onDismiss = onDismiss
-                        )
-                    }
                 }
+                uiState is LyricsSearchUiState.Error -> {
+                    ErrorContent(
+                        message = uiState.message,
+                        onDismiss = onDismiss
+                    )
+                }
+            }
+        }
+    }
+
+    if (isContainedInCard) {
+        PlayerCardOverlayDialog(
+            onDismissRequest = onDismiss,
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+        ) {
+            dialogBody(Modifier.fillMaxWidth())
+        }
+    } else {
+        Dialog(
+            onDismissRequest = onDismiss,
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            Surface(
+                modifier = Modifier
+                    .padding(24.dp)
+                    .fillMaxWidth(),
+                shape = RoundedCornerShape(32.dp), // Forma muy redondeada (Expressive)
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                tonalElevation = 6.dp
+            ) {
+                dialogBody(Modifier.padding(24.dp))
             }
         }
     }
@@ -144,142 +213,191 @@ private fun IdleContent(
     forcePickResults: Boolean,
     onToggleForcePickResults: (Boolean) -> Unit,
     onSearch: () -> Unit,
+    onManualSearchClick: () -> Unit,
+    onOpenProvidersClick: (() -> Unit)?,
     onImport: () -> Unit,
     onCancel: () -> Unit
 ) {
-    // Icono Decorativo Grande
-    Box(
-        modifier = Modifier
-            .size(72.dp)
-            .clip(RoundedStarShape(
-                sides = 8,
-                curve = 0.1,
-                rotation = 0f,
-                //iterations = 45
-            )) // Forma "Squircle" agradable
-            .background(MaterialTheme.colorScheme.secondaryContainer),
-        contentAlignment = Alignment.Center
-    ) {
-        Icon(
-            imageVector = Icons.Rounded.MusicNote,
-            contentDescription = null,
-            modifier = Modifier.size(40.dp),
-            tint = MaterialTheme.colorScheme.onSecondaryContainer
-        )
-    }
-
-    Spacer(modifier = Modifier.height(20.dp))
-
-    // Título y Canción
-    if (currentSong != null) {
-        Text(
-            text = currentSong.title,
-            style = MaterialTheme.typography.headlineSmall,
-            fontWeight = FontWeight.Bold,
-            textAlign = TextAlign.Center,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis
-        )
-        Text(
-            text = currentSong.displayArtist,
-            style = MaterialTheme.typography.titleMedium,
-            color = MaterialTheme.colorScheme.primary,
-            textAlign = TextAlign.Center
-        )
+    val context = LocalContext.current
+    val providerConfigs by LyricsProviderPreferences.observeProviderConfigs(context)
+        .collectAsStateWithLifecycle(initialValue = LyricsProviderPreferences.defaultConfigs())
+    val enabledConfigs = providerConfigs.filter { it.enabled }
+    val topProviderName = enabledConfigs.firstOrNull()?.provider?.displayName ?: LyricsProviderType.ZARZ_LRC.displayName
+    val providerSummary = if (enabledConfigs.size > 1) {
+        "Nguồn: $topProviderName (+${enabledConfigs.size - 1})"
     } else {
-        Text(
-            text = stringResource(R.string.lyrics_not_found),
-            style = MaterialTheme.typography.headlineSmall,
-            textAlign = TextAlign.Center
-        )
+        "Nguồn: $topProviderName"
     }
 
-    Spacer(modifier = Modifier.height(12.dp))
-
-    Text(
-        text = stringResource(R.string.lyrics_search_online_prompt),
-        style = MaterialTheme.typography.bodyMedium,
-        textAlign = TextAlign.Center,
-        color = MaterialTheme.colorScheme.onSurfaceVariant
-    )
-
-    Spacer(modifier = Modifier.height(32.dp))
-
-    ElevatedCard(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.elevatedCardColors(
-            containerColor = MaterialTheme.colorScheme.secondaryContainer
-        )
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .verticalScroll(rememberScrollState()),
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Row(
+        // Icono Decorativo Grande
+        Box(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
+                .size(72.dp)
+                .clip(RoundedStarShape(
+                    sides = 8,
+                    curve = 0.1,
+                    rotation = 0f,
+                )) // Forma "Squircle" agradable
+                .background(MaterialTheme.colorScheme.secondaryContainer),
+            contentAlignment = Alignment.Center
         ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = stringResource(R.string.lyrics_fetch_show_options_title),
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.onSecondaryContainer
-                )
-                Text(
-                    text = stringResource(R.string.lyrics_fetch_show_options_subtitle),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.75f)
+            Icon(
+                imageVector = Icons.Rounded.MusicNote,
+                contentDescription = null,
+                modifier = Modifier.size(40.dp),
+                tint = MaterialTheme.colorScheme.onSecondaryContainer
+            )
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Título y Canción
+        if (currentSong != null) {
+            Text(
+                text = currentSong.title,
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = currentSong.displayArtist,
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.primary,
+                textAlign = TextAlign.Center,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        } else {
+            Text(
+                text = stringResource(R.string.lyrics_not_found),
+                style = MaterialTheme.typography.headlineSmall,
+                textAlign = TextAlign.Center
+            )
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        Text(
+            text = stringResource(R.string.lyrics_search_online_prompt),
+            style = MaterialTheme.typography.bodyMedium,
+            textAlign = TextAlign.Center,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+
+        Spacer(modifier = Modifier.height(20.dp))
+
+        ElevatedCard(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(20.dp),
+            colors = CardDefaults.elevatedCardColors(
+                containerColor = MaterialTheme.colorScheme.secondaryContainer
+            )
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = stringResource(R.string.lyrics_fetch_show_options_title),
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer
+                    )
+                    Text(
+                        text = stringResource(R.string.lyrics_fetch_show_options_subtitle),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.75f)
+                    )
+                }
+                Switch(
+                    checked = forcePickResults,
+                    onCheckedChange = onToggleForcePickResults,
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
+                        checkedTrackColor = MaterialTheme.colorScheme.primary
+                    )
                 )
             }
-            Switch(
-                checked = forcePickResults,
-                onCheckedChange = onToggleForcePickResults,
-                colors = SwitchDefaults.colors(
-                    checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
-                    checkedTrackColor = MaterialTheme.colorScheme.primary
+        }
+
+        Spacer(modifier = Modifier.height(14.dp))
+
+        // Botones de Acción (Vertical para mejor touch target)
+        Column(
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Button(
+                onClick = onSearch,
+                modifier = Modifier.fillMaxWidth().height(50.dp),
+                shape = CircleShape
+            ) {
+                Icon(Icons.Rounded.Search, contentDescription = null, modifier = Modifier.size(20.dp))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(stringResource(R.string.common_search), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                if (onOpenProvidersClick != null) {
+                    OutlinedButton(
+                        onClick = onOpenProvidersClick,
+                        modifier = Modifier.weight(1f).height(46.dp),
+                        shape = RoundedCornerShape(14.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp)
+                    ) {
+                        Icon(Icons.Rounded.LowPriority, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(providerSummary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+                OutlinedButton(
+                    onClick = onManualSearchClick,
+                    modifier = Modifier.weight(1f).height(46.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    contentPadding = PaddingValues(horizontal = 10.dp)
+                ) {
+                    Icon(Icons.Rounded.Edit, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Tìm thủ công", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+
+            Button(
+                onClick = onImport,
+                modifier = Modifier.fillMaxWidth().height(48.dp),
+                shape = RoundedCornerShape(14.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.secondary,
+                    contentColor = MaterialTheme.colorScheme.onSecondary
                 )
-            )
-        }
-    }
+            ) {
+                Icon(Icons.Rounded.CloudUpload, contentDescription = null, modifier = Modifier.size(20.dp))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(stringResource(R.string.common_import))
+            }
 
-    Spacer(modifier = Modifier.height(16.dp))
-
-    // Botones de Acción (Vertical para mejor touch target)
-    Column(
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Button(
-            onClick = onSearch,
-            modifier = Modifier.fillMaxWidth().height(52.dp),
-            shape = CircleShape
-        ) {
-            Icon(Icons.Rounded.Search, contentDescription = null, modifier = Modifier.size(20.dp))
-            Spacer(modifier = Modifier.width(8.dp))
-            Text(stringResource(R.string.common_search), maxLines = 1, overflow = TextOverflow.Ellipsis)
-        }
-
-        Button(
-            onClick = onImport,
-            modifier = Modifier.fillMaxWidth().height(52.dp),
-            shape = RoundedCornerShape(12.dp),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = MaterialTheme.colorScheme.secondary,
-                contentColor = MaterialTheme.colorScheme.onSecondary
-            )
-        ) {
-            Icon(Icons.Rounded.CloudUpload, contentDescription = null, modifier = Modifier.size(20.dp))
-            Spacer(modifier = Modifier.width(8.dp))
-            Text(stringResource(R.string.common_import))
-        }
-
-        // Botón Cancelar (Reemplaza a la X)
-        TextButton(
-            onClick = onCancel,
-            modifier = Modifier.fillMaxWidth().height(52.dp),
-            shape = RoundedCornerShape(18.dp)
-        ) {
-            Text(stringResource(R.string.common_cancel), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            // Botón Cancelar (Reemplaza a la X)
+            TextButton(
+                onClick = onCancel,
+                modifier = Modifier.fillMaxWidth().height(46.dp),
+                shape = RoundedCornerShape(18.dp)
+            ) {
+                Text(stringResource(R.string.common_cancel), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
         }
     }
 }
@@ -306,58 +424,114 @@ private fun LoadingContent() {
 private fun PickResultContent(
     results: List<LyricsSearchResult>,
     onPickResult: (LyricsSearchResult) -> Unit,
+    onManualSearchClick: () -> Unit,
+    onOpenProvidersClick: (() -> Unit)?,
     onCancel: () -> Unit
 ) {
-    Text(
-        text = stringResource(R.string.lyrics_found_n_matches_format).format(results.size),
-        style = MaterialTheme.typography.headlineSmall,
-        textAlign = TextAlign.Center,
-        modifier = Modifier.fillMaxWidth()
-    )
-
-    Spacer(modifier = Modifier.height(24.dp))
-
-    // Lista Scrollable Optimizada
-    LazyColumn(
-        modifier = Modifier.heightIn(max = 350.dp), // Altura máxima dinámica
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-        contentPadding = PaddingValues(bottom = 8.dp)
-    ) {
-        items(results, key = { it.record.id }) { result ->
-            ResultItemCard(result = result, onClick = { onPickResult(result) })
-        }
-
-        item {
-            val primaryProvider = results.firstOrNull()?.lyrics?.provider ?: "LRCLIB"
-            ProviderText(
-                providerText = stringResource(R.string.lyrics_provided_by),
-                uri = LyricsProviderType.resolveWebsiteUri(primaryProvider),
-                providerName = primaryProvider,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth().padding(top = 16.dp, bottom = 8.dp)
-            )
-        }
-    }
-
-    Spacer(modifier = Modifier.height(16.dp))
-
-    // Botón Cancelar al final de la lista
-    TextButton(
-        onClick = onCancel,
+    Column(
         modifier = Modifier.fillMaxWidth(),
-        colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onSurfaceVariant)
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text(stringResource(R.string.common_cancel), maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(
+            text = stringResource(R.string.lyrics_found_n_matches_format).format(results.size),
+            style = MaterialTheme.typography.headlineSmall,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            if (onOpenProvidersClick != null) {
+                FilledTonalButton(
+                    onClick = onOpenProvidersClick,
+                    modifier = Modifier.weight(1f).height(38.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp)
+                ) {
+                    Icon(Icons.Rounded.LowPriority, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Đổi nguồn", maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelMedium)
+                }
+            }
+            FilledTonalButton(
+                onClick = onManualSearchClick,
+                modifier = Modifier.weight(1f).height(38.dp),
+                shape = RoundedCornerShape(12.dp),
+                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp)
+            ) {
+                Icon(Icons.Rounded.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Tìm thủ công", maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelMedium)
+            }
+        }
+
+        Spacer(modifier = Modifier.height(14.dp))
+
+        // Lista Scrollable Optimizada
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f, fill = false)
+                .heightIn(max = 350.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            contentPadding = PaddingValues(bottom = 8.dp)
+        ) {
+            itemsIndexed(
+                items = results,
+                key = { index, item -> "${item.lyrics.provider}_${item.record.id}_$index" }
+            ) { _, result ->
+                ResultItemCard(result = result, onClick = { onPickResult(result) })
+            }
+
+            item {
+                val providers = results
+                    .mapNotNull { it.lyrics.provider?.takeIf { p -> p.isNotBlank() } }
+                    .distinct()
+                val primaryProvider = providers.firstOrNull() ?: "LRCLIB"
+                val providersLabel = if (providers.isNotEmpty()) providers.joinToString(", ") else "LRCLIB"
+                ProviderText(
+                    providerText = stringResource(R.string.lyrics_provided_by),
+                    uri = LyricsProviderType.resolveWebsiteUri(primaryProvider),
+                    providerName = providersLabel,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth().padding(top = 16.dp, bottom = 8.dp)
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // Botón Cancelar al final de la lista
+        TextButton(
+            onClick = onCancel,
+            modifier = Modifier.fillMaxWidth(),
+            colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onSurfaceVariant)
+        ) {
+            Text(stringResource(R.string.common_cancel), maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ResultItemCard(
     result: LyricsSearchResult,
     onClick: () -> Unit
 ) {
-    val hasSyncedLyrics = !result.record.syncedLyrics.isNullOrEmpty()
-    
+    val hasSyncedLyrics = !result.record.syncedLyrics.isNullOrEmpty() || !result.lyrics.synced.isNullOrEmpty()
+    val hasWordSync = result.lyrics.synced?.any { !it.words.isNullOrEmpty() } == true
+    val providerName = result.lyrics.provider?.takeIf { it.isNotBlank() } ?: "LRCLIB"
+    val subtitleText = when {
+        result.record.artistName.isNotBlank() && result.record.albumName.isNotBlank() ->
+            stringResource(R.string.lyrics_artist_album_line, result.record.artistName, result.record.albumName)
+        result.record.artistName.isNotBlank() -> result.record.artistName
+        else -> result.record.albumName
+    }
+
     Surface(
         onClick = onClick,
         shape = RoundedCornerShape(16.dp),
@@ -365,7 +539,7 @@ private fun ResultItemCard(
         modifier = Modifier.fillMaxWidth()
     ) {
         Row(
-            modifier = Modifier.padding(16.dp),
+            modifier = Modifier.padding(14.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             // Icon indicator
@@ -388,22 +562,47 @@ private fun ResultItemCard(
                 )
             }
 
-            Spacer(modifier = Modifier.width(16.dp))
+            Spacer(modifier = Modifier.width(12.dp))
 
-            Column(modifier = Modifier.weight(1f)) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Text(
+                    text = result.record.name,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                if (subtitleText.isNotBlank()) {
                     Text(
-                        text = result.record.name,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.weight(1f, fill = false),
+                        text = subtitleText,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
+                }
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = MaterialTheme.colorScheme.secondaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                    ) {
+                        Text(
+                            text = providerName,
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                            maxLines = 1,
+                            softWrap = false
+                        )
+                    }
                     if (hasSyncedLyrics) {
                         Surface(
                             shape = RoundedCornerShape(6.dp),
@@ -414,22 +613,29 @@ private fun ResultItemCard(
                                 text = stringResource(R.string.lyrics_synced_badge),
                                 style = MaterialTheme.typography.labelSmall,
                                 fontWeight = FontWeight.Bold,
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                maxLines = 1,
+                                softWrap = false
+                            )
+                        }
+                    }
+                    if (hasWordSync) {
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = MaterialTheme.colorScheme.tertiaryContainer,
+                            contentColor = MaterialTheme.colorScheme.onTertiaryContainer
+                        ) {
+                            Text(
+                                text = "Word-Sync",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                maxLines = 1,
+                                softWrap = false
                             )
                         }
                     }
                 }
-                Text(
-                    text = stringResource(
-                        R.string.lyrics_artist_album_line,
-                        result.record.artistName,
-                        result.record.albumName
-                    ),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
             }
         }
     }
@@ -441,7 +647,9 @@ fun NotFoundContent(
     initialArtist: String?,
     message: String,
     onManualSearch: (String, String?) -> Unit,
-    onCancel: () -> Unit
+    onCancel: () -> Unit,
+    isManualEditMode: Boolean = false,
+    onOpenProvidersClick: (() -> Unit)? = null
 ) {
     val normalizedArtist = rememberSaveable(initialArtist) {
         initialArtist
@@ -450,8 +658,8 @@ fun NotFoundContent(
             .orEmpty()
     }
 
-    var title by rememberSaveable { mutableStateOf(initialTitle) }
-    var artist by rememberSaveable { mutableStateOf(normalizedArtist) }
+    var title by rememberSaveable(initialTitle) { mutableStateOf(initialTitle) }
+    var artist by rememberSaveable(normalizedArtist) { mutableStateOf(normalizedArtist) }
 
     Box(
         modifier = Modifier
@@ -461,7 +669,7 @@ fun NotFoundContent(
         contentAlignment = Alignment.Center
     ) {
         Icon(
-            imageVector = Icons.Rounded.SearchOff,
+            imageVector = if (isManualEditMode) Icons.Rounded.Search else Icons.Rounded.SearchOff,
             contentDescription = null,
             modifier = Modifier.size(36.dp),
             tint = MaterialTheme.colorScheme.onSecondaryContainer
@@ -471,7 +679,7 @@ fun NotFoundContent(
     Spacer(Modifier.height(16.dp))
 
     Text(
-        text = stringResource(R.string.lyrics_not_found),
+        text = if (isManualEditMode) "Tìm lời thủ công" else stringResource(R.string.lyrics_not_found),
         style = MaterialTheme.typography.headlineSmall
     )
 
@@ -524,10 +732,10 @@ fun NotFoundContent(
         )
     }
 
-    Spacer(Modifier.height(24.dp))
+    Spacer(Modifier.height(20.dp))
 
     Column(
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
         modifier = Modifier.fillMaxWidth()
     ) {
         Button(
@@ -540,7 +748,7 @@ fun NotFoundContent(
             enabled = title.isNotBlank(),
             modifier = Modifier
                 .fillMaxWidth()
-                .height(52.dp),
+                .height(50.dp),
             shape = RoundedCornerShape(18.dp)
         ) {
             Icon(Icons.Rounded.Search, null)
@@ -548,9 +756,23 @@ fun NotFoundContent(
             Text(stringResource(R.string.common_search))
         }
 
+        if (onOpenProvidersClick != null) {
+            OutlinedButton(
+                onClick = onOpenProvidersClick,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(46.dp),
+                shape = RoundedCornerShape(16.dp)
+            ) {
+                Icon(Icons.Rounded.LowPriority, null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Chọn nguồn lời bài hát", maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+
         TextButton(
             onClick = onCancel,
-            modifier = Modifier.fillMaxWidth().height(52.dp),
+            modifier = Modifier.fillMaxWidth().height(46.dp),
             shape = RoundedCornerShape(18.dp)
         ) {
             Text(stringResource(R.string.common_cancel), maxLines = 1, overflow = TextOverflow.Ellipsis)

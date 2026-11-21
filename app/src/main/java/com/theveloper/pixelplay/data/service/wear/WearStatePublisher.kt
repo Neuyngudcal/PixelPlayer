@@ -11,6 +11,7 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import com.google.android.gms.wearable.Asset
 import com.google.android.gms.wearable.PutDataMapRequest
 import com.google.android.gms.wearable.Wearable
+import com.google.android.material.color.utilities.Hct
 import com.theveloper.pixelplay.data.preferences.dataStore
 import com.theveloper.pixelplay.data.model.PlayerInfo
 import com.theveloper.pixelplay.shared.WearDataPaths
@@ -72,40 +73,18 @@ class WearStatePublisher @Inject constructor(
     }
 
     /**
-     * Publish the current player state to Wear Data Layer.
-     * Converts PlayerInfo -> WearPlayerState (lightweight DTO) and sends as DataItem.
-     *
-     * @param songId The current media item's ID
-     * @param playerInfo The full player info from MusicService
+     * Wear OS support has been removed; state publishing is now a no-op.
      */
+    @Suppress("UNUSED_PARAMETER")
     fun publishState(songId: String?, playerInfo: PlayerInfo) {
-        scope.launch {
-            try {
-                publishStateInternal(songId, playerInfo)
-            } catch (e: Exception) {
-                Timber.tag(TAG).w(e, "Failed to publish state to Wear Data Layer")
-            }
-        }
+        // Wear OS integration disabled.
     }
 
     /**
-     * Clear state from the Data Layer (e.g. when service is destroyed).
+     * Wear OS support has been removed; clearing state is now a no-op.
      */
     fun clearState() {
         clearCache()
-        scope.launch {
-            try {
-                val request = PutDataMapRequest.create(WearDataPaths.PLAYER_STATE).apply {
-                    dataMap.putString(WearDataPaths.KEY_STATE_JSON, "")
-                    dataMap.putLong(WearDataPaths.KEY_TIMESTAMP, System.currentTimeMillis())
-                }.asPutDataRequest().setUrgent()
-
-                dataClient.putDataItem(request)
-                Timber.tag(TAG).d("Cleared Wear player state")
-            } catch (e: Exception) {
-                Timber.tag(TAG).w(e, "Failed to clear Wear state")
-            }
-        }
     }
 
     private suspend fun publishStateInternal(songId: String?, playerInfo: PlayerInfo) {
@@ -304,9 +283,12 @@ class WearStatePublisher @Inject constructor(
         val secondaryContainer = colors.darkPrevNextBackground
         val secondaryContent = colors.darkPrevNextIcon
 
-        val gradientTop = ColorUtils.blendARGB(surfaceContainerHigh, playContainer, 0.24f)
-        val gradientMiddle = ColorUtils.blendARGB(surfaceContainer, AndroidColor.BLACK, 0.48f)
-        val gradientBottom = ColorUtils.blendARGB(surfaceContainerLowest, AndroidColor.BLACK, 0.78f)
+        val primaryHct = Hct.fromInt(playContainer)
+        val surfaceHct = Hct.fromInt(surfaceContainer)
+        val accentChroma = primaryHct.chroma.coerceAtMost(36.0)
+        val gradientTop = Hct.from(primaryHct.hue, (accentChroma * 0.65).coerceAtMost(28.0), 20.0).toInt()
+        val gradientMiddle = Hct.from(surfaceHct.hue, (accentChroma * 0.35).coerceAtMost(16.0), 10.0).toInt()
+        val gradientBottom = Hct.from(surfaceHct.hue, (accentChroma * 0.20).coerceAtMost(10.0), 4.0).toInt()
 
         val disabledContainer = surfaceContainerHighest
         val chipContainer = ColorUtils.blendARGB(secondaryContainer, surfaceContainerLow, 0.36f)
@@ -320,52 +302,27 @@ class WearStatePublisher @Inject constructor(
             surfaceContainerArgb = surfaceContainer,
             surfaceContainerHighArgb = surfaceContainerHigh,
             surfaceContainerHighestArgb = surfaceContainerHighest,
-            textPrimaryArgb = ensureReadable(preferredColor = title, backgroundColor = gradientMiddle),
-            textSecondaryArgb = ensureReadable(preferredColor = artist, backgroundColor = gradientBottom),
-            textErrorArgb = 0xFFFFB8C7.toInt(),
+            textPrimaryArgb = ensureWearReadable(preferredColor = title, backgroundColor = gradientMiddle),
+            textSecondaryArgb = ensureWearReadable(preferredColor = artist, backgroundColor = gradientBottom),
+            textErrorArgb = harmonizeWearAccent(0xFFFFB4AB.toInt(), playContainer, gradientBottom),
             controlContainerArgb = playContainer,
-            controlContentArgb = ensureReadable(preferredColor = playContent, backgroundColor = playContainer),
+            controlContentArgb = ensureWearReadable(preferredColor = playContent, backgroundColor = playContainer),
             controlDisabledContainerArgb = disabledContainer,
-            controlDisabledContentArgb = ensureReadable(
+            controlDisabledContentArgb = ensureWearReadable(
                 preferredColor = artist,
                 backgroundColor = disabledContainer
             ),
             transportContainerArgb = secondaryContainer,
-            transportContentArgb = ensureReadable(
+            transportContentArgb = ensureWearReadable(
                 preferredColor = secondaryContent,
                 backgroundColor = secondaryContainer,
             ),
             chipContainerArgb = chipContainer,
-            chipContentArgb = ensureReadable(preferredColor = secondaryContent, backgroundColor = chipContainer),
-            favoriteActiveArgb = shiftHue(playContainer, 34f),
-            shuffleActiveArgb = shiftHue(playContainer, -72f),
-            repeatActiveArgb = shiftHue(playContainer, -22f),
+            chipContentArgb = ensureWearReadable(preferredColor = secondaryContent, backgroundColor = chipContainer),
+            favoriteActiveArgb = harmonizeWearAccent(0xFFFF5C8A.toInt(), playContainer, surfaceContainer),
+            shuffleActiveArgb = harmonizeWearAccent(0xFF44CDC4.toInt(), playContainer, surfaceContainer),
+            repeatActiveArgb = harmonizeWearAccent(0xFF70A6FF.toInt(), playContainer, surfaceContainer),
         )
-    }
-
-    private fun shiftHue(color: Int, hueShift: Float): Int {
-        val hsl = FloatArray(3)
-        ColorUtils.colorToHSL(color, hsl)
-        hsl[0] = (hsl[0] + hueShift + 360f) % 360f
-        hsl[1] = (hsl[1] * 1.18f).coerceIn(0.42f, 0.92f)
-        hsl[2] = (hsl[2] + 0.08f).coerceIn(0.34f, 0.78f)
-        return ColorUtils.HSLToColor(hsl)
-    }
-
-    private fun ensureReadable(preferredColor: Int, backgroundColor: Int): Int {
-        val opaqueBackground = if (AndroidColor.alpha(backgroundColor) >= 255) {
-            backgroundColor
-        } else {
-            ColorUtils.compositeColors(backgroundColor, AndroidColor.BLACK)
-        }
-        val preferredContrast = ColorUtils.calculateContrast(preferredColor, opaqueBackground)
-        if (preferredContrast >= 3.0) return preferredColor
-
-        val light = 0xFFF6F2FF.toInt()
-        val dark = 0xFF17141E.toInt()
-        val lightContrast = ColorUtils.calculateContrast(light, opaqueBackground)
-        val darkContrast = ColorUtils.calculateContrast(dark, opaqueBackground)
-        return if (lightContrast >= darkContrast) light else dark
     }
 
     private fun com.theveloper.pixelplay.data.model.Lyrics.toWearLyrics(

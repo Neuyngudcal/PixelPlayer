@@ -142,7 +142,7 @@ private fun RecentlyPlayedRangeChip(
         ) {
             Box(
                 modifier = Modifier
-                    .width(iconSlotWidth)
+                    .width(iconSlotWidth.coerceAtLeast(0.dp))
                     .clipToBounds(),
                 contentAlignment = Alignment.CenterStart
             ) {

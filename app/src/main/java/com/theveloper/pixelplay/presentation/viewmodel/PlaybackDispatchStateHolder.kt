@@ -444,8 +444,12 @@ class PlaybackDispatchStateHolder @Inject constructor(
     }
 
     private fun List<Song>.matchesSongOrder(contextSongs: List<Song>): Boolean {
+        if (this === contextSongs) return true
         if (size != contextSongs.size) return false
-        return indices.all { this[it].id == contextSongs[it].id }
+        if (isEmpty()) return true
+        // Fast-check boundary elements before scanning all indices
+        if (first().id != contextSongs.first().id || last().id != contextSongs.last().id) return false
+        return indices.all { index -> this[index].id == contextSongs[index].id }
     }
 
     private fun MediaController.resolveReusablePlaybackTargetIndex(

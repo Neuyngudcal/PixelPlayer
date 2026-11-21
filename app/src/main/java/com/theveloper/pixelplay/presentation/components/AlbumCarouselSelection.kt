@@ -14,6 +14,8 @@ import androidx.compose.ui.unit.*
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import coil.size.Size
@@ -24,6 +26,10 @@ import kotlinx.collections.immutable.ImmutableList
 import kotlinx.coroutines.flow.first
 
 import com.theveloper.pixelplay.data.preferences.AlbumArtQuality
+import kotlin.math.abs
+import kotlin.math.ceil
+import kotlin.math.floor
+import kotlin.math.roundToInt
 
 // ====== TIPOS/STATE DEL CARRUSEL (wrapper para mantener compatibilidad) ======
 
@@ -36,7 +42,7 @@ fun rememberRoundedParallaxCarouselState(
 
 // ====== TU SECCIÓN: ACOPLADA AL NUEVO API ======
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun AlbumCarouselSection(
     currentSong: Song?,
@@ -49,7 +55,8 @@ fun AlbumCarouselSection(
     modifier: Modifier = Modifier,
     carouselStyle: String = CarouselStyle.NO_PEEK,
     itemSpacing: Dp = 8.dp,
-    albumArtQuality: AlbumArtQuality = AlbumArtQuality.MEDIUM
+    albumArtQuality: AlbumArtQuality = AlbumArtQuality.MEDIUM,
+    onSwipePreviewChanged: (String?, () -> Float) -> Unit = { _, _ -> }
 ) {
     if (queue.isEmpty()) return
 
@@ -67,16 +74,11 @@ fun AlbumCarouselSection(
         pageCount = { queue.size }
     )
 
-    // Snappy, critically-damped (no-overshoot) spring for programmatic skip scrolls.
-    // The previous MotionScheme.expressive().defaultSpatialSpec was a slow, bouncy spring whose
-    // long settle tail produced many frames of per-item measure/clip work, reading as "laggy".
-    // A no-bounce spring snaps in and settles fast, matching the native feel of the open/close
-    // animation while cutting the number of expensive carousel frames.
-    val carouselAnimationSpec = remember {
-        spring<Float>(
-            dampingRatio = Spring.DampingRatioNoBouncy,
-            stiffness = Spring.StiffnessMediumLow
-        )
+    // Use M3 Expressive slowSpatialSpec (damping = 0.8f, stiffness = 200f) for the full-width
+    // album art hero transition so programmatic skips accelerate gracefully instead of snapping too abruptly.
+    val motionScheme = MaterialTheme.motionScheme
+    val carouselAnimationSpec = remember(motionScheme) {
+        motionScheme.slowSpatialSpec<Float>()
     }
 
     // Calculate target size based on quality
@@ -101,11 +103,15 @@ fun AlbumCarouselSection(
         buildQueueOccurrenceKeys(queue)
     }
 
+    val prefetchRadius = remember(albumArtQuality) {
+        if (albumArtQuality == AlbumArtQuality.ORIGINAL || albumArtQuality == AlbumArtQuality.HIGH) 1 else 2
+    }
+
     PrefetchAlbumNeighbors(
         isActive = expansionFraction > 0.08f,
         pagerState = carouselState.pagerState,
         queue = queue,
-        radius = 1,
+        radius = prefetchRadius,
         targetSize = targetSize,
         anchorIndex = effectiveTargetIndex
     )
@@ -116,16 +122,88 @@ fun AlbumCarouselSection(
     // source) so we can tell a real swipe apart from our own programmatic skip/seek scrolls.
     var isUserDragging by remember { mutableStateOf(false) }
     var userDragSettlePending by remember { mutableStateOf(false) }
+    var settledSwipePage by remember { mutableStateOf<Int?>(null) }
     LaunchedEffect(carouselState) {
         carouselState.pagerState.interactionSource.interactions.collect { interaction ->
             when (interaction) {
                 is DragInteraction.Start -> {
+                    settledSwipePage = null
                     isUserDragging = true
                     userDragSettlePending = true
                 }
                 is DragInteraction.Stop, is DragInteraction.Cancel -> isUserDragging = false
             }
         }
+    }
+
+    LaunchedEffect(currentSongIndex, requestedTargetIndex) {
+        if (requestedTargetIndex != null || settledSwipePage == currentSongIndex) {
+            settledSwipePage = null
+        }
+    }
+
+    LaunchedEffect(settledSwipePage) {
+        val pendingPage = settledSwipePage ?: return@LaunchedEffect
+        kotlinx.coroutines.delay(800)
+        if (settledSwipePage == pendingPage) {
+            settledSwipePage = null
+        }
+    }
+
+    val latestCurrentSongIndex = rememberUpdatedState(currentSongIndex)
+    val latestSettledSwipePage = rememberUpdatedState(settledSwipePage)
+    val latestIsSwipeActive = rememberUpdatedState(
+        isUserDragging || userDragSettlePending || settledSwipePage != null
+    )
+    val swipeProgressProvider = remember(carouselState) {
+        {
+            val settledTarget = latestSettledSwipePage.value
+            val continuousPage = carouselState.pagerState.currentPage +
+                carouselState.pagerState.currentPageOffsetFraction
+            if (settledTarget != null && !carouselState.pagerState.isScrollInProgress) {
+                1f
+            } else if (latestIsSwipeActive.value) {
+                val anchor = latestCurrentSongIndex.value
+                val delta = continuousPage - anchor
+                val absDelta = abs(delta)
+                if (absDelta <= 1f) {
+                    absDelta.coerceIn(0f, 1f)
+                } else {
+                    val target = settledTarget ?: (anchor + delta.roundToInt())
+                    (1f - abs(target - continuousPage)).coerceIn(0f, 1f)
+                }
+            } else {
+                0f
+            }
+        }
+    }
+
+    val latestOnSwipePreviewChanged by rememberUpdatedState(onSwipePreviewChanged)
+    LaunchedEffect(carouselState, queue, currentSongIndex, requestedTargetIndex) {
+        snapshotFlow {
+            val swipeActive = (isUserDragging || userDragSettlePending || settledSwipePage != null) &&
+                requestedTargetIndex == null
+            if (!swipeActive) {
+                null
+            } else {
+                val settledTarget = settledSwipePage
+                val anchor = currentSongIndex
+                val continuousPage = carouselState.pagerState.currentPage +
+                    carouselState.pagerState.currentPageOffsetFraction
+                val delta = continuousPage - anchor
+                val targetIdx = when {
+                    settledTarget != null -> settledTarget
+                    abs(delta) < 0.005f -> null
+                    delta > 0f -> (anchor + ceil(delta.toDouble()).toInt()).coerceIn(0, queue.lastIndex)
+                    else -> (anchor + floor(delta.toDouble()).toInt()).coerceIn(0, queue.lastIndex)
+                }?.takeIf { it != anchor && it in queue.indices }
+                targetIdx?.let { queue[it].albumArtUriString }
+            }
+        }
+            .distinctUntilChanged()
+            .collect { targetUri ->
+                latestOnSwipePreviewChanged(targetUri, swipeProgressProvider)
+            }
     }
 
     // Player -> Carousel. Retargets continuously: each press cancels the in-flight animation and
@@ -162,6 +240,8 @@ fun AlbumCarouselSection(
         lastSettledSongId = queue.getOrNull(effectiveTargetIndex)?.id ?: currentSong?.id
     }
 
+    val latestOnSongSelected by rememberUpdatedState(onSongSelected)
+    val latestRequestedScrollIndex by rememberUpdatedState(requestedScrollIndex)
     val hapticFeedback = LocalHapticFeedback.current
     // Carousel -> Player (cuando se detiene el scroll)
     LaunchedEffect(carouselState, currentSongIndex, queue) {
@@ -176,9 +256,13 @@ fun AlbumCarouselSection(
                 if (!userDragSettlePending) return@collect
                 userDragSettlePending = false
                 val settled = carouselState.pagerState.currentPage
+                if (latestRequestedScrollIndex == settled) return@collect
                 if (settled != currentSongIndex) {
+                    settledSwipePage = settled
                     hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
-                    queue.getOrNull(settled)?.let { onSongSelected(it, settled) }
+                    queue.getOrNull(settled)?.let { song ->
+                        latestOnSongSelected(song, settled)
+                    }
                 }
             }
     }
@@ -199,16 +283,20 @@ fun AlbumCarouselSection(
             itemKey = { index -> carouselItemKeys.getOrNull(index) ?: "queue_item_$index" },
             content = { index ->
                 val song = queue[index]
-                val isFocusedItem = carouselState.pagerState.currentPage == index
+                val isTelegramArt = song.albumArtUriString?.startsWith("telegram_art") == true
                 Box(
                     Modifier
                         .fillMaxSize()
                         .aspectRatio(1f)
                         .clickable(
-                            enabled = isFocusedItem && song.albumId != -1L,
+                            enabled = song.albumId != -1L,
                             interactionSource = remember { MutableInteractionSource() },
                             indication = null,
-                            onClick = { onAlbumClick(song) }
+                            onClick = {
+                                if (carouselState.pagerState.currentPage == index) {
+                                    onAlbumClick(song)
+                                }
+                            }
                         )
                 ) { // Enforce 1:1 aspect ratio for the item itself
                     OptimizedAlbumArt(
@@ -216,9 +304,11 @@ fun AlbumCarouselSection(
                         title = song.title,
                         modifier = Modifier.fillMaxSize(),
                         targetSize = targetSize,
-                        placeholderModel = if (song.albumArtUriString?.startsWith("telegram_art") == true) {
-                             "${song.albumArtUriString}?quality=thumb"
-                        } else null
+                        placeholderModel = if (isTelegramArt) {
+                            "${song.albumArtUriString}?quality=thumb"
+                        } else null,
+                        crossfadeDurationMillis = if (isTelegramArt) 350 else 0,
+                        useSubcomposition = false
                     )
                 }
             }

@@ -244,14 +244,6 @@
     <string name="settings_palette_style_expressive_desc">대담한 색조 변화와 대비.</string>
     <string name="settings_palette_style_fruit_salad">Fruit Salad</string>
     <string name="settings_palette_style_fruit_salad_desc">장난스러운 회전 강조색.</string>
-    <string name="settings_palette_style_color_accuracy_title">색상 정확도</string>
-    <string name="settings_palette_style_color_accuracy_subtitle">0은 현재 조정을 유지합니다. 값이 높을수록 앨범 아트의 지배적인 색상에 더 가깝게 유지됩니다.</string>
-    <string name="settings_palette_style_accuracy_current">현재</string>
-    <string name="settings_palette_style_accuracy_more_accurate">정확함</string>
-    <string name="settings_palette_style_accuracy_summary_current">0 • 현재</string>
-    <string name="settings_palette_style_accuracy_summary_subtle">%1$d • 미묘함</string>
-    <string name="settings_palette_style_accuracy_summary_balanced">%1$d • 균형</string>
-    <string name="settings_palette_style_accuracy_summary_precise">%1$d • 정밀함</string>
 
     <!-- NavBarCornerRadiusScreen -->
     <string name="navbar_adjust_title">모서리 반경 조정</string>

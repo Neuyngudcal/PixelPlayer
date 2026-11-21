@@ -1,6 +1,7 @@
 package com.theveloper.pixelplay.data.media
 
 import android.os.ParcelFileDescriptor
+import androidx.annotation.VisibleForTesting
 import com.kyant.taglib.TagLib
 import timber.log.Timber
 import java.io.File
@@ -14,34 +15,34 @@ import kotlin.math.pow
  * Supports standard tags:
  * - REPLAYGAIN_TRACK_GAIN (e.g. "-6.54 dB")
  * - REPLAYGAIN_ALBUM_GAIN (e.g. "-8.20 dB")
+ * - R128_TRACK_GAIN / R128_ALBUM_GAIN (RFC 7845 Q7.8 fixed-point `1/256 dB`, aligned by `+5.0 dB`)
  *
  * The gain is converted to a linear volume multiplier: 10^(gainDb / 20)
- * and clamped to [0.0, 1.0] to avoid clipping.
+ * and clamped to [0.0, 1.0] to avoid clipping and match `Player.volume` bounds.
  */
 @Singleton
 class ReplayGainManager @Inject constructor() {
 
-    // LRU cache: filePath -> ReplayGainValues
+    private data class CacheEntry(
+        val values: ReplayGainValues?,
+        val lastModifiedMs: Long,
+    )
+
+    // LRU cache: filePath -> CacheEntry (supports both positive and negative cache hits)
     // Avoids re-reading tags on repeat, resume, or rapid track changes.
-    private val cache = object : LinkedHashMap<String, ReplayGainValues?>(64, 0.75f, true) {
-        override fun removeEldestEntry(eldest: Map.Entry<String, ReplayGainValues?>) = size > 200
+    private val cache = object : LinkedHashMap<String, CacheEntry>(64, 0.75f, true) {
+        override fun removeEldestEntry(eldest: Map.Entry<String, CacheEntry>) = size > 200
+    }
+
+    @VisibleForTesting
+    internal var propertyMapReader: (File) -> Map<String, Array<String>>? = { file ->
+        ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY).use { fd ->
+            TagLib.getMetadata(fd.detachFd(), readPictures = false)?.propertyMap
+        }
     }
 
     companion object {
         private const val TAG = "ReplayGainManager"
-
-        // Standard ReplayGain tag keys (TagLib uses uppercase property map keys)
-        private val TRACK_GAIN_KEYS = listOf(
-            "REPLAYGAIN_TRACK_GAIN",
-            "REPLAYGAIN_TRACK_GAIN_DB",  // Some taggers use this variant
-            "R128_TRACK_GAIN"            // Opus R128 normalization
-        )
-
-        private val ALBUM_GAIN_KEYS = listOf(
-            "REPLAYGAIN_ALBUM_GAIN",
-            "REPLAYGAIN_ALBUM_GAIN_DB",
-            "R128_ALBUM_GAIN"
-        )
 
         // Pre-amp to apply when no ReplayGain tag is found (dB)
         // 0.0 means no change
@@ -54,49 +55,84 @@ class ReplayGainManager @Inject constructor() {
     )
 
     /**
-     * Reads ReplayGain tags from the audio file at the given path.
-     * Returns null if the file can't be read or no RG tags are found.
+     * Invalidates any cached ReplayGain entry (positive or negative) for [filePath].
      */
+    fun invalidateCache(filePath: String) {
+        if (filePath.isBlank()) return
+        synchronized(cache) {
+            cache.remove(filePath)
+        }
+    }
+
     /**
      * Returns the cached ReplayGain values for the given path without triggering an IO read.
-     * Returns null if the file has not been read yet.
+     * Returns null if the file has not been read yet, was modified since caching, or has no tags.
      */
     fun getCachedReplayGain(filePath: String): ReplayGainValues? {
         if (filePath.isBlank()) return null
-        return synchronized(cache) { cache[filePath] }
+        val file = File(filePath)
+        val currentModified = if (file.exists()) file.lastModified() else return null
+        return synchronized(cache) {
+            val entry = cache[filePath] ?: return@synchronized null
+            if (entry.lastModifiedMs != currentModified) {
+                cache.remove(filePath)
+                null
+            } else {
+                entry.values
+            }
+        }
     }
 
+    /**
+     * Reads ReplayGain tags from the audio file at the given path.
+     * Returns null if the file can't be read or no RG tags are found.
+     * Uses both positive and negative caching keyed by file modification timestamp.
+     */
     fun readReplayGain(filePath: String): ReplayGainValues? {
         if (filePath.isBlank()) return null
 
-        // Return cached value if available — avoids expensive JNI tag read on repeat/resume
-        synchronized(cache) { cache[filePath] }?.let {
-            Timber.tag(TAG).d("Cache hit for ${File(filePath).name}")
-            return it
-        }
-
         val file = File(filePath)
         if (!file.exists() || !file.canRead()) return null
+        val currentModified = file.lastModified()
+
+        // Return cached entry (including cached negative null hit) when modification time matches.
+        val cachedEntry = synchronized(cache) {
+            val entry = cache[filePath]
+            if (entry != null && entry.lastModifiedMs == currentModified) {
+                entry
+            } else {
+                if (entry != null) cache.remove(filePath)
+                null
+            }
+        }
+        if (cachedEntry != null) {
+            Timber.tag(TAG).d("Cache hit (hasTags=%s) for %s", cachedEntry.values != null, file.name)
+            return cachedEntry.values
+        }
 
         return try {
-            ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY).use { fd ->
-                val metadata = TagLib.getMetadata(fd.detachFd(), readPictures = false)
-                val propertyMap = metadata?.propertyMap ?: run {
-                    synchronized(cache) { cache[filePath] = null }
-                    return null
+            val propertyMap = propertyMapReader(file)
+            if (propertyMap == null) {
+                synchronized(cache) {
+                    cache[filePath] = CacheEntry(values = null, lastModifiedMs = currentModified)
                 }
+                return null
+            }
 
-                val trackGain = extractGainValue(propertyMap, TRACK_GAIN_KEYS)
-                val albumGain = extractGainValue(propertyMap, ALBUM_GAIN_KEYS)
+            val trackGain = extractGainValue(propertyMap, ReplayGainTagParser.TRACK_GAIN_KEYS)
+            val albumGain = extractGainValue(propertyMap, ReplayGainTagParser.ALBUM_GAIN_KEYS)
 
-                if (trackGain == null && albumGain == null) {
-                    synchronized(cache) { cache[filePath] = null }
-                    return null
+            if (trackGain == null && albumGain == null) {
+                synchronized(cache) {
+                    cache[filePath] = CacheEntry(values = null, lastModifiedMs = currentModified)
                 }
+                return null
+            }
 
-                ReplayGainValues(trackGainDb = trackGain, albumGainDb = albumGain).also {
-                    Timber.tag(TAG).d("ReplayGain for ${file.name}: track=${it.trackGainDb}dB, album=${it.albumGainDb}dB")
-                    synchronized(cache) { cache[filePath] = it }
+            ReplayGainValues(trackGainDb = trackGain, albumGainDb = albumGain).also { values ->
+                Timber.tag(TAG).d("ReplayGain for ${file.name}: track=${values.trackGainDb}dB, album=${values.albumGainDb}dB")
+                synchronized(cache) {
+                    cache[filePath] = CacheEntry(values = values, lastModifiedMs = currentModified)
                 }
             }
         } catch (e: Exception) {
@@ -106,14 +142,17 @@ class ReplayGainManager @Inject constructor() {
     }
 
     /**
-     * Converts a dB gain value to a linear volume multiplier, clamped to [0, 1].
+     * Converts a dB gain value to a linear volume multiplier, clamped to `[0.0, 1.0]`.
      * Negative gain values reduce volume (which is the common case for loud tracks).
-     * Positive gain values would increase volume but we cap at 1.0 to prevent clipping.
+     * Positive gain values cannot exceed `1.0` on [androidx.media3.common.Player.setVolume]
+     * without external amplification, so clamping here keeps `expectedVolume` and crossfade
+     * headroom consistent and avoids clipping.
      */
     fun gainDbToVolume(gainDb: Float, preAmpDb: Float = DEFAULT_PRE_AMP_DB): Float {
+        if (!gainDb.isFinite() || !preAmpDb.isFinite()) return 1f
         val totalGainDb = gainDb + preAmpDb
         val linear = 10f.pow(totalGainDb / 20f)
-        return linear.coerceIn(0f, 2f)  // allow up to +6 dB boost for quiet tracks
+        return if (linear.isFinite()) linear.coerceIn(0f, 1f) else 1f
     }
 
     /**
@@ -140,22 +179,6 @@ class ReplayGainManager @Inject constructor() {
         }
     }
 
-    private fun extractGainValue(propertyMap: Map<String, Array<String>>, keys: List<String>): Float? {
-        for (key in keys) {
-            val rawValue = propertyMap[key]?.firstOrNull() ?: continue
-            return parseGainString(rawValue)
-        }
-        return null
-    }
-
-    /**
-     * Parses a ReplayGain string like "-6.54 dB" or "+3.21 dB" into a Float.
-     * Handles variants with or without "dB" suffix and various whitespace.
-     */
-    private fun parseGainString(raw: String): Float? {
-        val cleaned = raw.trim()
-            .replace(Regex("[dD][bB]"), "")  // Remove "dB" suffix
-            .trim()
-        return cleaned.toFloatOrNull()
-    }
+    private fun extractGainValue(propertyMap: Map<String, Array<String>>, keys: List<String>): Float? =
+        ReplayGainTagParser.extractGainDb(propertyMap, keys)
 }

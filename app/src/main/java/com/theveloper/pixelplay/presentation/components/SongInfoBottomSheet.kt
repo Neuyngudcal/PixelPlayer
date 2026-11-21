@@ -157,37 +157,6 @@ fun SongInfoBottomSheet(
     var pendingTonePermissionTarget by remember { mutableStateOf<ToneTarget?>(null) }
     val audioMeta by songInfoViewModel.audioMeta.collectAsStateWithLifecycle()
     val resolvedArtists by songInfoViewModel.resolvedArtists.collectAsStateWithLifecycle()
-    val isPixelPlayWatchAvailable by songInfoViewModel.isPixelPlayWatchAvailable.collectAsStateWithLifecycle()
-    val isWatchAvailabilityResolved by songInfoViewModel.isWatchAvailabilityResolved.collectAsStateWithLifecycle()
-    val isSendingToWatch by songInfoViewModel.isSendingToWatch.collectAsStateWithLifecycle()
-    val watchTransfers by songInfoViewModel.watchTransfers.collectAsStateWithLifecycle()
-    val watchSongIds by songInfoViewModel.watchSongIds.collectAsStateWithLifecycle()
-    val reachableWatchNodeIds by songInfoViewModel.reachableWatchNodeIds.collectAsStateWithLifecycle()
-    val latestSongWatchTransfer = remember(song.id, watchTransfers) {
-        watchTransfers.values
-            .asSequence()
-            .filter { it.songId == song.id }
-            .maxByOrNull { it.updatedAtMillis }
-    }
-    val currentSongTransfer = latestSongWatchTransfer?.takeIf {
-        it.status == com.theveloper.pixelplay.shared.WearTransferProgress.STATUS_TRANSFERRING
-    }
-    val currentSongTransferPercent = ((currentSongTransfer?.progress ?: 0f) * 100f).toInt().coerceIn(0, 100)
-    val isSongSavedOnWatch = remember(
-        song.id,
-        watchSongIds,
-        reachableWatchNodeIds,
-        currentSongTransfer,
-    ) {
-        currentSongTransfer == null && songInfoViewModel.isSongSavedOnAllReachableWatches(song.id)
-    }
-    val canSendToWatch = remember(song.path, song.contentUriString) {
-        songInfoViewModel.isLocalSongForWatchTransfer(song)
-    }
-
-    LaunchedEffect(songInfoViewModel) {
-        songInfoViewModel.refreshWatchAvailability()
-    }
 
     val ringtonePermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
@@ -260,43 +229,6 @@ fun SongInfoBottomSheet(
         songInfoViewModel.setSongAsTone(song, target) { result ->
             handleToneResult(song, target, result)
         }
-    }
-
-    var lastShownWatchTransferError by remember(song.id) { mutableStateOf<String?>(null) }
-    LaunchedEffect(
-        latestSongWatchTransfer?.requestId,
-        latestSongWatchTransfer?.status,
-        latestSongWatchTransfer?.error,
-    ) {
-        val failedTransfer = latestSongWatchTransfer?.takeIf {
-            it.status == com.theveloper.pixelplay.shared.WearTransferProgress.STATUS_FAILED &&
-                    !it.error.isNullOrBlank()
-        } ?: return@LaunchedEffect
-        val errorKey = "${failedTransfer.requestId}:${failedTransfer.error}"
-        if (lastShownWatchTransferError == errorKey) return@LaunchedEffect
-        lastShownWatchTransferError = errorKey
-        Toast.makeText(context, failedTransfer.error, Toast.LENGTH_SHORT).show()
-    }
-
-    val shouldOfferWatchTransfer = remember(
-        canSendToWatch,
-        currentSongTransfer,
-        isPixelPlayWatchAvailable,
-        isSongSavedOnWatch,
-        isWatchAvailabilityResolved,
-    ) {
-        currentSongTransfer == null &&
-                canSendToWatch &&
-                isWatchAvailabilityResolved &&
-                isPixelPlayWatchAvailable &&
-                !isSongSavedOnWatch
-    }
-    val shouldShowWatchTransferLoading = remember(
-        canSendToWatch,
-        isWatchAvailabilityResolved,
-    ) {
-        canSendToWatch &&
-                !isWatchAvailabilityResolved
     }
 
     val evenCornerRadiusElems = 26.dp
@@ -546,35 +478,13 @@ fun SongInfoBottomSheet(
                                             }
                                         )
 
-                                        val shouldRenderWatchTransferRow =
-                                            currentSongTransfer != null ||
-                                                    shouldOfferWatchTransfer ||
-                                                    shouldShowWatchTransferLoading
-                                        if (shouldRenderWatchTransferRow) {
-                                            Row4Actions(
-                                                isPixelPlayWatchAvailable = isPixelPlayWatchAvailable,
-                                                isSendingToWatch = isSendingToWatch,
-                                                shouldOfferWatchTransfer = shouldOfferWatchTransfer,
-                                                shouldShowWatchTransferLoading = shouldShowWatchTransferLoading,
-                                                currentSongTransferPercent = currentSongTransferPercent,
-                                                currentSongTransferStatus = currentSongTransfer?.status,
-                                                currentSongTransferTotalBytes = currentSongTransfer?.totalBytes ?: 0L,
-                                                onRingtoneClick = { showTonePickerDialog = true },
-                                                onSendToWatchClick = {
-                                                    songInfoViewModel.sendSongToWatch(song) { message ->
-                                                        Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
-                                                    }
-                                                }
-                                            )
-                                        } else {
-                                            RingtoneActionButton(
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .heightIn(min = 66.dp),
-                                                showText = true,
-                                                onClick = { showTonePickerDialog = true },
-                                            )
-                                        }
+                                        RingtoneActionButton(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .heightIn(min = 66.dp),
+                                            showText = true,
+                                            onClick = { showTonePickerDialog = true },
+                                        )
 
                                         Spacer(Modifier.height(80.dp))
                                     }

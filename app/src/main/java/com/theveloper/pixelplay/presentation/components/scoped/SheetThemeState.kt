@@ -31,6 +31,7 @@ import com.theveloper.pixelplay.presentation.viewmodel.ColorSchemePair
 internal data class SheetThemeState(
     val albumColorScheme: ColorScheme,
     val miniPlayerScheme: ColorScheme,
+    val targetAlbumColorScheme: ColorScheme,
     val isPreparingPlayback: Boolean,
     val miniReadyAlpha: Float,
     val miniAppearScale: Float,
@@ -60,13 +61,22 @@ internal fun rememberSheetThemeState(
     currentSong: Song?,
     themedAlbumArtUri: String?,
     preparingSongId: String?,
-    systemColorScheme: ColorScheme
+    systemColorScheme: ColorScheme,
+    swipeTargetSchemePair: ColorSchemePair? = null,
+    swipeProgressProvider: () -> Float = { 0f }
 ): SheetThemeState {
     val isAlbumArtTheme = playerThemePreference == ThemePreference.ALBUM_ART
     val hasAlbumArt = !currentSong?.albumArtUriString.isNullOrBlank()
 
     val activePlayerScheme = remember(activePlayerSchemePair, isDarkTheme) {
         activePlayerSchemePair?.let { if (isDarkTheme) it.dark else it.light }
+    }
+    val swipeTargetScheme = remember(swipeTargetSchemePair, isDarkTheme, isAlbumArtTheme) {
+        if (isAlbumArtTheme) {
+            swipeTargetSchemePair?.let { if (isDarkTheme) it.dark else it.light }
+        } else {
+            null
+        }
     }
     val currentSongActiveScheme = remember(
         activePlayerScheme,
@@ -119,21 +129,14 @@ internal fun rememberSheetThemeState(
         systemColorScheme = systemColorScheme
     )
 
-    val rawMiniPlayerScheme = resolvePlayerSheetTargetScheme(
-        isAlbumArtTheme = isAlbumArtTheme,
-        hasAlbumArt = hasAlbumArt,
-        currentSongActiveScheme = currentSongActiveScheme,
-        lastAlbumScheme = lastAlbumSchemeSnapshot,
-        systemColorScheme = systemColorScheme
-    )
-
     // --- Batch Color Animation ---
     // Instead of 34×2 = 68 independent animateColorAsState (one Spring coroutine each),
-    // we use a single Animatable<Float> progress [0,1] that interpolates between the
-    // previous and the new target ColorScheme manually. This reduces per-frame State reads
-    // from 68 → 0 (the lerp runs during the Animatable tick, not during recomposition).
-    val albumColorScheme = rememberBatchAnimatedColorScheme(rawAlbumColorScheme)
-    val miniPlayerScheme = rememberBatchAnimatedColorScheme(rawMiniPlayerScheme)
+    // we use a single Animatable<Float> progress [0,1] shared by both full player and mini player.
+    val albumColorScheme = rememberBatchAnimatedColorScheme(
+        target = rawAlbumColorScheme,
+        swipeTargetScheme = swipeTargetScheme,
+        swipeProgressProvider = swipeProgressProvider
+    )
 
     val miniAppearProgress = remember { Animatable(0f) }
     LaunchedEffect(currentSong?.id) {
@@ -142,14 +145,17 @@ internal fun rememberSheetThemeState(
         } else if (miniAppearProgress.value < 1f) {
             miniAppearProgress.animateTo(
                 targetValue = 1f,
-                animationSpec = tween(durationMillis = 260, easing = FastOutSlowInEasing)
+                animationSpec = tween(
+                    durationMillis = com.theveloper.pixelplay.presentation.components.ANIMATION_DURATION_MS,
+                    easing = com.theveloper.pixelplay.presentation.components.M3ExpressiveEmphasizedEasing
+                )
             )
         }
     }
 
     val miniReadyAlpha = miniAppearProgress.value
     val miniAppearScale = lerp(0.985f, 1f, miniAppearProgress.value)
-    val playerAreaBackground = miniPlayerScheme.primaryContainer
+    val playerAreaBackground = albumColorScheme.primaryContainer
 
     // NOTE: miniAlpha and effectivePlayerAreaElevation are no longer computed here.
     // They were driven by the expansion fraction via the Transition API, which
@@ -162,7 +168,8 @@ internal fun rememberSheetThemeState(
 
     return SheetThemeState(
         albumColorScheme = albumColorScheme,
-        miniPlayerScheme = miniPlayerScheme,
+        targetAlbumColorScheme = rawAlbumColorScheme,
+        miniPlayerScheme = albumColorScheme,
         isPreparingPlayback = isPreparingPlayback,
         miniReadyAlpha = miniReadyAlpha,
         miniAppearScale = miniAppearScale,
@@ -170,38 +177,74 @@ internal fun rememberSheetThemeState(
     )
 }
 
+private class SchemeSnapshotRef(var value: ColorScheme)
+
 /**
  * Animates a [ColorScheme] transition using a single [Animatable]<Float> progress value
- * instead of 34 independent [animateColorAsState] calls.
+ * instead of 34 independent [animateColorAsState] calls, and optionally blends toward
+ * [swipeTargetScheme] using [swipeProgressProvider] during interactive carousel swipes.
  *
- * When [target] changes, a spring from 0→1 is run once, and the interpolated scheme is
- * derived from it. This reduces the number of running Springs from 34 → 1 and eliminates
- * the 34 concurrent [State] reads that were triggering recomposition on every animation frame.
+ * When [target] changes, [lastRenderedRef] is snapshotted as the new origin so a settled
+ * swipe hands off seamlessly without snapping back to the previous track's colors.
  */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-private fun rememberBatchAnimatedColorScheme(target: ColorScheme): ColorScheme {
+private fun rememberBatchAnimatedColorScheme(
+    target: ColorScheme,
+    swipeTargetScheme: ColorScheme? = null,
+    swipeProgressProvider: () -> Float = { 0f }
+): ColorScheme {
     val progress = remember { Animatable(1f) }
     var fromScheme by remember { mutableStateOf(target) }
     var toScheme by remember { mutableStateOf(target) }
+    val effectsSpec = remember { androidx.compose.material3.MotionScheme.expressive().slowEffectsSpec<Float>() }
+    val swipeTargetState = androidx.compose.runtime.rememberUpdatedState(swipeTargetScheme)
+    val swipeProgressState = androidx.compose.runtime.rememberUpdatedState(swipeProgressProvider)
+    val lastRenderedRef = remember { SchemeSnapshotRef(target) }
 
     LaunchedEffect(target) {
         if (toScheme == target) return@LaunchedEffect
-        // Snapshot current interpolated state as the new "from"
-        fromScheme = lerpColorScheme(fromScheme, toScheme, progress.value)
+        val currentRendered = lastRenderedRef.value
+        if (currentRendered == target) {
+            fromScheme = target
+            toScheme = target
+            progress.snapTo(1f)
+            return@LaunchedEffect
+        }
+        // Snapshot actual rendered state (including any active swipe blend) as the new "from"
+        fromScheme = currentRendered
         toScheme = target
         progress.snapTo(0f)
         progress.animateTo(
             targetValue = 1f,
-            // Snappier than the old StiffnessLow so the palette resolves in step with the
-            // (now faster) carousel skip animation instead of trailing behind it.
-            animationSpec = spring(stiffness = Spring.StiffnessMediumLow)
+            animationSpec = effectsSpec
         )
     }
 
-    // derivedStateOf ensures we only recompose consumers when progress.value actually changes,
+    // derivedStateOf ensures we only recompose consumers when progress/swipe actually changes,
     // not on every State read elsewhere in the composition.
     val interpolated by remember {
-        derivedStateOf { lerpColorScheme(fromScheme, toScheme, progress.value) }
+        derivedStateOf {
+            val base = if (fromScheme == toScheme || progress.value >= 1f) {
+                toScheme
+            } else {
+                lerpColorScheme(fromScheme, toScheme, progress.value)
+            }
+            val activeSwipeTarget = swipeTargetState.value
+            val swipeFraction = if (activeSwipeTarget != null) {
+                swipeProgressState.value().coerceIn(0f, 1f)
+            } else {
+                0f
+            }
+            val result = if (activeSwipeTarget != null && swipeFraction > 0.001f) {
+                if (swipeFraction >= 0.999f) activeSwipeTarget
+                else lerpColorScheme(base, activeSwipeTarget, swipeFraction)
+            } else {
+                base
+            }
+            lastRenderedRef.value = result
+            result
+        }
     }
     return interpolated
 }
@@ -248,4 +291,16 @@ private fun lerpColorScheme(from: ColorScheme, to: ColorScheme, t: Float): Color
         scrim                  = lerp(from.scrim, to.scrim, t),
         surfaceBright          = lerp(from.surfaceBright, to.surfaceBright, t),
         surfaceDim             = lerp(from.surfaceDim, to.surfaceDim, t),
+        primaryFixed           = lerp(from.primaryFixed, to.primaryFixed, t),
+        primaryFixedDim        = lerp(from.primaryFixedDim, to.primaryFixedDim, t),
+        onPrimaryFixed         = lerp(from.onPrimaryFixed, to.onPrimaryFixed, t),
+        onPrimaryFixedVariant  = lerp(from.onPrimaryFixedVariant, to.onPrimaryFixedVariant, t),
+        secondaryFixed         = lerp(from.secondaryFixed, to.secondaryFixed, t),
+        secondaryFixedDim      = lerp(from.secondaryFixedDim, to.secondaryFixedDim, t),
+        onSecondaryFixed       = lerp(from.onSecondaryFixed, to.onSecondaryFixed, t),
+        onSecondaryFixedVariant = lerp(from.onSecondaryFixedVariant, to.onSecondaryFixedVariant, t),
+        tertiaryFixed          = lerp(from.tertiaryFixed, to.tertiaryFixed, t),
+        tertiaryFixedDim       = lerp(from.tertiaryFixedDim, to.tertiaryFixedDim, t),
+        onTertiaryFixed        = lerp(from.onTertiaryFixed, to.onTertiaryFixed, t),
+        onTertiaryFixedVariant = lerp(from.onTertiaryFixedVariant, to.onTertiaryFixedVariant, t),
     )

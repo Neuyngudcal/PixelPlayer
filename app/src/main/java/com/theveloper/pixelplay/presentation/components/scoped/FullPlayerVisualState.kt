@@ -18,16 +18,23 @@ internal class FullPlayerVisualState(
     private val expansionFraction: Animatable<Float, AnimationVector1D>,
     private val initialOffsetY: Float
 ) {
-    /** Full-player fade-in: invisible until 25 % expanded, fully opaque at 100 %. */
+    /** Full-player fade-in with M3 Expressive decelerate curve: invisible until 20% expanded. */
     val contentAlpha: Float
         get() {
             val f = expansionFraction.value
-            return (f - 0.25f).coerceIn(0f, 0.75f) / 0.75f
+            val raw = ((f - 0.20f) / 0.80f).coerceIn(0f, 1f)
+            // Smooth cubic ease-out: 1 - (1 - x)^3
+            val inv = 1f - raw
+            return 1f - (inv * inv * inv)
         }
 
     /** Slide-up entrance driven by [contentAlpha]. */
     val translationY: Float
         get() = lerp(initialOffsetY, 0f, contentAlpha)
+
+    /** Subtle spatial scale entrance (0.96f -> 1.0f) for M3 Expressive depth. */
+    val contentScale: Float
+        get() = lerp(0.96f, 1f, contentAlpha)
 }
 
 @Composable

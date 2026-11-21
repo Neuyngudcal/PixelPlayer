@@ -1,3 +1,6 @@
+import java.util.Properties
+import org.gradle.api.GradleException
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.compose.compiler)
@@ -18,6 +21,42 @@ android {
         versionName = (project.findProperty("APP_VERSION_NAME") as? String) ?: "1.0.0"
     }
 
+    val keystoreProperties = Properties().apply {
+        val propFile = rootProject.file("keystore.properties")
+        if (propFile.exists()) {
+            propFile.inputStream().use { load(it) }
+        }
+    }
+    val releaseStorePath = keystoreProperties.getProperty("storeFile")?.trim()?.takeIf { it.isNotEmpty() }
+        ?: providers.gradleProperty("KEYSTORE_FILE").orNull?.trim()?.takeIf { it.isNotEmpty() }
+        ?: providers.environmentVariable("KEYSTORE_FILE").orNull?.trim()?.takeIf { it.isNotEmpty() }
+        ?: "$rootDir/vz-pixelplay.jks"
+    val releaseKeystoreFile = file(releaseStorePath)
+    val releaseStorePassword = keystoreProperties.getProperty("storePassword")?.trim()?.takeIf { it.isNotEmpty() }
+        ?: providers.gradleProperty("KEYSTORE_PASSWORD").orNull?.trim()?.takeIf { it.isNotEmpty() }
+        ?: providers.environmentVariable("KEYSTORE_PASSWORD").orNull?.trim()?.takeIf { it.isNotEmpty() }
+    val releaseKeyAlias = keystoreProperties.getProperty("keyAlias")?.trim()?.takeIf { it.isNotEmpty() }
+        ?: providers.gradleProperty("KEY_ALIAS").orNull?.trim()?.takeIf { it.isNotEmpty() }
+        ?: providers.environmentVariable("KEY_ALIAS").orNull?.trim()?.takeIf { it.isNotEmpty() }
+    val releaseKeyPassword = keystoreProperties.getProperty("keyPassword")?.trim()?.takeIf { it.isNotEmpty() }
+        ?: providers.gradleProperty("KEY_PASSWORD").orNull?.trim()?.takeIf { it.isNotEmpty() }
+        ?: providers.environmentVariable("KEY_PASSWORD").orNull?.trim()?.takeIf { it.isNotEmpty() }
+    val hasReleaseSigningCredentials = releaseKeystoreFile.exists() &&
+        releaseStorePassword != null &&
+        releaseKeyAlias != null &&
+        releaseKeyPassword != null
+
+    if (hasReleaseSigningCredentials) {
+        signingConfigs {
+            create("release") {
+                storeFile = releaseKeystoreFile
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
+        }
+    }
+
     buildTypes {
         debug {
             applicationIdSuffix = ".debug"
@@ -26,17 +65,21 @@ android {
         }
 
         release {
+            if (hasReleaseSigningCredentials) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            lint {
-                abortOnError = false
-                checkReleaseBuilds = false
-            }
         }
+    }
+
+    lint {
+        checkReleaseBuilds = true
+        abortOnError = true
     }
 
     buildFeatures {
@@ -54,6 +97,41 @@ kotlin {
     compilerOptions {
         jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_21)
         freeCompilerArgs.add("-opt-in=com.google.android.horologist.annotations.ExperimentalHorologistApi")
+    }
+}
+
+gradle.taskGraph.whenReady {
+    val releasePackageTasks = setOf(
+        "${project.path}:assembleRelease",
+        "${project.path}:bundleRelease",
+        "${project.path}:packageRelease",
+        "${project.path}:packageReleaseBundle"
+    )
+    if (allTasks.any { it.path in releasePackageTasks }) {
+        val keystoreProps = Properties().apply {
+            val propFile = rootProject.file("keystore.properties")
+            if (propFile.exists()) propFile.inputStream().use { load(it) }
+        }
+        val storePath = keystoreProps.getProperty("storeFile")?.trim()?.takeIf { it.isNotEmpty() }
+            ?: providers.gradleProperty("KEYSTORE_FILE").orNull?.trim()?.takeIf { it.isNotEmpty() }
+            ?: providers.environmentVariable("KEYSTORE_FILE").orNull?.trim()?.takeIf { it.isNotEmpty() }
+            ?: "$rootDir/vz-pixelplay.jks"
+        val keystoreFile = file(storePath)
+        val hasStorePassword = !keystoreProps.getProperty("storePassword").isNullOrBlank() ||
+            !providers.gradleProperty("KEYSTORE_PASSWORD").orNull.isNullOrBlank() ||
+            !providers.environmentVariable("KEYSTORE_PASSWORD").orNull.isNullOrBlank()
+        val hasKeyAlias = !keystoreProps.getProperty("keyAlias").isNullOrBlank() ||
+            !providers.gradleProperty("KEY_ALIAS").orNull.isNullOrBlank() ||
+            !providers.environmentVariable("KEY_ALIAS").orNull.isNullOrBlank()
+        val hasKeyPassword = !keystoreProps.getProperty("keyPassword").isNullOrBlank() ||
+            !providers.gradleProperty("KEY_PASSWORD").orNull.isNullOrBlank() ||
+            !providers.environmentVariable("KEY_PASSWORD").orNull.isNullOrBlank()
+        if (!keystoreFile.exists() || !hasStorePassword || !hasKeyAlias || !hasKeyPassword) {
+            throw GradleException(
+                "Wear release build requires release keystore and signing credentials " +
+                    "(keystore.properties or KEYSTORE_PASSWORD/KEY_ALIAS/KEY_PASSWORD)."
+            )
+        }
     }
 }
 
@@ -98,6 +176,7 @@ dependencies {
 
     // Core
     implementation(libs.androidx.core.ktx)
+    implementation(libs.material)
 
     // Lifecycle
     implementation(libs.androidx.lifecycle.runtime.ktx)

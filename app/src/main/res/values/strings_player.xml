@@ -57,6 +57,18 @@
     <string name="cast_searching_hint">Make sure your TV or speaker is on and sharing the same Wi‑Fi network.</string>
     <string name="cast_tab_controls">Controls</string>
     <string name="cast_tab_devices">Devices</string>
+    <string name="cast_manage_radios_rescan">Manage active radios and rescan</string>
+    <string name="cast_tap_to_connect">Tap to connect</string>
+    <string name="cast_no_devices_yet">No devices yet</string>
+    <string name="cast_tile_title">Cast</string>
+    <string name="cast_tile_subtitle_ready">Ready on Wi‑Fi</string>
+    <string name="cast_tile_subtitle_wifi_needed">Requires Wi‑Fi</string>
+    <string name="cast_security_dialog_title">Cast safety &amp; privacy</string>
+    <string name="cast_security_dialog_body">Casting opens a local network stream over Wi‑Fi to nearby TVs and speakers. Only cast on trusted private networks—others on the same public Wi‑Fi may see or control active Cast playback.</string>
+    <string name="cast_security_dialog_wifi_off_hint">Wi‑Fi is currently disconnected. Connect to a trusted Wi‑Fi network before casting.</string>
+    <string name="cast_security_dialog_confirm">Scan Cast devices</string>
+    <string name="cast_security_dialog_open_wifi">Wi‑Fi settings</string>
+    <string name="cast_security_dialog_dismiss">Cancel</string>
 
     <!-- Casting & Remote Playback -->
     <string name="cast_server_channel_name">Cast media server</string>
@@ -195,4 +207,16 @@
     <string name="lyrics_artist_album_line">%1$s • %2$s</string>
     <string name="lyrics_provided_by">Lyrics provided by</string>
     <string name="lyrics_lrclib_uri">https://lrclib.net/</string>
+
+    <!-- Tablet Now Playing Modes & Side Panel -->
+    <string name="player_cd_favorite">Favorite</string>
+    <string name="player_mode_expand_fullscreen">Expand to full screen</string>
+    <string name="player_mode_dock_corner">Dock to side card</string>
+    <string name="player_panel_lyrics">Lyrics</string>
+    <string name="player_panel_up_next">Up Next</string>
+    <string name="player_panel_expand_fullscreen">Open full view</string>
+    <string name="player_panel_close">Close panel</string>
+    <string name="player_lyrics_empty_title">No lyrics available yet</string>
+    <string name="player_lyrics_fetch_action">Find lyrics</string>
+    <string name="player_queue_empty_title">Your queue is empty</string>
 </resources>

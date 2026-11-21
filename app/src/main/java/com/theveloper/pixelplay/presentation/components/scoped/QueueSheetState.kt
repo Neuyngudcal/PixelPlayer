@@ -40,7 +40,9 @@ internal fun rememberQueueSheetState(
     isPlayerFullyExpanded: Boolean
 ): QueueSheetState {
     val motionScheme = MotionScheme.expressive()
-    val queueAnimationSpec = remember { motionScheme.defaultSpatialSpec<Float>() }
+    val queueAnimationSpec = remember(motionScheme) {
+        motionScheme.defaultSpatialSpec<Float>()
+    }
     var showQueueSheet by remember { mutableStateOf(false) }
     var isCollapsing by remember { mutableStateOf(false) }
     val allowQueueSheetInteraction by remember(showPlayerContentArea, isPlayerFullyExpanded) {

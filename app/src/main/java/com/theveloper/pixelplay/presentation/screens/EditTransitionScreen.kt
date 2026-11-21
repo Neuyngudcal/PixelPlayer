@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -81,6 +82,7 @@ import com.theveloper.pixelplay.R
 import com.theveloper.pixelplay.data.model.Curve
 import com.theveloper.pixelplay.data.model.TransitionMode
 import com.theveloper.pixelplay.data.model.TransitionSettings
+import com.theveloper.pixelplay.presentation.components.LocalInsideFloatingPane
 import com.theveloper.pixelplay.presentation.viewmodel.TransitionViewModel
 import racra.compose.smooth_corner_rect_library.AbsoluteSmoothCornerShape
 import java.util.concurrent.TimeUnit
@@ -119,11 +121,14 @@ fun EditTransitionScreen(
         }
     }
 
+    val insideFloatingPane = LocalInsideFloatingPane.current
     Scaffold(
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
+        containerColor = if (insideFloatingPane) Color.Transparent else MaterialTheme.colorScheme.background,
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             LargeTopAppBar(
+                windowInsets = if (insideFloatingPane) WindowInsets(0, 0, 0, 0) else TopAppBarDefaults.windowInsets,
                 title = {
                     Text(
                         modifier = Modifier.padding(start = 4.dp),

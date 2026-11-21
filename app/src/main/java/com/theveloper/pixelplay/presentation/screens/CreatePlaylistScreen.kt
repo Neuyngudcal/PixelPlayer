@@ -56,7 +56,6 @@ import androidx.compose.material.icons.rounded.Album
 import androidx.compose.material.icons.rounded.AudioFile
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Check
-import androidx.compose.material.icons.rounded.Cloud
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.GridView
@@ -145,16 +144,13 @@ import androidx.compose.ui.graphics.Matrix
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.material.icons.automirrored.rounded.QueueMusic
 import androidx.compose.material.icons.rounded.Clear
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Surface
-import androidx.compose.ui.graphics.TransformOrigin
 import com.theveloper.pixelplay.data.model.StorageFilter
 import com.theveloper.pixelplay.presentation.viewmodel.PlayerViewModel
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
@@ -311,6 +307,10 @@ private fun CreatePlaylistContent(
     
     // Songs State
     val selectedSongIds = remember { mutableStateMapOf<String, Boolean>() }
+
+    LaunchedEffect(Unit) {
+        playerViewModel.setPlaylistPickerStorageFilter(StorageFilter.OFFLINE)
+    }
     
     // Image State
     var selectedImageUri by remember { mutableStateOf<Uri?>(null) }
@@ -435,7 +435,7 @@ private fun CreatePlaylistContent(
             )
         },
         floatingActionButton = {
-            if (!showCropUi && !(currentStep == 1 && creationMode == PlaylistCreationMode.MANUAL)) {
+            if (!showCropUi) {
                 MediumExtendedFloatingActionButton(
                     text = {
                         Text(
@@ -535,120 +535,6 @@ private fun CreatePlaylistContent(
                     containerColor = if (currentStep == 0 && playlistName.isBlank()) MaterialTheme.colorScheme.surfaceContainerHighest else MaterialTheme.colorScheme.tertiaryContainer,
                     contentColor = if (currentStep == 0 && playlistName.isBlank()) MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f) else MaterialTheme.colorScheme.onTertiaryContainer,
                 )
-            }
-        },
-        bottomBar = {
-            if (currentStep == 1 && creationMode == PlaylistCreationMode.MANUAL) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .navigationBarsPadding()
-                        .padding(horizontal = 16.dp, vertical = 16.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    val storageFilter by playerViewModel.playlistPickerStorageFilter.collectAsStateWithLifecycle()
-                    val tabs = listOf(
-                        StorageFilter.OFFLINE to R.string.library_storage_filter_offline,
-                        StorageFilter.ONLINE to R.string.library_storage_filter_online
-                    )
-                    val selectedTabIndex = tabs.indexOfFirst { it.first == storageFilter }.coerceAtLeast(0)
-
-                    PrimaryTabRow(
-                        selectedTabIndex = selectedTabIndex,
-                        modifier = Modifier
-                            .weight(1f)
-                            .clip(CircleShape)
-                            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-                            .padding(5.dp),
-                        containerColor = Color.Transparent,
-                        divider = {},
-                        indicator = {}
-                    ) {
-                        tabs.forEachIndexed { index, (filter, labelRes) ->
-                            TabAnimation(
-                                index = index,
-                                title = stringResource(labelRes),
-                                selectedIndex = selectedTabIndex,
-                                onClick = { playerViewModel.setPlaylistPickerStorageFilter(filter) },
-                                transformOrigin = if (index == 0) TransformOrigin(0f, 0.5f) else TransformOrigin(1f, 0.5f)
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.Center
-                                ) {
-                                    if (filter == StorageFilter.OFFLINE) {
-                                        Icon(
-                                            painter = painterResource(id = R.drawable.ic_phonef),
-                                            contentDescription = null,
-                                            modifier = Modifier.size(18.dp)
-                                        )
-                                    } else {
-                                        Icon(
-                                            imageVector = Icons.Rounded.Cloud,
-                                            contentDescription = null,
-                                            modifier = Modifier.size(18.dp)
-                                        )
-                                    }
-                                    Spacer(Modifier.width(6.dp))
-                                    Text(
-                                        text = stringResource(labelRes),
-                                        fontFamily = GoogleSansRounded,
-                                        fontWeight = FontWeight.Bold,
-                                        modifier = Modifier.padding(end = 4.dp)
-                                    )
-                                }
-                            }
-                        }
-                    }
-
-                    FilledIconButton(
-                        onClick = {
-                            val imageUriString = if(selectedTab == 1) selectedImageUri?.toString() else null
-                            val color = if(selectedTab == 2) selectedColor else null
-                            val icon = if(selectedTab == 2) selectedIconName else null
-                            
-                            val scale = if(selectedTab == 1) cropScale else 1f
-                            val panX = if(selectedTab == 1) cropOffset.x else 0f
-                            val panY = if(selectedTab == 1) cropOffset.y else 0f
-                            
-                            val shapeTypeForSave = if (selectedTab == 2) selectedShapeType.name else null
-                            val (d1, d2, d3, d4) = if (selectedTab == 2) {
-                                when (selectedShapeType) {
-                                    PlaylistShapeType.SmoothRect -> Quadruple(smoothRectCornerRadius, smoothRectSmoothness, 0f, 0f)
-                                    PlaylistShapeType.Star -> Quadruple(starCurve.toFloat(), starRotation, starScale, starSides.toFloat())
-                                    else -> Quadruple(0f, 0f, 0f, 0f)
-                                }
-                            } else Quadruple(null, null, null, null)
-
-                            onCreate(
-                                playlistName, 
-                                imageUriString, 
-                                color, 
-                                icon, 
-                                selectedSongIds.filterValues { it }.keys.toList(),
-                                scale,
-                                panX,
-                                panY,
-                                shapeTypeForSave,
-                                d1, d2, d3, d4,
-                                null
-                            )
-                        },
-                        modifier = Modifier.size(56.dp),
-                        shape = RoundedCornerShape(16.dp),
-                        colors = IconButtonDefaults.filledIconButtonColors(
-                            containerColor = MaterialTheme.colorScheme.tertiaryContainer,
-                            contentColor = MaterialTheme.colorScheme.onTertiaryContainer
-                        )
-                    ) {
-                        Icon(
-                            Icons.Rounded.Check,
-                            contentDescription = stringResource(R.string.playlist_creation_create),
-                            modifier = Modifier.size(28.dp)
-                        )
-                    }
-                }
             }
         },
         containerColor = MaterialTheme.colorScheme.surface

@@ -29,6 +29,7 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 
+@OptIn(androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun TabAnimation(
     modifier: Modifier = Modifier,
@@ -49,16 +50,16 @@ fun TabAnimation(
     val offsetX = remember { Animatable(0f) }
     var hasAnimatedSelectionChange by remember { mutableStateOf(false) }
 
-    val animationSpec = tween<Float>(durationMillis = 250, easing = FastOutSlowInEasing)
-
+    val motionScheme = MaterialTheme.motionScheme
+    val animationSpec = motionScheme.fastSpatialSpec<Float>()
     val backgroundColor by animateColorAsState(
         targetValue = if (isSelected) selectedColor else unselectedColor,
-        animationSpec = tween(durationMillis = 200),
+        animationSpec = motionScheme.defaultEffectsSpec(),
         label = "Tab Background Color"
     )
     val contentColor by animateColorAsState(
         targetValue = if (isSelected) onSelectedColor else onUnselectedColor,
-        animationSpec = tween(durationMillis = 200),
+        animationSpec = motionScheme.defaultEffectsSpec(),
         label = "Tab Content Color"
     )
 

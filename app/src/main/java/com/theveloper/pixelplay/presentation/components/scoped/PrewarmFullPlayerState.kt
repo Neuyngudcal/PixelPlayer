@@ -12,7 +12,10 @@ import androidx.compose.ui.platform.LocalContext
 import kotlinx.coroutines.delay
 
 @Composable
-internal fun rememberPrewarmFullPlayer(currentSongId: String?): Boolean {
+internal fun rememberPrewarmFullPlayer(
+    currentSongId: String?,
+    isExpanded: Boolean = false
+): Boolean {
     val context = LocalContext.current
 
     // OPT #5: Skip prewarm entirely on low-RAM devices. Having two FullPlayerContent
@@ -25,7 +28,7 @@ internal fun rememberPrewarmFullPlayer(currentSongId: String?): Boolean {
 
     var prewarmFullPlayer by remember { mutableStateOf(false) }
 
-    if (isLowRamDevice) return false
+    if (isLowRamDevice || isExpanded) return false
 
     LaunchedEffect(currentSongId) {
         if (currentSongId != null) {

@@ -219,9 +219,10 @@ class MornyeLyricsProviderChain(
         private const val PRIORITY_GRACE_MS = 5_000L // 5 seconds
         private const val APPLE_TOKEN_TTL_MS = 30 * 60 * 1000L // 30 minutes
 
-        private val APPLE_INDEX_SCRIPT_REGEX = Regex("""/assets/index~[^"' <]+\.js""")
+        private val APPLE_INDEX_SCRIPT_REGEX = Regex("""/assets/index[~.-][^"' <]+\.js""")
         private val APPLE_JWT_TOKEN_REGEX = Regex("""eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+""")
         private val ISRC_REGEX = Regex("""^[A-Z0-9]{12}$""")
+        private val JSONP_WRAPPER_REGEX = Regex("""^\s*[a-zA-Z0-9_$.]+\s*\((.*)\)\s*;?\s*$""", RegexOption.DOT_MATCHES_ALL)
     }
 
     private val standardClient: OkHttpClient by lazy {
@@ -268,12 +269,14 @@ class MornyeLyricsProviderChain(
         title: String,
         artist: String,
         durationMs: Long,
+        candidatePairs: List<Pair<String, String>> = emptyList(),
         lrclibFetcher: suspend () -> Pair<Lyrics, String>?
     ): ProviderChainLyricsHit? = withContext(Dispatchers.IO) {
         val configs = LyricsProviderPreferences.getProviderConfigs(context)
-        val healthyProviders = configs
-            .filter { it.enabled && isProviderHealthy(it.provider) }
-            .map { it.provider }
+        val enabledProviders = configs.filter { it.enabled }.map { it.provider }
+        val healthyProviders = enabledProviders
+            .filter { isProviderHealthy(it) }
+            .ifEmpty { enabledProviders }
             .ifEmpty { listOf(LyricsProviderType.ZARZ_LRC, LyricsProviderType.LRCLIB) }
 
         val durationSec = if (durationMs > 0L) durationMs / 1000.0 else 0.0
@@ -290,6 +293,7 @@ class MornyeLyricsProviderChain(
                                 title = title,
                                 artist = artist,
                                 durationSec = durationSec,
+                                candidatePairs = candidatePairs,
                                 lrclibFetcher = lrclibFetcher
                             )
                         }.getOrNull()?.let { index to it }
@@ -326,68 +330,92 @@ class MornyeLyricsProviderChain(
         title: String,
         artist: String,
         durationSec: Double,
+        candidatePairs: List<Pair<String, String>> = emptyList(),
         lrclibFetcher: (suspend () -> Pair<Lyrics, String>?)? = null
     ): ProviderChainLyricsHit? = withContext(Dispatchers.IO) {
-        val cleanTitle = title.trim()
-        val cleanArtist = artist.trim()
-        if (cleanTitle.isEmpty()) return@withContext null
-
-        try {
-            val rawLrc = when (provider) {
-                LyricsProviderType.ZARZ_LRC -> fetchZarzLrc(cleanTitle, cleanArtist, durationSec)
-                LyricsProviderType.APPLE_MUSIC -> fetchAppleMusicPaxsenix(cleanTitle, cleanArtist, durationSec)
-                LyricsProviderType.LRCRED -> fetchLrcRed(cleanTitle, cleanArtist, durationSec)
-                LyricsProviderType.LYRICSPLUS -> fetchLyricsPlus(cleanTitle, cleanArtist, durationSec)
-                LyricsProviderType.BETTERLYRICS -> fetchBetterLyrics(cleanTitle, cleanArtist, durationSec)
-                LyricsProviderType.LRCLIB -> {
-                    val pair = lrclibFetcher?.invoke() ?: return@withContext null
-                    val taggedRaw = if (pair.second.contains("[source:", ignoreCase = true)) {
-                        pair.second
-                    } else {
-                        "[source:${provider.displayName}]\n${pair.second}"
-                    }
-                    return@withContext ProviderChainLyricsHit(
-                        provider = provider,
-                        rawLrc = taggedRaw,
-                        parsedLyrics = pair.first.copy(
-                            areFromRemote = true,
-                            provider = provider.displayName
-                        )
-                    )
+        if (provider == LyricsProviderType.LRCLIB) {
+            return@withContext try {
+                val pair = lrclibFetcher?.invoke() ?: return@withContext null
+                val taggedRaw = if (pair.second.contains("[source:", ignoreCase = true)) {
+                    pair.second
+                } else {
+                    "[source:${provider.displayName}]\n${pair.second}"
                 }
-                LyricsProviderType.NETEASE -> fetchNetease(cleanTitle, cleanArtist, durationSec)
-                LyricsProviderType.KUGOU -> fetchKugou(cleanTitle, cleanArtist, durationSec)
-                LyricsProviderType.QQMUSIC -> fetchQqMusic(cleanTitle, cleanArtist, durationSec)
-            } ?: return@withContext null
-
-            val taggedRaw = if (rawLrc.contains("[source:", ignoreCase = true)) {
-                rawLrc
-            } else {
-                "[source:${provider.displayName}]\n$rawLrc"
+                ProviderChainLyricsHit(
+                    provider = provider,
+                    rawLrc = taggedRaw,
+                    parsedLyrics = pair.first.copy(
+                        areFromRemote = true,
+                        provider = provider.displayName
+                    )
+                )
+            } catch (ce: CancellationException) {
+                throw ce
+            } catch (e: Exception) {
+                Log.d(TAG, "Provider ${provider.displayName} miss: ${e.message}")
+                null
             }
-            val parsed = LyricsUtils.parseLyrics(taggedRaw).copy(
-                areFromRemote = true,
-                provider = provider.displayName
-            )
-            if (parsed.synced.isNullOrEmpty() && parsed.plain.isNullOrEmpty()) {
-                return@withContext null
-            }
-            Log.d(TAG, "Successfully fetched lyrics from ${provider.displayName} for $cleanArtist - $cleanTitle")
-            ProviderChainLyricsHit(
-                provider = provider,
-                rawLrc = taggedRaw,
-                parsedLyrics = parsed
-            )
-        } catch (ce: CancellationException) {
-            throw ce
-        } catch (e: ProviderUnavailableException) {
-            Log.w(TAG, "Provider ${provider.displayName} unavailable, cooling down: ${e.message}")
-            markProviderUnavailable(provider)
-            null
-        } catch (e: Exception) {
-            Log.d(TAG, "Provider ${provider.displayName} miss for $cleanArtist - $cleanTitle: ${e.message}")
-            null
         }
+
+        val pairsToTry = buildList {
+            val primaryTitle = title.trim()
+            val primaryArtist = artist.trim()
+            if (primaryTitle.isNotEmpty()) {
+                add(primaryTitle to primaryArtist)
+            }
+            candidatePairs.forEach { (candTitle, candArtist) ->
+                val ct = candTitle.trim()
+                val ca = candArtist.trim()
+                if (ct.isNotEmpty() && none { it.first == ct && it.second == ca }) {
+                    add(ct to ca)
+                }
+            }
+        }.take(3)
+        if (pairsToTry.isEmpty()) return@withContext null
+
+        for ((candTitle, candArtist) in pairsToTry) {
+            try {
+                val rawLrc = when (provider) {
+                    LyricsProviderType.ZARZ_LRC -> fetchZarzLrc(candTitle, candArtist, durationSec)
+                    LyricsProviderType.APPLE_MUSIC -> fetchAppleMusicPaxsenix(candTitle, candArtist, durationSec)
+                    LyricsProviderType.LRCRED -> fetchLrcRed(candTitle, candArtist, durationSec)
+                    LyricsProviderType.LYRICSPLUS -> fetchLyricsPlus(candTitle, candArtist, durationSec)
+                    LyricsProviderType.BETTERLYRICS -> fetchBetterLyrics(candTitle, candArtist, durationSec)
+                    LyricsProviderType.LRCLIB -> null
+                    LyricsProviderType.NETEASE -> fetchNetease(candTitle, candArtist, durationSec)
+                    LyricsProviderType.KUGOU -> fetchKugou(candTitle, candArtist, durationSec)
+                    LyricsProviderType.QQMUSIC -> fetchQqMusic(candTitle, candArtist, durationSec)
+                } ?: continue
+
+                val taggedRaw = if (rawLrc.contains("[source:", ignoreCase = true)) {
+                    rawLrc
+                } else {
+                    "[source:${provider.displayName}]\n$rawLrc"
+                }
+                val parsed = LyricsUtils.parseLyrics(taggedRaw).copy(
+                    areFromRemote = true,
+                    provider = provider.displayName
+                )
+                if (parsed.synced.isNullOrEmpty() && parsed.plain.isNullOrEmpty()) {
+                    continue
+                }
+                Log.d(TAG, "Successfully fetched lyrics from ${provider.displayName} for $candArtist - $candTitle")
+                return@withContext ProviderChainLyricsHit(
+                    provider = provider,
+                    rawLrc = taggedRaw,
+                    parsedLyrics = parsed
+                )
+            } catch (ce: CancellationException) {
+                throw ce
+            } catch (e: ProviderUnavailableException) {
+                Log.w(TAG, "Provider ${provider.displayName} unavailable, cooling down: ${e.message}")
+                markProviderUnavailable(provider)
+                return@withContext null
+            } catch (e: Exception) {
+                Log.d(TAG, "Provider ${provider.displayName} miss for $candArtist - $candTitle: ${e.message}")
+            }
+        }
+        null
     }
 
     // ─── 1. Apple Music Catalog & Token + Zarz-LRC + Apple Music (Paxsenix) ────
@@ -437,11 +465,13 @@ class MornyeLyricsProviderChain(
         val query = "$title $artist".trim()
         if (query.isEmpty()) return null
 
-        var token = getAppleMusicBearerToken(forceRefresh = false) ?: return null
-        var searchJson = executeAppleCatalogSearch(token, query)
-        if (searchJson == null) {
-            token = getAppleMusicBearerToken(forceRefresh = true) ?: return null
-            searchJson = executeAppleCatalogSearch(token, query) ?: return null
+        resolveAppleSongIdViaItunesSearch(title, artist, durationSec)?.let { return it }
+        resolveAppleSongIdViaPaxsenix(title, artist, durationSec)?.let { return it }
+
+        val token = getAppleMusicBearerToken(forceRefresh = false) ?: return null
+        val searchJson = executeAppleCatalogSearch(token, query) ?: run {
+            val refreshed = getAppleMusicBearerToken(forceRefresh = true) ?: return null
+            executeAppleCatalogSearch(refreshed, query) ?: return null
         }
 
         val songsOrder = searchJson.getAsJsonObject("results")
@@ -477,6 +507,143 @@ class MornyeLyricsProviderChain(
             }
         }
 
+        return bestId
+    }
+
+    private fun resolveAppleSongIdViaItunesSearch(
+        title: String,
+        artist: String,
+        durationSec: Double
+    ): String? {
+        val query = "$title $artist".trim()
+        if (query.isEmpty()) return null
+
+        val url = Uri.parse("https://itunes.apple.com/search")
+            .buildUpon()
+            .appendQueryParameter("term", query)
+            .appendQueryParameter("media", "music")
+            .appendQueryParameter("entity", "song")
+            .appendQueryParameter("limit", "25")
+            .build()
+            .toString()
+
+        val req = Request.Builder()
+            .url(url)
+            .header("User-Agent", BROWSER_UA)
+            .header("Accept", "application/json")
+            .get()
+            .build()
+
+        val json = runCatching {
+            standardClient.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) return null
+                JsonParser.parseString(resp.body.string()).asJsonObjectOrNull()
+            }
+        }.getOrNull() ?: return null
+
+        val results = json.getAsJsonArray("results") ?: return null
+        var bestId: String? = null
+        var bestScore = -1
+
+        for (itemEl in results) {
+            val item = itemEl.asJsonObjectOrNull() ?: continue
+            val trackId = item.getLongOrNull("trackId")?.toString()
+                ?: item.getStringOrNull("trackId")
+                ?: continue
+            val candName = item.getStringOrNull("trackName") ?: continue
+            val candArtist = item.getStringOrNull("artistName").orEmpty()
+            val candDurSec = (item.getLongOrNull("trackTimeMillis") ?: 0L) / 1000.0
+
+            val score = scoreTrackCandidate(
+                candTitle = candName,
+                candArtist = candArtist,
+                candDurationSec = candDurSec,
+                reqTitle = title,
+                reqArtist = artist,
+                reqDurationSec = durationSec
+            ) ?: continue
+
+            if (score > bestScore) {
+                bestScore = score
+                bestId = trackId
+            }
+        }
+        return bestId
+    }
+
+    private fun resolveAppleSongIdViaPaxsenix(
+        title: String,
+        artist: String,
+        durationSec: Double
+    ): String? {
+        val query = "$title $artist".trim()
+        if (query.isEmpty()) return null
+
+        val url = Uri.parse("https://lyrics.paxsenix.org/apple-music/search")
+            .buildUpon()
+            .appendQueryParameter("q", query)
+            .build()
+            .toString()
+
+        val req = Request.Builder()
+            .url(url)
+            .header("User-Agent", BROWSER_UA)
+            .header("Accept", "application/json")
+            .get()
+            .build()
+
+        val rootEl = runCatching {
+            standardClient.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) return null
+                JsonParser.parseString(resp.body.string())
+            }
+        }.getOrNull() ?: return null
+
+        val items = when {
+            rootEl.isJsonArray -> rootEl.asJsonArray
+            rootEl.isJsonObject -> {
+                val obj = rootEl.asJsonObject
+                obj.getAsJsonArray("results")
+                    ?: obj.getAsJsonArray("songs")
+                    ?: obj.getAsJsonArray("data")
+            }
+            else -> null
+        } ?: return null
+
+        var bestId: String? = null
+        var bestScore = -1
+
+        for (itemEl in items) {
+            val item = itemEl.asJsonObjectOrNull() ?: continue
+            val id = item.getStringOrNull("id")?.trim()?.takeIf { it.isNotEmpty() }
+                ?: item.getLongOrNull("id")?.toString()
+                ?: continue
+            val candName = item.getStringOrNull("songName")
+                ?: item.getStringOrNull("name")
+                ?: item.getStringOrNull("title")
+                ?: continue
+            val candArtist = item.getStringOrNull("artistName")
+                ?: item.getStringOrNull("artist")
+                ?: ""
+            val rawDur = item.getDoubleOrNull("duration")
+                ?: item.getDoubleOrNull("durationInMillis")
+                ?: 0.0
+            val candDurSec = if (rawDur > 1000.0) rawDur / 1000.0 else rawDur
+
+            val score = scoreTrackCandidate(
+                candTitle = candName,
+                candArtist = candArtist,
+                candDurationSec = candDurSec,
+                reqTitle = title,
+                reqArtist = artist,
+                reqDurationSec = durationSec
+            ) ?: continue
+
+            if (score > bestScore) {
+                bestScore = score
+                bestId = id
+            }
+        }
         return bestId
     }
 
@@ -835,7 +1002,9 @@ class MornyeLyricsProviderChain(
     ): String? {
         val urlBuilder = Uri.parse(endpoint).buildUpon()
             .appendQueryParameter("title", title)
-            .appendQueryParameter("artist", artist)
+        if (artist.isNotBlank()) {
+            urlBuilder.appendQueryParameter("artist", artist)
+        }
         if (durationSec > 0.0) {
             urlBuilder.appendQueryParameter("duration", String.format(Locale.US, "%.3f", durationSec))
         }
@@ -926,7 +1095,9 @@ class MornyeLyricsProviderChain(
     private fun fetchBetterLyrics(title: String, artist: String, durationSec: Double): String? {
         val urlBuilder = Uri.parse("https://lyrics-api.boidu.dev/getLyrics").buildUpon()
             .appendQueryParameter("s", title)
-            .appendQueryParameter("a", artist)
+        if (artist.isNotBlank()) {
+            urlBuilder.appendQueryParameter("a", artist)
+        }
         if (durationSec > 0.0) {
             urlBuilder.appendQueryParameter("d", durationSec.roundToLong().toString())
         }
@@ -956,51 +1127,131 @@ class MornyeLyricsProviderChain(
 
     private fun fetchNetease(title: String, artist: String, durationSec: Double): String? {
         val query = "$title $artist".trim()
-        val searchUrl = Uri.parse("https://lyrics.paxsenix.org/netease/search")
+        if (query.isEmpty()) return null
+
+        val officialSearchUrl = Uri.parse("https://music.163.com/api/search/get")
+            .buildUpon()
+            .appendQueryParameter("s", query)
+            .appendQueryParameter("type", "1")
+            .appendQueryParameter("offset", "0")
+            .appendQueryParameter("total", "true")
+            .appendQueryParameter("limit", "15")
+            .build()
+            .toString()
+
+        val paxSearchUrl = Uri.parse("https://lyrics.paxsenix.org/netease/search")
             .buildUpon()
             .appendQueryParameter("q", query)
             .build()
             .toString()
 
-        val searchReq = Request.Builder()
-            .url(searchUrl)
+        var bestSongId: Long? = findBestNeteaseSongId(
+            url = officialSearchUrl,
+            referer = "https://music.163.com/",
+            reqTitle = title,
+            reqArtist = artist,
+            reqDurationSec = durationSec
+        )
+        if (bestSongId == null) {
+            bestSongId = findBestNeteaseSongId(
+                url = paxSearchUrl,
+                referer = null,
+                reqTitle = title,
+                reqArtist = artist,
+                reqDurationSec = durationSec
+            )
+        }
+
+        val songId = bestSongId ?: return null
+
+        val officialLyricsUrl = Uri.parse("https://music.163.com/api/song/lyric")
+            .buildUpon()
+            .appendQueryParameter("id", songId.toString())
+            .appendQueryParameter("lv", "1")
+            .appendQueryParameter("kv", "1")
+            .appendQueryParameter("tv", "-1")
+            .appendQueryParameter("rv", "-1")
+            .build()
+            .toString()
+
+        val paxLyricsUrl = Uri.parse("https://lyrics.paxsenix.org/netease/lyrics")
+            .buildUpon()
+            .appendQueryParameter("id", songId.toString())
+            .build()
+            .toString()
+
+        return fetchNeteaseLyricsFromEndpoint(officialLyricsUrl, referer = "https://music.163.com/")
+            ?: fetchNeteaseLyricsFromEndpoint(paxLyricsUrl, referer = null)
+    }
+
+    private fun findBestNeteaseSongId(
+        url: String,
+        referer: String?,
+        reqTitle: String,
+        reqArtist: String,
+        reqDurationSec: Double
+    ): Long? {
+        val reqBuilder = Request.Builder()
+            .url(url)
             .header("Accept", "application/json")
             .header("User-Agent", BROWSER_UA)
             .get()
-            .build()
+        if (!referer.isNullOrBlank()) {
+            reqBuilder.header("Referer", referer)
+        }
 
-        val searchJson = standardClient.newCall(searchReq).execute().use { resp ->
-            when {
-                resp.code == 429 || resp.code >= 500 -> throw ProviderUnavailableException("NetEase HTTP ${resp.code}")
-                !resp.isSuccessful -> return null
-                else -> JsonParser.parseString(resp.body.string()).asJsonObjectOrNull()
+        val rootEl = runCatching {
+            standardClient.newCall(reqBuilder.build()).execute().use { resp ->
+                if (!resp.isSuccessful) return null
+                JsonParser.parseString(resp.body.string())
             }
+        }.getOrNull() ?: return null
+
+        val songs = when {
+            rootEl.isJsonArray -> rootEl.asJsonArray
+            rootEl.isJsonObject -> {
+                val obj = rootEl.asJsonObject
+                obj.getAsJsonObject("result")?.getAsJsonArray("songs")
+                    ?: obj.getAsJsonArray("songs")
+                    ?: obj.getAsJsonArray("results")
+            }
+            else -> null
         } ?: return null
 
-        val songs = searchJson.getAsJsonObject("result")?.getAsJsonArray("songs") ?: return null
         var bestSongId: Long? = null
         var bestScore = -1
 
         for (songEl in songs) {
             val songObj = songEl.asJsonObjectOrNull() ?: continue
             val id = songObj.getLongOrNull("id") ?: continue
-            val name = songObj.getStringOrNull("name") ?: continue
-            val artistsArr = songObj.getAsJsonArray("artists")
-            val artistJoined = buildList {
-                if (artistsArr != null) {
+            val name = songObj.getStringOrNull("name")
+                ?: songObj.getStringOrNull("songName")
+                ?: songObj.getStringOrNull("title")
+                ?: continue
+            val artistsArr = songObj.getAsJsonArray("artists") ?: songObj.getAsJsonArray("ar")
+            val artistJoined = if (artistsArr != null && artistsArr.size() > 0) {
+                buildList {
                     for (a in artistsArr) {
                         a.asJsonObjectOrNull()?.getStringOrNull("name")?.let { add(it) }
                     }
-                }
-            }.joinToString(", ")
+                }.joinToString(", ")
+            } else {
+                songObj.getStringOrNull("artistName")
+                    ?: songObj.getStringOrNull("artist")
+                    ?: ""
+            }
+            val rawDur = songObj.getDoubleOrNull("duration")
+                ?: songObj.getDoubleOrNull("dt")
+                ?: 0.0
+            val candDurSec = if (rawDur > 1000.0) rawDur / 1000.0 else rawDur
 
             val score = scoreTrackCandidate(
                 candTitle = name,
                 candArtist = artistJoined,
-                candDurationSec = 0.0,
-                reqTitle = title,
-                reqArtist = artist,
-                reqDurationSec = 0.0
+                candDurationSec = candDurSec,
+                reqTitle = reqTitle,
+                reqArtist = reqArtist,
+                reqDurationSec = reqDurationSec
             ) ?: continue
 
             if (score > bestScore) {
@@ -1008,25 +1259,25 @@ class MornyeLyricsProviderChain(
                 bestSongId = id
             }
         }
+        return bestSongId
+    }
 
-        val songId = bestSongId ?: return null
-        val lyricsUrl = Uri.parse("https://lyrics.paxsenix.org/netease/lyrics")
-            .buildUpon()
-            .appendQueryParameter("id", songId.toString())
-            .build()
-            .toString()
-
-        val lyricsReq = Request.Builder()
-            .url(lyricsUrl)
+    private fun fetchNeteaseLyricsFromEndpoint(url: String, referer: String?): String? {
+        val reqBuilder = Request.Builder()
+            .url(url)
             .header("Accept", "application/json")
             .header("User-Agent", BROWSER_UA)
             .get()
-            .build()
+        if (!referer.isNullOrBlank()) {
+            reqBuilder.header("Referer", referer)
+        }
 
-        val lyricsJson = standardClient.newCall(lyricsReq).execute().use { resp ->
-            if (!resp.isSuccessful) return null
-            JsonParser.parseString(resp.body.string()).asJsonObjectOrNull()
-        } ?: return null
+        val lyricsJson = runCatching {
+            standardClient.newCall(reqBuilder.build()).execute().use { resp ->
+                if (!resp.isSuccessful) return null
+                JsonParser.parseString(resp.body.string()).asJsonObjectOrNull()
+            }
+        }.getOrNull() ?: return null
 
         val mainLrc = lyricsJson.getAsJsonObject("lrc")?.getStringOrNull("lyric")?.trim().orEmpty()
         if (mainLrc.isEmpty()) return null
@@ -1045,31 +1296,37 @@ class MornyeLyricsProviderChain(
 
     private fun fetchKugou(title: String, artist: String, durationSec: Double): String? {
         val keyword = if (artist.isNotBlank()) "$artist - $title" else title
-        val durationMs = if (durationSec > 0.0) (durationSec * 1000.0).roundToLong() else 0L
+        var durationMs = if (durationSec > 0.0) (durationSec * 1000.0).roundToLong() else 0L
+        var hash = ""
+        var resolvedDurationSec = durationSec
 
-        val searchUrl = Uri.parse("https://lyrics.kugou.com/search")
-            .buildUpon()
-            .appendQueryParameter("ver", "1")
-            .appendQueryParameter("man", "yes")
-            .appendQueryParameter("client", "pc")
-            .appendQueryParameter("keyword", keyword)
-            .appendQueryParameter("duration", durationMs.toString())
-            .appendQueryParameter("hash", "")
-            .build()
-            .toString()
+        if (durationMs <= 0L) {
+            val resolved = resolveKugouSongSearchMeta(keyword, title, artist, durationSec)
+            if (resolved != null) {
+                hash = resolved.first.orEmpty()
+                if (resolved.second > 0L) {
+                    durationMs = resolved.second
+                    resolvedDurationSec = durationMs / 1000.0
+                }
+            }
+        }
 
-        val searchReq = Request.Builder()
-            .url(searchUrl)
-            .header("User-Agent", BROWSER_UA)
-            .get()
-            .build()
+        var searchJson = executeKugouLyricsSearch(keyword, durationMs, hash)
+        var candidates = searchJson?.getAsJsonArray("candidates")
+        if ((candidates == null || candidates.size() == 0) && hash.isEmpty()) {
+            val resolved = resolveKugouSongSearchMeta(keyword, title, artist, durationSec)
+            if (resolved != null) {
+                val newHash = resolved.first.orEmpty()
+                val newDurMs = if (resolved.second > 0L) resolved.second else durationMs
+                if (newDurMs > 0L) {
+                    resolvedDurationSec = newDurMs / 1000.0
+                }
+                searchJson = executeKugouLyricsSearch(keyword, newDurMs, newHash)
+                candidates = searchJson?.getAsJsonArray("candidates")
+            }
+        }
+        if (candidates == null || candidates.size() == 0) return null
 
-        val searchJson = standardClient.newCall(searchReq).execute().use { resp ->
-            if (!resp.isSuccessful) return null
-            JsonParser.parseString(resp.body.string()).asJsonObjectOrNull()
-        } ?: return null
-
-        val candidates = searchJson.getAsJsonArray("candidates") ?: return null
         var bestId: String? = null
         var bestAccessKey: String? = null
         var bestScore = -1
@@ -1089,7 +1346,7 @@ class MornyeLyricsProviderChain(
                 candDurationSec = candDurSec,
                 reqTitle = title,
                 reqArtist = artist,
-                reqDurationSec = durationSec
+                reqDurationSec = resolvedDurationSec
             ) ?: continue
 
             if (score > bestScore) {
@@ -1128,6 +1385,88 @@ class MornyeLyricsProviderChain(
         return decodeBase64Lyrics(contentB64)
     }
 
+    private fun resolveKugouSongSearchMeta(
+        keyword: String,
+        reqTitle: String,
+        reqArtist: String,
+        reqDurationSec: Double
+    ): Pair<String?, Long>? {
+        val songSearchUrl = Uri.parse("https://mobilecdn.kugou.com/api/v3/search/song")
+            .buildUpon()
+            .appendQueryParameter("format", "json")
+            .appendQueryParameter("keyword", keyword)
+            .appendQueryParameter("page", "1")
+            .appendQueryParameter("pagesize", "10")
+            .build()
+            .toString()
+
+        val req = Request.Builder()
+            .url(songSearchUrl)
+            .header("User-Agent", BROWSER_UA)
+            .get()
+            .build()
+
+        val json = runCatching {
+            standardClient.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) return null
+                JsonParser.parseString(unwrapJsonp(resp.body.string())).asJsonObjectOrNull()
+            }
+        }.getOrNull() ?: return null
+
+        val info = json.getAsJsonObject("data")?.getAsJsonArray("info") ?: return null
+        var bestResult: Pair<String?, Long>? = null
+        var bestScore = -1
+
+        for (itemEl in info) {
+            val item = itemEl.asJsonObjectOrNull() ?: continue
+            val candTitle = item.getStringOrNull("songname") ?: continue
+            val candArtist = item.getStringOrNull("singername").orEmpty()
+            val rawDur = item.getLongOrNull("duration") ?: 0L
+            val durMs = if (rawDur in 1L..5000L) rawDur * 1000L else rawDur
+            val candDurSec = durMs / 1000.0
+            val hash = item.getStringOrNull("hash")?.trim()
+
+            val score = scoreTrackCandidate(
+                candTitle = candTitle,
+                candArtist = candArtist,
+                candDurationSec = candDurSec,
+                reqTitle = reqTitle,
+                reqArtist = reqArtist,
+                reqDurationSec = reqDurationSec
+            ) ?: continue
+
+            if (score > bestScore && durMs > 0L) {
+                bestScore = score
+                bestResult = hash to durMs
+            }
+        }
+        return bestResult
+    }
+
+    private fun executeKugouLyricsSearch(keyword: String, durationMs: Long, hash: String): JsonObject? {
+        val urlBuilder = Uri.parse("https://lyrics.kugou.com/search")
+            .buildUpon()
+            .appendQueryParameter("ver", "1")
+            .appendQueryParameter("man", "yes")
+            .appendQueryParameter("client", "pc")
+            .appendQueryParameter("keyword", keyword)
+        if (durationMs > 0L) {
+            urlBuilder.appendQueryParameter("duration", durationMs.toString())
+        }
+        urlBuilder.appendQueryParameter("hash", hash)
+
+        val searchReq = Request.Builder()
+            .url(urlBuilder.build().toString())
+            .header("User-Agent", BROWSER_UA)
+            .get()
+            .build()
+
+        return standardClient.newCall(searchReq).execute().use { resp ->
+            if (!resp.isSuccessful) return null
+            JsonParser.parseString(resp.body.string()).asJsonObjectOrNull()
+        }
+    }
+
     // ─── 7. QQ Music (Direct LRC) ──────────────────────────────────────────────
 
     private fun fetchQqMusic(title: String, artist: String, durationSec: Double): String? {
@@ -1148,7 +1487,7 @@ class MornyeLyricsProviderChain(
 
         val searchJson = standardClient.newCall(searchReq).execute().use { resp ->
             if (!resp.isSuccessful) return null
-            JsonParser.parseString(resp.body.string()).asJsonObjectOrNull()
+            JsonParser.parseString(unwrapJsonp(resp.body.string())).asJsonObjectOrNull()
         } ?: return null
 
         val itemList = searchJson.getAsJsonObject("data")
@@ -1209,7 +1548,7 @@ class MornyeLyricsProviderChain(
 
         val lyricJson = standardClient.newCall(lyricReq).execute().use { resp ->
             if (!resp.isSuccessful) return null
-            JsonParser.parseString(resp.body.string()).asJsonObjectOrNull()
+            JsonParser.parseString(unwrapJsonp(resp.body.string())).asJsonObjectOrNull()
         } ?: return null
 
         val rawLyric = lyricJson.getStringOrNull("lyric")?.trim().orEmpty()
@@ -1221,6 +1560,12 @@ class MornyeLyricsProviderChain(
         } else null
 
         return if (!transLrc.isNullOrBlank()) "$mainLrc\n\n$transLrc" else mainLrc
+    }
+
+    private fun unwrapJsonp(raw: String): String {
+        val trimmed = raw.trim()
+        if (trimmed.startsWith("{") || trimmed.startsWith("[")) return trimmed
+        return JSONP_WRAPPER_REGEX.matchEntire(trimmed)?.groupValues?.getOrNull(1)?.trim() ?: trimmed
     }
 
     // ─── Helpers & Matching ────────────────────────────────────────────────────
@@ -1250,7 +1595,7 @@ class MornyeLyricsProviderChain(
 
         val normReqArtist = normalizeMatchText(reqArtist)
         val normCandArtist = normalizeMatchText(candArtist)
-        val artistScore = if (normReqArtist.isEmpty() || normReqArtist == "unknown" || normReqArtist == "unknown artist") {
+        val artistScore = if (normReqArtist.isEmpty() || normReqArtist == "unknown" || normReqArtist == "unknown artist" || normReqArtist == "various artists" || normReqArtist == "various") {
             10
         } else if (normCandArtist == normReqArtist) {
             30

@@ -1,5 +1,6 @@
 package com.theveloper.pixelplay.ui.theme
 
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Typography
 import androidx.compose.ui.text.ExperimentalTextApi
 import androidx.compose.ui.text.PlatformTextStyle
@@ -109,47 +110,48 @@ val GoogleSansRounded = FontFamily(
     ),
 )
 
-// Tipografía - Usar fuentes amigables y modernas.
-// Considerar añadir fuentes personalizadas en res/font para un look más único.
+// Material 3 Expressive 30-style type scale (15 baseline + 15 emphasized) using Google Sans Rounded.
+// Values strictly match androidx.compose.material3.tokens.TypeScaleTokens (material3:1.5.0-alpha22).
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 val Typography = Typography(
     displayLarge = TextStyle(
         fontFamily = GoogleSansRounded,
-        fontWeight = FontWeight.Bold,
-        fontSize = 48.sp,
-        lineHeight = 56.sp,
-        letterSpacing = 0.sp
+        fontWeight = FontWeight.Normal,
+        fontSize = 57.sp,
+        lineHeight = 64.sp,
+        letterSpacing = (-0.2).sp
     ),
     displayMedium = TextStyle(
         fontFamily = GoogleSansRounded,
-        fontWeight = FontWeight.Bold,
-        fontSize = 36.sp,
-        lineHeight = 44.sp,
+        fontWeight = FontWeight.Normal,
+        fontSize = 45.sp,
+        lineHeight = 52.sp,
         letterSpacing = 0.sp
     ),
     displaySmall = TextStyle(
         fontFamily = GoogleSansRounded,
         fontWeight = FontWeight.Normal,
-        fontSize = 30.sp,
-        lineHeight = 38.sp,
+        fontSize = 36.sp,
+        lineHeight = 44.sp,
         letterSpacing = 0.sp
     ),
     headlineLarge = TextStyle(
         fontFamily = GoogleSansRounded,
-        fontWeight = FontWeight.SemiBold,
+        fontWeight = FontWeight.Normal,
         fontSize = 32.sp,
         lineHeight = 40.sp,
         letterSpacing = 0.sp
     ),
     headlineMedium = TextStyle(
         fontFamily = GoogleSansRounded,
-        fontWeight = FontWeight.SemiBold,
+        fontWeight = FontWeight.Normal,
         fontSize = 28.sp,
         lineHeight = 36.sp,
         letterSpacing = 0.sp
     ),
     headlineSmall = TextStyle(
         fontFamily = GoogleSansRounded,
-        fontWeight = FontWeight.SemiBold,
+        fontWeight = FontWeight.Normal,
         fontSize = 24.sp,
         lineHeight = 32.sp,
         letterSpacing = 0.sp
@@ -164,7 +166,7 @@ val Typography = Typography(
     titleMedium = TextStyle(
         fontFamily = GoogleSansRounded,
         fontWeight = FontWeight.Medium,
-        fontSize = 18.sp,
+        fontSize = 16.sp,
         lineHeight = 24.sp,
         letterSpacing = 0.15.sp
     ),
@@ -199,20 +201,125 @@ val Typography = Typography(
     labelLarge = TextStyle(
         fontFamily = GoogleSansRounded,
         fontWeight = FontWeight.Medium,
-        fontSize = 16.sp,
+        fontSize = 14.sp,
         lineHeight = 20.sp,
         letterSpacing = 0.1.sp
     ),
     labelMedium = TextStyle(
         fontFamily = GoogleSansRounded,
         fontWeight = FontWeight.Medium,
-        fontSize = 14.sp,
+        fontSize = 12.sp,
         lineHeight = 16.sp,
         letterSpacing = 0.5.sp
     ),
     labelSmall = TextStyle(
         fontFamily = GoogleSansRounded,
         fontWeight = FontWeight.Medium,
+        fontSize = 11.sp,
+        lineHeight = 16.sp,
+        letterSpacing = 0.5.sp
+    ),
+    displayLargeEmphasized = TextStyle(
+        fontFamily = GoogleSansRounded,
+        fontWeight = FontWeight.SemiBold,
+        fontSize = 57.sp,
+        lineHeight = 64.sp,
+        letterSpacing = (-0.2).sp
+    ),
+    displayMediumEmphasized = TextStyle(
+        fontFamily = GoogleSansRounded,
+        fontWeight = FontWeight.SemiBold,
+        fontSize = 45.sp,
+        lineHeight = 52.sp,
+        letterSpacing = 0.sp
+    ),
+    displaySmallEmphasized = TextStyle(
+        fontFamily = GoogleSansRounded,
+        fontWeight = FontWeight.SemiBold,
+        fontSize = 36.sp,
+        lineHeight = 44.sp,
+        letterSpacing = 0.sp
+    ),
+    headlineLargeEmphasized = TextStyle(
+        fontFamily = GoogleSansRounded,
+        fontWeight = FontWeight.SemiBold,
+        fontSize = 32.sp,
+        lineHeight = 40.sp,
+        letterSpacing = 0.sp
+    ),
+    headlineMediumEmphasized = TextStyle(
+        fontFamily = GoogleSansRounded,
+        fontWeight = FontWeight.SemiBold,
+        fontSize = 28.sp,
+        lineHeight = 36.sp,
+        letterSpacing = 0.sp
+    ),
+    headlineSmallEmphasized = TextStyle(
+        fontFamily = GoogleSansRounded,
+        fontWeight = FontWeight.SemiBold,
+        fontSize = 24.sp,
+        lineHeight = 32.sp,
+        letterSpacing = 0.sp
+    ),
+    titleLargeEmphasized = TextStyle(
+        fontFamily = GoogleSansRounded,
+        fontWeight = FontWeight.SemiBold,
+        fontSize = 22.sp,
+        lineHeight = 28.sp,
+        letterSpacing = 0.sp
+    ),
+    titleMediumEmphasized = TextStyle(
+        fontFamily = GoogleSansRounded,
+        fontWeight = FontWeight.Bold,
+        fontSize = 16.sp,
+        lineHeight = 24.sp,
+        letterSpacing = 0.15.sp
+    ),
+    titleSmallEmphasized = TextStyle(
+        fontFamily = GoogleSansRounded,
+        fontWeight = FontWeight.Bold,
+        fontSize = 14.sp,
+        lineHeight = 20.sp,
+        letterSpacing = 0.1.sp
+    ),
+    bodyLargeEmphasized = TextStyle(
+        fontFamily = GoogleSansRounded,
+        fontWeight = FontWeight.Medium,
+        fontSize = 16.sp,
+        lineHeight = 24.sp,
+        letterSpacing = 0.15.sp
+    ),
+    bodyMediumEmphasized = TextStyle(
+        fontFamily = GoogleSansRounded,
+        fontWeight = FontWeight.Medium,
+        fontSize = 14.sp,
+        lineHeight = 20.sp,
+        letterSpacing = 0.25.sp
+    ),
+    bodySmallEmphasized = TextStyle(
+        fontFamily = GoogleSansRounded,
+        fontWeight = FontWeight.Medium,
+        fontSize = 12.sp,
+        lineHeight = 16.sp,
+        letterSpacing = 0.4.sp
+    ),
+    labelLargeEmphasized = TextStyle(
+        fontFamily = GoogleSansRounded,
+        fontWeight = FontWeight.Bold,
+        fontSize = 14.sp,
+        lineHeight = 20.sp,
+        letterSpacing = 0.1.sp
+    ),
+    labelMediumEmphasized = TextStyle(
+        fontFamily = GoogleSansRounded,
+        fontWeight = FontWeight.Bold,
+        fontSize = 12.sp,
+        lineHeight = 16.sp,
+        letterSpacing = 0.5.sp
+    ),
+    labelSmallEmphasized = TextStyle(
+        fontFamily = GoogleSansRounded,
+        fontWeight = FontWeight.Bold,
         fontSize = 11.sp,
         lineHeight = 16.sp,
         letterSpacing = 0.5.sp

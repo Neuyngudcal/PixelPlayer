@@ -102,8 +102,8 @@ import coil.compose.AsyncImagePainter
 import coil.request.ImageRequest
 import coil.size.Size
 import com.theveloper.pixelplay.R
-import com.theveloper.pixelplay.data.github.GitHubContributorService
 import com.theveloper.pixelplay.presentation.components.CollapsibleCommonTopBar
+import com.theveloper.pixelplay.presentation.components.LocalInsideFloatingPane
 import com.theveloper.pixelplay.presentation.components.MiniPlayerHeight
 import com.theveloper.pixelplay.presentation.components.SmartImage
 import com.theveloper.pixelplay.presentation.navigation.Screen
@@ -184,6 +184,8 @@ fun AboutScreen(
     navController: NavController,
     viewModel: PlayerViewModel,
     onNavigationIconClick: () -> Unit,
+    embeddedInPane: Boolean = false,
+    onOpenLicenses: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val versionName: String = try {
@@ -193,73 +195,7 @@ fun AboutScreen(
         "N/A"
     }
 
-    var contributors by remember { mutableStateOf<List<Contributor>>(emptyList()) }
-    var isLoadingContributors by remember { mutableStateOf(true) }
-    val githubService = remember { GitHubContributorService() }
-
-    LaunchedEffect(Unit) {
-        try {
-            val result = githubService.fetchContributors()
-            result.onSuccess { githubContributors ->
-                contributors = githubContributors
-                    .filter { normalizeHandle(it.login) != CoreMaintainer.id }
-                    .map { github ->
-                        Contributor(
-                            id = normalizeHandle(github.login),
-                            displayName = "@${github.login}",
-                            role = "Community contributor",
-                            avatarUrl = github.avatar_url,
-                            iconRes = R.drawable.rounded_person_24,
-                            githubUrl = github.html_url,
-                            contributions = github.contributions,
-                        )
-                    }
-            }
-            result.onFailure { exception ->
-                Timber.e(exception, "Failed to fetch contributors from GitHub")
-                contributors = emptyList()
-            }
-        } finally {
-            isLoadingContributors = false
-        }
-    }
-
-    val contributorsById = remember(contributors) {
-        contributors.associateBy { it.id }
-    }
-
-    val spotlightContributors = remember(contributorsById) {
-        PinnedCommunityMembers.map { pinned ->
-            val primaryMatch = contributorsById[pinned.id]
-            val aliasMatch = PinnedAliases[pinned.id]
-                ?.firstNotNullOfOrNull { alias -> contributorsById[alias] }
-            val match = primaryMatch ?: aliasMatch
-
-            if (match == null) {
-                pinned
-            } else {
-                pinned.copy(
-                    avatarUrl = match.avatarUrl ?: pinned.avatarUrl,
-                    contributions = match.contributions ?: pinned.contributions,
-                    githubUrl = match.githubUrl ?: pinned.githubUrl,
-                )
-            }
-        }
-    }
-
-    val excludedIds = remember(spotlightContributors) {
-        buildSet {
-            add(CoreMaintainer.id)
-            spotlightContributors.forEach { spotlight ->
-                add(spotlight.id)
-                addAll(PinnedAliases[spotlight.id].orEmpty())
-            }
-        }
-    }
-
-    val communityContributors = remember(contributors, excludedIds) {
-        contributors.filterNot { it.id in excludedIds }
-    }
+    val spotlightContributors = PinnedCommunityMembers
 
     val transitionState = remember { MutableTransitionState(false) }
     LaunchedEffect(Unit) {
@@ -281,9 +217,14 @@ fun AboutScreen(
     val coroutineScope = rememberCoroutineScope()
     val lazyListState = rememberLazyListState()
 
-    val statusBarHeight = WindowInsets.statusBars
-        .asPaddingValues()
-        .calculateTopPadding()
+    val insideFloatingPane = LocalInsideFloatingPane.current
+    val statusBarHeight = if (embeddedInPane || insideFloatingPane) {
+        0.dp
+    } else {
+        WindowInsets.statusBars
+            .asPaddingValues()
+            .calculateTopPadding()
+    }
     val minTopBarHeight = 64.dp + statusBarHeight
     val maxTopBarHeight = 170.dp
 
@@ -344,19 +285,23 @@ fun AboutScreen(
     }
 
     Box(
-        modifier = Modifier
-            .nestedScroll(nestedScrollConnection)
-            .fillMaxSize()
-            .graphicsLayer {
-                alpha = contentAlpha
-                translationY = contentOffset.toPx()
-            },
+        modifier = if (embeddedInPane) {
+            Modifier.fillMaxSize()
+        } else {
+            Modifier
+                .nestedScroll(nestedScrollConnection)
+                .fillMaxSize()
+                .graphicsLayer {
+                    alpha = contentAlpha
+                    translationY = contentOffset.toPx()
+                }
+        },
     ) {
         val currentTopBarHeightDp = with(density) { topBarHeight.value.toDp() }
         LazyColumn(
             state = lazyListState,
             contentPadding = PaddingValues(
-                top = currentTopBarHeightDp + 8.dp,
+                top = if (embeddedInPane) 8.dp else currentTopBarHeightDp + 8.dp,
                 bottom = MiniPlayerHeight +
                     WindowInsets.navigationBars
                         .asPaddingValues()
@@ -368,9 +313,7 @@ fun AboutScreen(
             item(key = "hero_card") {
                 AboutHeroCard(
                     versionName = versionName,
-                    onVersionLongPress = {
-                        navController.navigateSafely(Screen.EasterEgg.route)
-                    },
+                    onVersionLongPress = {},
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp)
@@ -433,7 +376,7 @@ fun AboutScreen(
             item(key = "open_source_licenses") {
                 OpenSourceLicensesCard(
                     onClick = {
-                        navController.navigateSafely(Screen.OpenSourceLicenses.route)
+                        onOpenLicenses?.invoke() ?: navController.navigateSafely(Screen.OpenSourceLicenses.route)
                     },
                     modifier = Modifier
                         .fillMaxWidth()
@@ -441,74 +384,21 @@ fun AboutScreen(
                 )
             }
 
-            item(key = "contributors_title") {
-                AboutSectionHeader(
-                    title = stringResource(R.string.about_contributors_section_title),
-                    subtitle = stringResource(R.string.about_contributors_section_subtitle),
-                    modifier = Modifier.padding(top = 24.dp),
-                )
-            }
-
-            if (isLoadingContributors) {
-                item(key = "contributors_loading") {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 28.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        CircularProgressIndicator()
-                    }
-                }
-            } else if (communityContributors.isEmpty()) {
-                item(key = "contributors_empty") {
-                    Surface(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp),
-                        shape = expressiveListShape(index = 0, count = 1),
-                        color = MaterialTheme.colorScheme.surfaceContainerLow,
-                        tonalElevation = 1.dp,
-                    ) {
-                        Text(
-                            text = stringResource(R.string.about_no_contributors),
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-            } else {
-                itemsIndexed(
-                    items = communityContributors,
-                    key = { _, contributor -> "contributor_${contributor.id}" },
-                ) { index, contributor ->
-                    ContributorCard(
-                        contributor = contributor,
-                        shape = expressiveListShape(index = index, count = communityContributors.size),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp)
-                            .padding(top = if (index == 0) 0.dp else 3.dp),
-                        showContributionCount = true,
-                        onCardClick = contributor.githubUrl?.let { url -> { openUrl(context, url) } },
-                    )
-                }
-            }
-
             item(key = "bottom_spacer") {
                 Spacer(modifier = Modifier.height(24.dp))
             }
         }
 
-        CollapsibleCommonTopBar(
-            title = stringResource(R.string.about_screen_title),
-            collapseFraction = collapseFraction,
-            headerHeight = currentTopBarHeightDp,
-            onBackClick = onNavigationIconClick,
-            expandedTitleStartPadding = 20.dp,
-            collapsedTitleStartPadding = 68.dp
-        )
+        if (!embeddedInPane) {
+            CollapsibleCommonTopBar(
+                title = stringResource(R.string.about_screen_title),
+                collapseFraction = collapseFraction,
+                headerHeight = currentTopBarHeightDp,
+                onBackClick = onNavigationIconClick,
+                expandedTitleStartPadding = 20.dp,
+                collapsedTitleStartPadding = 68.dp
+            )
+        }
     }
 }
 

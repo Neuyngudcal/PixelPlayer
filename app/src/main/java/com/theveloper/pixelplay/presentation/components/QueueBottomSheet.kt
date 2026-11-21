@@ -91,6 +91,8 @@ import androidx.compose.material.icons.filled.LibraryAdd
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.SkipNext
+import androidx.compose.material.icons.rounded.KeyboardArrowDown
+import com.theveloper.pixelplay.presentation.components.player.PlayerCardOverlayDialog
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -254,6 +256,7 @@ fun QueueBottomSheet(
     modifier: Modifier = Modifier,
     tonalElevation: Dp = 10.dp,
     shape: RoundedCornerShape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+    isContainedInCard: Boolean = false
 ) {
     val colors = MaterialTheme.colorScheme
     var showTimerOptions by rememberSaveable { mutableStateOf(false) }
@@ -322,17 +325,19 @@ fun QueueBottomSheet(
     var pendingReorderGraceUpdates by remember { mutableIntStateOf(0) }
 
     // Stable keys for queue rows to prevent state recycling glitches on remove/reorder.
-    // Start empty so opening the sheet does not eagerly allocate IDs/keys for the entire queue.
-    var committedDisplaySongIds by remember { mutableStateOf<List<String>>(emptyList()) }
-    var committedDisplayKeys by remember { mutableStateOf<List<Long>>(emptyList()) }
-    var nextStableQueueItemKey by remember { mutableLongStateOf(0L) }
-
-    // Track queue order by content (not list identity) to avoid clearing preview
-    // when upstream emits equivalent list instances during drag.
-    var reorderPreviewQueueSignature by remember { mutableStateOf<Int?>(null) }
-    val displaySongsSignature = remember(displaySongs, queueIndexOffset) {
-        (queueIndexOffset * 31) + System.identityHashCode(displaySongs)
+    // Derived deterministically inside remember(displaySongs, queueIndexOffset) with zero
+    // mutableStateOf writes during composition.
+    val committedKeyTracker = remember { CommittedKeyTracker() }
+    val committedDisplayKeys = remember(displaySongs, queueIndexOffset) {
+        computeCommittedKeys(
+            tracker = committedKeyTracker,
+            newSongs = displaySongs,
+            queueIndexOffset = queueIndexOffset,
+            pendingExpectedIds = pendingReorderExpectedIds,
+            previewKeys = reorderPreviewKeys
+        )
     }
+    val updatedCommittedDisplayKeys by rememberUpdatedState(committedDisplayKeys)
 
     // --- REORDER STATE ---
     var lastMovedFrom by remember { mutableStateOf<Int?>(null) }
@@ -349,7 +354,7 @@ fun QueueBottomSheet(
             val currentOrder = reorderPreviewOrder
                 ?: List(displaySongCount) { queueIndexOffset + it }
             val currentKeys = reorderPreviewKeys
-                ?: committedDisplayKeys.takeIf { it.size == displaySongCount }
+                ?: updatedCommittedDisplayKeys.takeIf { it.size == displaySongCount }
                 ?: List(displaySongCount) { (queueIndexOffset + it).toLong() }
 
             val keyToLocalIndex = HashMap<Long, Int>(displaySongCount).apply {
@@ -387,79 +392,24 @@ fun QueueBottomSheet(
     }
     val updatedIsReordering by rememberUpdatedState(isReordering)
 
-    fun remapCommittedKeysForDisplay(newSongs: List<Song>) {
-        // Fast path: common queue-skip case where display list is just a suffix of previous display list.
-        if (committedDisplaySongIds.isNotEmpty() && newSongs.isNotEmpty()) {
-            val firstNewId = newSongs.first().id
-            val startIndex = committedDisplaySongIds.indexOf(firstNewId)
-            if (startIndex >= 0 && startIndex + newSongs.size <= committedDisplaySongIds.size) {
-                var suffixMatches = true
-                for (i in newSongs.indices) {
-                    if (committedDisplaySongIds[startIndex + i] != newSongs[i].id) {
-                        suffixMatches = false
-                        break
-                    }
-                }
-                if (suffixMatches) {
-                    committedDisplaySongIds = committedDisplaySongIds.subList(startIndex, startIndex + newSongs.size).toList()
-                    committedDisplayKeys = committedDisplayKeys.subList(startIndex, startIndex + newSongs.size).toList()
-                    return
-                }
-            }
-        }
-
-        val reusableKeysBySongId = mutableMapOf<String, ArrayDeque<Long>>()
-        committedDisplaySongIds.forEachIndexed { index, songId ->
-            val key = committedDisplayKeys.getOrNull(index) ?: return@forEachIndexed
-            reusableKeysBySongId.getOrPut(songId) { ArrayDeque() }.addLast(key)
-        }
-
-        var nextKey = nextStableQueueItemKey
-        if (committedDisplaySongIds.isEmpty() && committedDisplayKeys.isEmpty()) {
-            nextKey = queueIndexOffset.toLong()
-        }
-        val newKeys = ArrayList<Long>(newSongs.size)
-        newSongs.forEach { song ->
-            val bucket = reusableKeysBySongId[song.id]
-            val reusedKey = if (bucket != null && bucket.isNotEmpty()) bucket.removeFirst() else null
-            if (reusedKey != null) {
-                newKeys.add(reusedKey)
-            } else {
-                newKeys.add(nextKey)
-                nextKey++
-            }
-        }
-
-        committedDisplaySongIds = newSongs.map { it.id }
-        committedDisplayKeys = newKeys
-        nextStableQueueItemKey = nextKey
-    }
-
-    // Reset local reorder preview only when the queue truly changes to something new.
-    if (reorderPreviewQueueSignature != displaySongsSignature) {
+    // Reset local reorder preview outside composition when the queue truly changes.
+    var hasSeenInitialDisplaySongs by remember { mutableStateOf(false) }
+    LaunchedEffect(displaySongs, queueIndexOffset) {
         val expectedIds = pendingReorderExpectedIds
         var isProcessed = false
 
         if (expectedIds != null) {
-            val currentDisplayIds = displaySongs.map { it.id }
-            if (currentDisplayIds == expectedIds) {
-                reorderPreviewKeys
-                    ?.takeIf { it.size == displaySongs.size }
-                    ?.let { previewKeys ->
-                        committedDisplaySongIds = currentDisplayIds
-                        committedDisplayKeys = previewKeys
-                    }
+            val matchesExpected = displaySongs.size == expectedIds.size &&
+                displaySongs.indices.all { displaySongs[it].id == expectedIds[it] }
+            if (matchesExpected) {
                 reorderPreviewOrder = null
                 reorderPreviewKeys = null
                 reorderPreviewBaseQueue = null
                 pendingReorderExpectedIds = null
                 pendingReorderGraceUpdates = 0
-                remapCommittedKeysForDisplay(displaySongs)
-                reorderPreviewQueueSignature = displaySongsSignature
                 isProcessed = true
             } else if (reorderPreviewOrder != null && pendingReorderGraceUpdates > 0) {
                 pendingReorderGraceUpdates -= 1
-                reorderPreviewQueueSignature = displaySongsSignature
                 isProcessed = true
             } else {
                 pendingReorderExpectedIds = null
@@ -470,16 +420,13 @@ fun QueueBottomSheet(
             }
         }
 
-        if (!isProcessed) {
-            if (reorderPreviewQueueSignature != null) {
-                // Queue data changed from external source - safe to clear preview
-                reorderPreviewOrder = null
-                reorderPreviewKeys = null
-                reorderPreviewBaseQueue = null
-            }
-            remapCommittedKeysForDisplay(displaySongs)
-            reorderPreviewQueueSignature = displaySongsSignature
+        if (!isProcessed && hasSeenInitialDisplaySongs) {
+            // Queue data changed from external source - safe to clear preview
+            reorderPreviewOrder = null
+            reorderPreviewKeys = null
+            reorderPreviewBaseQueue = null
         }
+        hasSeenInitialDisplaySongs = true
     }
 
     // Only jump to current song when the actual current song changes (e.g. track skip).
@@ -758,10 +705,21 @@ fun QueueBottomSheet(
         Box(
             modifier = Modifier.fillMaxSize()
         ) {
+            val navigationBarHeight = if (isContainedInCard) {
+                0.dp
+            } else {
+                WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+            }
+            val toolbarHeight = if (isContainedInCard) 60.dp else 70.dp
+
             Column {
-                val headerTopPadding = WindowInsets.statusBars
-                    .asPaddingValues()
-                    .calculateTopPadding() + 10.dp
+                val headerTopPadding = if (isContainedInCard) {
+                    10.dp
+                } else {
+                    WindowInsets.statusBars
+                        .asPaddingValues()
+                        .calculateTopPadding() + 10.dp
+                }
 
                 QueueHeaderSection(
                     isPlaying = isPlaying,
@@ -783,6 +741,8 @@ fun QueueBottomSheet(
                             }
                         }
                     },
+                    isContainedInCard = isContainedInCard,
+                    onDismiss = onDismiss,
                     modifier = Modifier
                         .fillMaxWidth()
                         .then(directSheetDragModifier)
@@ -827,7 +787,7 @@ fun QueueBottomSheet(
                             contentPadding = PaddingValues(
                                 start = 0.dp,
                                 end = if (LocalShowScrollbar.current && (listState.canScrollForward || listState.canScrollBackward)) 26.dp else 0.dp,
-                                bottom = MiniPlayerHeight + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 32.dp
+                                bottom = if (isContainedInCard) 88.dp else MiniPlayerHeight + navigationBarHeight + 32.dp
                             )
                         ) {
                             item("queue_top_spacer") {
@@ -937,7 +897,7 @@ fun QueueBottomSheet(
                                 .padding(
                                     top = 24.dp,
                                     end = 14.dp,
-                                    bottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 14.dp
+                                    bottom = navigationBarHeight + 14.dp
                                 )
                         )
                     }
@@ -954,13 +914,11 @@ fun QueueBottomSheet(
                     label = "fabRotation"
                 )
 
-                val navigationBarHeight = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-
                 Row(
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         .padding(bottom = fabSpacing + navigationBarHeight)
-                        .height(70.dp)
+                        .height(toolbarHeight)
                         .then(directSheetDragModifier),
                     horizontalArrangement = Arrangement.Center,
                     verticalAlignment = Alignment.CenterVertically
@@ -974,7 +932,8 @@ fun QueueBottomSheet(
                         isTimerActive = isTimerActiveDerived,
                         onToggleShuffle = onToggleShuffle,
                         onToggleRepeat = onToggleRepeat,
-                        onTimerClick = { showTimerOptions = true }
+                        onTimerClick = { showTimerOptions = true },
+                        isContainedInCard = isContainedInCard
                     )
 
                     Spacer(modifier = Modifier.width(4.dp))
@@ -1048,8 +1007,11 @@ fun QueueBottomSheet(
                     ) {
                         Column(
                             modifier = Modifier
-                                .wrapContentWidth(Alignment.CenterHorizontally)
-                                .padding(bottom = fabSpacing + menuSpacing),
+                                .align(Alignment.BottomEnd)
+                                .padding(
+                                    bottom = fabSpacing + navigationBarHeight + toolbarHeight + 12.dp,
+                                    end = fabSpacing
+                                ),
                             horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
@@ -1126,7 +1088,7 @@ fun QueueBottomSheet(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .padding(
-                        bottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 96.dp
+                        bottom = navigationBarHeight + if (isContainedInCard) 84.dp else 96.dp
                     )
                     .zIndex(50f),
                 enter = fadeIn() + slideInVertically(initialOffsetY = { it }),
@@ -1168,47 +1130,95 @@ fun QueueBottomSheet(
                     }
                 }
             }
-        }
 
-        if (showTimerOptions) {
-            TimerOptionsBottomSheet(
-                onPlayCounter = onPlayCounter,
-                activeTimerValueDisplay = activeTimerValueDisplay.value,
-                activeTimerDurationMinutes = activeTimerDurationMinutes.value,
-                playCount = playCount.value,
-                isEndOfTrackTimerActive = isEndOfTrackTimerActive.value,
-                onDismiss = { showTimerOptions = false },
-                onSetPredefinedTimer = onSetPredefinedTimer,
-                onSetEndOfTrackTimer = onSetEndOfTrackTimer,
-                onOpenCustomTimePicker = onOpenCustomTimePicker,
-                onCancelCountedPlay = onCancelCountedPlay,
-                onCancelTimer = onCancelTimer
-            )
-        }
+            if (showTimerOptions) {
+                TimerOptionsBottomSheet(
+                    onPlayCounter = onPlayCounter,
+                    activeTimerValueDisplay = activeTimerValueDisplay.value,
+                    activeTimerDurationMinutes = activeTimerDurationMinutes.value,
+                    playCount = playCount.value,
+                    isEndOfTrackTimerActive = isEndOfTrackTimerActive.value,
+                    onDismiss = { showTimerOptions = false },
+                    onSetPredefinedTimer = onSetPredefinedTimer,
+                    onSetEndOfTrackTimer = onSetEndOfTrackTimer,
+                    onOpenCustomTimePicker = onOpenCustomTimePicker,
+                    onCancelCountedPlay = onCancelCountedPlay,
+                    onCancelTimer = onCancelTimer,
+                    isContainedInCard = isContainedInCard
+                )
+            }
 
-        if (showClearQueueDialog) {
-            AlertDialog(
-                onDismissRequest = { showClearQueueDialog = false },
-                title = { Text(stringResource(R.string.queue_dialog_clear_queue_title)) },
-                text = { Text(stringResource(R.string.queue_dialog_clear_queue_message)) },
-                confirmButton = {
-                    TextButton(
-                        onClick = {
-                            onClearQueue()
-                            showClearQueueDialog = false
+            if (showClearQueueDialog) {
+                if (isContainedInCard) {
+                    PlayerCardOverlayDialog(
+                        onDismissRequest = { showClearQueueDialog = false },
+                        containerColor = colors.surfaceContainerHigh
+                    ) {
+                        Text(
+                            text = stringResource(R.string.queue_dialog_clear_queue_title),
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.SemiBold,
+                            color = colors.onSurface
+                        )
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Text(
+                            text = stringResource(R.string.queue_dialog_clear_queue_message),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = colors.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.height(18.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)
+                        ) {
+                            TextButton(
+                                onClick = { showClearQueueDialog = false }
+                            ) {
+                                Text(
+                                    stringResource(R.string.common_cancel),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            TextButton(
+                                onClick = {
+                                    onClearQueue()
+                                    showClearQueueDialog = false
+                                }
+                            ) {
+                                Text(
+                                    stringResource(R.string.common_clear),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
                         }
-                    ) {
-                        Text(stringResource(R.string.common_clear), maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
-                },
-                dismissButton = {
-                    TextButton(
-                        onClick = { showClearQueueDialog = false }
-                    ) {
-                        Text(stringResource(R.string.common_cancel), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    }
+                } else {
+                    AlertDialog(
+                        onDismissRequest = { showClearQueueDialog = false },
+                        title = { Text(stringResource(R.string.queue_dialog_clear_queue_title)) },
+                        text = { Text(stringResource(R.string.queue_dialog_clear_queue_message)) },
+                        confirmButton = {
+                            TextButton(
+                                onClick = {
+                                    onClearQueue()
+                                    showClearQueueDialog = false
+                                }
+                            ) {
+                                Text(stringResource(R.string.common_clear), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                        },
+                        dismissButton = {
+                            TextButton(
+                                onClick = { showClearQueueDialog = false }
+                            ) {
+                                Text(stringResource(R.string.common_cancel), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                        }
+                    )
                 }
-            )
+            }
         }
     }
 }
@@ -1273,6 +1283,8 @@ private fun QueueHeaderSection(
     onNext: () -> Unit,
     colorScheme: ColorScheme? = null,
     onLocateCurrentSong: () -> Unit = {},
+    isContainedInCard: Boolean = false,
+    onDismiss: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val colors = MaterialTheme.colorScheme
@@ -1280,12 +1292,12 @@ private fun QueueHeaderSection(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .padding(top = topPadding, bottom = 12.dp)
+            .padding(top = topPadding, bottom = if (isContainedInCard) 8.dp else 12.dp)
     ) {
         Box(
             modifier = Modifier
                 .align(Alignment.CenterHorizontally)
-                .padding(top = 2.dp, bottom = 14.dp)
+                .padding(top = 2.dp, bottom = if (isContainedInCard) 10.dp else 14.dp)
                 .width(42.dp)
                 .height(4.dp)
                 .clip(CircleShape)
@@ -1302,7 +1314,9 @@ private fun QueueHeaderSection(
                 queueSourceName = queueSourceName,
                 queueCount = queueCount,
                 modifier = Modifier.fillMaxWidth(),
-                onLocateCurrentSong = onLocateCurrentSong
+                onLocateCurrentSong = onLocateCurrentSong,
+                isContainedInCard = isContainedInCard,
+                onDismiss = onDismiss
             )
         }
     }
@@ -1313,14 +1327,16 @@ private fun QueueHeader(
     queueSourceName: String,
     queueCount: Int,
     modifier: Modifier = Modifier,
-    onLocateCurrentSong: () -> Unit = {}
+    onLocateCurrentSong: () -> Unit = {},
+    isContainedInCard: Boolean = false,
+    onDismiss: (() -> Unit)? = null
 ) {
     val view = LocalView.current
     val appHapticsConfig = LocalAppHapticsConfig.current
 
     Row(
         modifier = modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(16.dp),
+        horizontalArrangement = Arrangement.spacedBy(if (isContainedInCard) 10.dp else 16.dp),
         verticalAlignment = Alignment.Top
     ) {
         Column(
@@ -1340,11 +1356,17 @@ private fun QueueHeader(
                     onLocateCurrentSong()
                 },
                 text = stringResource(R.string.queue_next_up_label),
-                style = MaterialTheme.typography.headlineLarge.copy(
+                style = (if (isContainedInCard) {
+                    MaterialTheme.typography.headlineSmall
+                } else {
+                    MaterialTheme.typography.headlineLarge
+                }).copy(
                     fontFamily = GoogleSansRounded,
                     fontWeight = FontWeight.SemiBold
                 ),
-                color = MaterialTheme.colorScheme.onSurface
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
             Text(
                 text = when {
@@ -1359,21 +1381,46 @@ private fun QueueHeader(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
-        QueueSourceBadge(
-            queueSourceName = queueSourceName,
-            modifier = Modifier.padding(top = 6.dp)
-        )
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            QueueSourceBadge(
+                queueSourceName = queueSourceName,
+                modifier = Modifier.padding(top = if (isContainedInCard) 2.dp else 6.dp),
+                maxWidth = if (isContainedInCard) 136.dp else 190.dp
+            )
+            if (isContainedInCard && onDismiss != null) {
+                Box(
+                    modifier = Modifier
+                        .padding(top = 2.dp)
+                        .size(34.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.88f))
+                        .clickable(onClick = onDismiss),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.KeyboardArrowDown,
+                        contentDescription = stringResource(R.string.player_panel_close),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
+        }
     }
 }
 
 @Composable
 private fun QueueSourceBadge(
     queueSourceName: String,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    maxWidth: Dp = 190.dp
 ) {
     val colors = MaterialTheme.colorScheme
     Surface(
-        modifier = modifier.widthIn(max = 190.dp),
+        modifier = modifier.widthIn(max = maxWidth),
         shape = CircleShape,
         color = colors.surfaceContainerHighest.copy(alpha = 0.88f),
         tonalElevation = 0.dp,
@@ -1409,7 +1456,8 @@ private fun QueueControlsToolbar(
     onToggleShuffle: () -> Unit,
     onToggleRepeat: () -> Unit,
     onTimerClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    isContainedInCard: Boolean = false
 ) {
     val activeColors = IconButtonDefaults.filledIconButtonColors(
         containerColor = MaterialTheme.colorScheme.primary,
@@ -1419,6 +1467,8 @@ private fun QueueControlsToolbar(
         containerColor = MaterialTheme.colorScheme.surfaceContainer,
         contentColor = MaterialTheme.colorScheme.onSurfaceVariant
     )
+    val buttonSize = if (isContainedInCard) 42.dp else 48.dp
+    val buttonSpacer = if (isContainedInCard) 8.dp else 12.dp
 
     Surface(
         modifier = modifier.fillMaxHeight(),
@@ -1436,25 +1486,28 @@ private fun QueueControlsToolbar(
         shadowElevation = 0.dp
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            modifier = Modifier.padding(
+                horizontal = if (isContainedInCard) 10.dp else 12.dp,
+                vertical = if (isContainedInCard) 6.dp else 8.dp
+            ),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.Center
         ) {
             FilledTonalIconButton(
                 onClick = onToggleShuffle,
                 colors = if (isShuffleOn) activeColors else inactiveColors,
-                modifier = Modifier.size(48.dp)
+                modifier = Modifier.size(buttonSize)
             ) {
                 Icon(
                     imageVector = Icons.Rounded.Shuffle,
                     contentDescription = stringResource(R.string.queue_cd_toggle_shuffle_action),
                 )
             }
-            Spacer(modifier = Modifier.width(12.dp))
+            Spacer(modifier = Modifier.width(buttonSpacer))
             FilledTonalIconButton(
                 onClick = onToggleRepeat,
                 colors = if (repeatMode != Player.REPEAT_MODE_OFF) activeColors else inactiveColors,
-                modifier = Modifier.size(48.dp)
+                modifier = Modifier.size(buttonSize)
             ) {
                 val repeatIcon = when (repeatMode) {
                     Player.REPEAT_MODE_ONE -> Icons.Rounded.RepeatOne
@@ -1465,11 +1518,11 @@ private fun QueueControlsToolbar(
                     contentDescription = stringResource(R.string.queue_cd_toggle_repeat_action),
                 )
             }
-            Spacer(modifier = Modifier.width(12.dp))
+            Spacer(modifier = Modifier.width(buttonSpacer))
             FilledTonalIconButton(
                 onClick = onTimerClick,
                 colors = if (isTimerActive.value) activeColors else inactiveColors,
-                modifier = Modifier.size(48.dp)
+                modifier = Modifier.size(buttonSize)
             ) {
                 Icon(
                     imageVector = Icons.Rounded.Timer,
@@ -1493,13 +1546,13 @@ fun SaveQueueAsPlaylistSheet(
     val albumShape = remember(animatedAlbumCornerRadius) {
         AbsoluteSmoothCornerShape(
             cornerRadiusTL = animatedAlbumCornerRadius,
-            smoothnessAsPercentTR = 60,
+            smoothnessAsPercentTL = 60,
             cornerRadiusTR = animatedAlbumCornerRadius,
-            smoothnessAsPercentBR = 60,
+            smoothnessAsPercentTR = 60,
             cornerRadiusBL = animatedAlbumCornerRadius,
             smoothnessAsPercentBL = 60,
             cornerRadiusBR = animatedAlbumCornerRadius,
-            smoothnessAsPercentTL = 60
+            smoothnessAsPercentBR = 60
         )
     }
 
@@ -1876,6 +1929,7 @@ fun SaveQueueAsPlaylistSheet(
         }
     }
 
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun QueuePlaylistSongItem(
     modifier: Modifier = Modifier,
@@ -1893,19 +1947,27 @@ fun QueuePlaylistSongItem(
     enableSwipeToDismiss: Boolean = false,
     swipeStateIdentity: Long = 0L,
     onDismissSong: () -> Unit = {},
-    isFromPlaylist: Boolean
+    isFromPlaylist: Boolean,
+    containerColorOverride: Color = Color.Unspecified,
+    titleColorOverride: Color = Color.Unspecified,
+    artistColorOverride: Color = Color.Unspecified,
+    playingEqColorOverride: Color = Color.Unspecified,
+    moreButtonContainerColorOverride: Color = Color.Unspecified,
+    moreButtonContentColorOverride: Color = Color.Unspecified,
+    flatElevation: Boolean = false
 ) {
     val colors = MaterialTheme.colorScheme
 
+    val motionScheme = MaterialTheme.motionScheme
     val cornerRadius by animateDpAsState(
         targetValue = if (isCurrentSong) 60.dp else 22.dp,
+        animationSpec = motionScheme.fastSpatialSpec(),
         label = "cornerRadiusAnimation"
     )
-
     val itemShape = RoundedCornerShape(cornerRadius)
-
     val albumCornerRadius by animateDpAsState(
         targetValue = if (isCurrentSong) 60.dp else 8.dp,
+        animationSpec = motionScheme.fastSpatialSpec(),
         label = "cornerRadiusAnimation"
     )
 
@@ -1915,10 +1977,38 @@ fun QueuePlaylistSongItem(
         targetValue = if (isDragging) 4.dp else 1.dp,
         label = "elevationAnimation"
     )
+    val resolvedElevation = if (flatElevation && !isDragging) 0.dp else elevation
 
-    val backgroundColor = colors.surfaceContainerLowest
-    val mvContainerColor = if (isCurrentSong) colors.tertiaryContainer else colors.surfaceContainerHigh
-    val mvContentColor = if (isCurrentSong) colors.onTertiaryContainer else colors.onSurface
+    val backgroundColor = if (containerColorOverride != Color.Unspecified) {
+        containerColorOverride
+    } else {
+        colors.surfaceContainerLowest
+    }
+    val mvContainerColor = when {
+        moreButtonContainerColorOverride != Color.Unspecified -> moreButtonContainerColorOverride
+        isCurrentSong -> colors.tertiaryContainer
+        else -> colors.surfaceContainerHigh
+    }
+    val mvContentColor = when {
+        moreButtonContentColorOverride != Color.Unspecified -> moreButtonContentColorOverride
+        isCurrentSong -> colors.onTertiaryContainer
+        else -> colors.onSurface
+    }
+    val titleColor = when {
+        titleColorOverride != Color.Unspecified -> titleColorOverride
+        isCurrentSong -> colors.primary
+        else -> colors.onSurface
+    }
+    val artistColor = when {
+        artistColorOverride != Color.Unspecified -> artistColorOverride
+        isCurrentSong -> colors.primary.copy(alpha = 0.8f)
+        else -> colors.onSurfaceVariant
+    }
+    val eqColor = if (playingEqColorOverride != Color.Unspecified) {
+        playingEqColorOverride
+    } else {
+        colors.secondary
+    }
     val hapticView = LocalView.current
     val appHapticsConfig = LocalAppHapticsConfig.current
     val dismissScope = rememberCoroutineScope()
@@ -2019,8 +2109,8 @@ fun QueuePlaylistSongItem(
                 },
             shape = itemShape,
             color = backgroundColor,
-            tonalElevation = elevation,
-            shadowElevation = elevation
+            tonalElevation = resolvedElevation,
+            shadowElevation = resolvedElevation
         ) {
             Row(
                 modifier = Modifier.padding(horizontal = 4.dp, vertical = 16.dp),
@@ -2072,14 +2162,14 @@ fun QueuePlaylistSongItem(
                     Column(Modifier.weight(1f)) {
                         Text(
                             song.title, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                            color = if (isCurrentSong) colors.primary else colors.onSurface,
+                            color = titleColor,
                             fontWeight = if (isCurrentSong) FontWeight.Bold else FontWeight.Normal,
                             style = MaterialTheme.typography.bodyLarge
                         )
                         Text(
                             song.displayArtist, maxLines = 1, overflow = TextOverflow.Ellipsis,
                             style = MaterialTheme.typography.bodyMedium,
-                            color = if (isCurrentSong) colors.primary.copy(alpha = 0.8f) else colors.onSurfaceVariant
+                            color = artistColor
                         )
                     }
 
@@ -2089,7 +2179,7 @@ fun QueuePlaylistSongItem(
                                 modifier = Modifier
                                     .padding(start = 8.dp)
                                     .size(width = 18.dp, height = 16.dp),
-                                color = colors.secondary,
+                                color = eqColor,
                                 isPlaying = isPlaying
                             )
                             Spacer(Modifier.width(4.dp))
@@ -2109,8 +2199,8 @@ fun QueuePlaylistSongItem(
                                 contentColor = mvContentColor
                             ),
                             modifier = Modifier
-                                .size(36.dp)
                                 .padding(end = 14.dp)
+                                .size(36.dp)
                         ) {
                             Icon(
                                 imageVector = Icons.Rounded.MoreVert,
@@ -2131,9 +2221,8 @@ fun QueuePlaylistSongItem(
                                 contentColor = colors.onSurface
                             ),
                             modifier = Modifier
-                                .width(40.dp)
-                                .height(40.dp)
                                 .padding(start = 4.dp, end = 8.dp)
+                                .size(36.dp)
                         ) {
                             Icon(
                                 modifier = Modifier.size(18.dp),
@@ -2146,4 +2235,82 @@ fun QueuePlaylistSongItem(
             }
         }
     }
+}
+
+private class CommittedKeyTracker(
+    var songIds: List<String> = emptyList(),
+    var keys: List<Long> = emptyList(),
+    var nextKey: Long = 0L
+)
+
+private fun computeCommittedKeys(
+    tracker: CommittedKeyTracker,
+    newSongs: List<Song>,
+    queueIndexOffset: Int,
+    pendingExpectedIds: List<String>?,
+    previewKeys: List<Long>?
+): List<Long> {
+    if (
+        pendingExpectedIds != null &&
+        previewKeys != null &&
+        previewKeys.size == newSongs.size &&
+        newSongs.size == pendingExpectedIds.size &&
+        newSongs.indices.all { newSongs[it].id == pendingExpectedIds[it] }
+    ) {
+        tracker.songIds = pendingExpectedIds
+        tracker.keys = previewKeys
+        return previewKeys
+    }
+
+    // Fast path: common queue-skip case where display list is just a suffix of previous display list.
+    if (tracker.songIds.isNotEmpty() && newSongs.isNotEmpty()) {
+        val firstNewId = newSongs.first().id
+        val startIndex = tracker.songIds.indexOf(firstNewId)
+        if (startIndex >= 0 && startIndex + newSongs.size <= tracker.songIds.size) {
+            var suffixMatches = true
+            for (i in newSongs.indices) {
+                if (tracker.songIds[startIndex + i] != newSongs[i].id) {
+                    suffixMatches = false
+                    break
+                }
+            }
+            if (suffixMatches) {
+                val slicedIds = tracker.songIds.subList(startIndex, startIndex + newSongs.size).toList()
+                val slicedKeys = tracker.keys.subList(startIndex, startIndex + newSongs.size).toList()
+                tracker.songIds = slicedIds
+                tracker.keys = slicedKeys
+                return slicedKeys
+            }
+        }
+    }
+
+    val reusableKeysBySongId = HashMap<String, ArrayDeque<Long>>(tracker.songIds.size)
+    tracker.songIds.forEachIndexed { index, songId ->
+        val key = tracker.keys.getOrNull(index) ?: return@forEachIndexed
+        reusableKeysBySongId.getOrPut(songId) { ArrayDeque() }.addLast(key)
+    }
+
+    var nextKey = if (tracker.songIds.isEmpty() && tracker.keys.isEmpty()) {
+        queueIndexOffset.toLong()
+    } else {
+        tracker.nextKey
+    }
+    val newKeys = ArrayList<Long>(newSongs.size)
+    val newSongIds = ArrayList<String>(newSongs.size)
+    newSongs.forEach { song ->
+        newSongIds.add(song.id)
+        val bucket = reusableKeysBySongId[song.id]
+        val reusedKey = if (bucket != null && bucket.isNotEmpty()) bucket.removeFirst() else null
+        if (reusedKey != null) {
+            newKeys.add(reusedKey)
+        } else {
+            newKeys.add(nextKey)
+            nextKey++
+        }
+    }
+
+    tracker.songIds = newSongIds
+    tracker.keys = newKeys
+    tracker.nextKey = nextKey
+    return newKeys
 }

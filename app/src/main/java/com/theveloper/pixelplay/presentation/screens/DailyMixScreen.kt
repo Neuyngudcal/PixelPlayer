@@ -75,6 +75,7 @@ import com.theveloper.pixelplay.R
 import com.theveloper.pixelplay.data.model.Song
 import com.theveloper.pixelplay.presentation.components.AiPlaylistSheet
 import com.theveloper.pixelplay.presentation.components.DailyMixMenu
+import com.theveloper.pixelplay.presentation.components.LocalInsideFloatingPane
 import com.theveloper.pixelplay.presentation.components.MiniPlayerHeight
 import com.theveloper.pixelplay.presentation.components.PlaylistBottomSheet
 import com.theveloper.pixelplay.presentation.components.SmartImage
@@ -157,7 +158,12 @@ fun DailyMixScreen(
         )
     }
 
-    val surfaceContainer = MaterialTheme.colorScheme.surface
+    val insideFloatingPane = LocalInsideFloatingPane.current
+    val surfaceContainer = if (insideFloatingPane) {
+        MaterialTheme.colorScheme.surfaceContainerLowest
+    } else {
+        MaterialTheme.colorScheme.surface
+    }
     val headerColor = MaterialTheme.colorScheme.primary
     val backgroundBrush = remember(surfaceContainer, headerColor) {
         Brush.verticalGradient(
@@ -264,7 +270,13 @@ fun DailyMixScreen(
             LazyColumn(
                 state = lazyListState,
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(bottom = MiniPlayerHeight + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 16.dp),
+                contentPadding = PaddingValues(
+                    bottom = MiniPlayerHeight + if (insideFloatingPane) {
+                        0.dp
+                    } else {
+                        WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+                    } + 16.dp
+                ),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 item(key = "daily_mix_header") {
@@ -310,7 +322,7 @@ fun DailyMixScreen(
                                 modifier = Modifier.padding(end = 4.dp),
                                 overflow = TextOverflow.Ellipsis,
                                 maxLines = 2,
-                                lineHeight = 20.sp
+                                lineHeight = MaterialTheme.typography.labelLarge.lineHeight
                             )
                         }
                         FilledTonalButton(
@@ -343,7 +355,7 @@ fun DailyMixScreen(
                                 modifier = Modifier.padding(end = 4.dp),
                                 overflow = TextOverflow.Ellipsis,
                                 maxLines = 2,
-                                lineHeight = 20.sp
+                                lineHeight = MaterialTheme.typography.labelLarge.lineHeight
                             )
                         }
                     }
@@ -373,7 +385,7 @@ fun DailyMixScreen(
                 contentColor = MaterialTheme.colorScheme.onSurface
             ),
             modifier = Modifier
-                .statusBarsPadding()
+                .then(if (!insideFloatingPane) Modifier.statusBarsPadding() else Modifier)
                 .padding(start = 10.dp, top = 8.dp)
                 .clip(CircleShape)
         ) {

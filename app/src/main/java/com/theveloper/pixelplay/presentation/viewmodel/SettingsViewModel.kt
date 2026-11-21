@@ -21,12 +21,13 @@ import com.theveloper.pixelplay.data.database.AiUsageDao
 import com.theveloper.pixelplay.data.database.AiUsageEntity
 import com.theveloper.pixelplay.data.preferences.AiPreferencesRepository
 import com.theveloper.pixelplay.data.preferences.AlbumArtQuality
-import com.theveloper.pixelplay.data.preferences.AlbumArtColorAccuracy
 import com.theveloper.pixelplay.data.preferences.AlbumArtPaletteStyle
+import com.theveloper.pixelplay.data.preferences.ThemeContrastLevel
 import com.theveloper.pixelplay.data.preferences.AppLanguage
 import com.theveloper.pixelplay.data.preferences.CollagePattern
 import com.theveloper.pixelplay.data.preferences.FullPlayerLoadingTweaks
 import com.theveloper.pixelplay.data.preferences.ThemePreferencesRepository
+import com.theveloper.pixelplay.ui.theme.SystemContrastObserver
 import com.theveloper.pixelplay.data.repository.LyricsRepository
 import com.theveloper.pixelplay.data.repository.MusicRepository
 import com.theveloper.pixelplay.data.model.LyricsSourcePreference
@@ -42,6 +43,7 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 import com.theveloper.pixelplay.R
+import com.theveloper.pixelplay.data.preferences.DEFAULT_NAV_BAR_CORNER_RADIUS
 import com.theveloper.pixelplay.data.preferences.NavBarStyle
 import com.theveloper.pixelplay.data.ai.GeminiModel
 import com.theveloper.pixelplay.data.ai.provider.AiClientFactory
@@ -58,9 +60,10 @@ data class SettingsUiState(
     val appThemeMode: String = AppThemeMode.FOLLOW_SYSTEM,
     val playerThemePreference: String = ThemePreference.ALBUM_ART,
     val albumArtPaletteStyle: AlbumArtPaletteStyle = AlbumArtPaletteStyle.default,
-    val albumArtColorAccuracy: Int = AlbumArtColorAccuracy.DEFAULT,
+    val themeContrastLevel: ThemeContrastLevel = ThemeContrastLevel.default,
+    val systemContrastLevel: Double = 0.0,
     val mockGenresEnabled: Boolean = false,
-    val navBarCornerRadius: Int = 32,
+    val navBarCornerRadius: Int = DEFAULT_NAV_BAR_CORNER_RADIUS,
     val navBarStyle: String = NavBarStyle.DEFAULT,
     val navBarCompactMode: Boolean = false,
     val carouselStyle: String = CarouselStyle.NO_PEEK,
@@ -141,7 +144,8 @@ private sealed interface SettingsUiUpdate {
         val appThemeMode: String,
         val playerThemePreference: String,
         val albumArtPaletteStyle: AlbumArtPaletteStyle,
-        val albumArtColorAccuracy: Int,
+        val themeContrastLevel: ThemeContrastLevel,
+        val systemContrastLevel: Double,
         val mockGenresEnabled: Boolean,
         val navBarCornerRadius: Int,
         val navBarStyle: String,
@@ -183,6 +187,7 @@ class SettingsViewModel @Inject constructor(
     private val aiPreferencesRepository: AiPreferencesRepository,
     private val themePreferencesRepository: ThemePreferencesRepository,
     private val colorSchemeProcessor: ColorSchemeProcessor,
+    private val systemContrastObserver: SystemContrastObserver,
     private val syncManager: SyncManager,
     private val aiClientFactory: AiClientFactory,
     private val geminiModelService: com.theveloper.pixelplay.data.ai.GeminiModelService,
@@ -198,7 +203,7 @@ class SettingsViewModel @Inject constructor(
 
     // AI Provider State
     val aiProvider: StateFlow<String> = aiPreferencesRepository.aiProvider
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "GEMINI")
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), AiProvider.ANDROID_AICORE.name)
 
     // Generic AI settings reactive to the selected provider
     val currentAiApiKey: StateFlow<String> = aiProvider
@@ -301,6 +306,10 @@ class SettingsViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
     val offlineLastBenchmarkSpeed: StateFlow<Float> = aiPreferencesRepository.offlineLastBenchmarkSpeed
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0f)
+    val aiCoreSupported: StateFlow<Boolean> = aiPreferencesRepository.aiCoreSupported
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+    val aiCoreBaseModelName: StateFlow<String> = aiPreferencesRepository.aiCoreBaseModelName
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "")
 
     val currentAiBaseUrl: StateFlow<String> = aiProvider
         .flatMapLatest { provider ->
@@ -606,7 +615,8 @@ class SettingsViewModel @Inject constructor(
                 themePreferencesRepository.appThemeModeFlow,
                 themePreferencesRepository.playerThemePreferenceFlow,
                 themePreferencesRepository.albumArtPaletteStyleFlow,
-                themePreferencesRepository.albumArtColorAccuracyFlow,
+                themePreferencesRepository.themeContrastLevelFlow,
+                systemContrastObserver.systemContrastFlow,
                 userPreferencesRepository.mockGenresEnabledFlow,
                 userPreferencesRepository.navBarCornerRadiusFlow,
                 userPreferencesRepository.navBarStyleFlow,
@@ -621,15 +631,16 @@ class SettingsViewModel @Inject constructor(
                     appThemeMode = values[1] as String,
                     playerThemePreference = values[2] as String,
                     albumArtPaletteStyle = values[3] as AlbumArtPaletteStyle,
-                    albumArtColorAccuracy = values[4] as Int,
-                    mockGenresEnabled = values[5] as Boolean,
-                    navBarCornerRadius = values[6] as Int,
-                    navBarStyle = values[7] as String,
-                    navBarCompactMode = values[8] as Boolean,
-                    libraryNavigationMode = values[9] as String,
-                    carouselStyle = values[10] as String,
-                    launchTab = values[11] as String,
-                    showPlayerFileInfo = values[12] as Boolean
+                    themeContrastLevel = values[4] as ThemeContrastLevel,
+                    systemContrastLevel = values[5] as Double,
+                    mockGenresEnabled = values[6] as Boolean,
+                    navBarCornerRadius = values[7] as Int,
+                    navBarStyle = values[8] as String,
+                    navBarCompactMode = values[9] as Boolean,
+                    libraryNavigationMode = values[10] as String,
+                    carouselStyle = values[11] as String,
+                    launchTab = values[12] as String,
+                    showPlayerFileInfo = values[13] as Boolean
                 )
             }.collect { update ->
                 _uiState.update { state ->
@@ -638,7 +649,8 @@ class SettingsViewModel @Inject constructor(
                         appThemeMode = update.appThemeMode,
                         playerThemePreference = update.playerThemePreference,
                         albumArtPaletteStyle = update.albumArtPaletteStyle,
-                        albumArtColorAccuracy = update.albumArtColorAccuracy,
+                        themeContrastLevel = update.themeContrastLevel,
+                        systemContrastLevel = update.systemContrastLevel,
                         mockGenresEnabled = update.mockGenresEnabled,
                         navBarCornerRadius = update.navBarCornerRadius,
                         navBarStyle = update.navBarStyle,
@@ -882,22 +894,30 @@ class SettingsViewModel @Inject constructor(
 
     fun setAlbumArtPaletteSettings(
         style: AlbumArtPaletteStyle,
-        accuracyLevel: Int
+        contrastLevel: ThemeContrastLevel
     ) {
         viewModelScope.launch {
-            themePreferencesRepository.setAlbumArtPaletteSettings(style, accuracyLevel)
+            themePreferencesRepository.setAlbumArtPaletteSettings(style, contrastLevel)
         }
+    }
+
+    suspend fun getAlbumArtSeedColor(uriString: String): androidx.compose.ui.graphics.Color? {
+        return colorSchemeProcessor.getOrExtractSeedColor(
+            albumArtUri = uriString,
+            forceRefresh = false,
+            persistToDatabase = false
+        )?.let { androidx.compose.ui.graphics.Color(it) }
     }
 
     suspend fun getAlbumArtPalettePreview(
         uriString: String,
         style: AlbumArtPaletteStyle,
-        accuracyLevel: Int
+        contrastLevel: Double
     ): ColorSchemePair? {
         return colorSchemeProcessor.getPreviewColorScheme(
             albumArtUri = uriString,
             paletteStyle = style,
-            colorAccuracyLevel = accuracyLevel
+            contrastLevel = contrastLevel
         )
     }
 

@@ -34,6 +34,7 @@ import androidx.media3.common.util.UnstableApi
 import com.theveloper.pixelplay.data.model.Song
 import com.theveloper.pixelplay.data.preferences.FullPlayerLoadingTweaks
 import com.theveloper.pixelplay.presentation.components.player.FullPlayerContent
+import com.theveloper.pixelplay.presentation.components.player.TabletPlayerDisplayMode
 import com.theveloper.pixelplay.presentation.components.scoped.FullPlayerVisualState
 import com.theveloper.pixelplay.presentation.components.scoped.rememberFullPlayerRuntimePolicy
 import com.theveloper.pixelplay.presentation.viewmodel.PlayerSheetState
@@ -69,66 +70,76 @@ internal fun BoxScope.UnifiedPlayerMiniAndFullLayers(
     onQueueDragStart: () -> Unit,
     onQueueDrag: (Float) -> Unit,
     onQueueRelease: (Float, Float) -> Unit,
-    onShowCastClicked: () -> Unit
+    onShowCastClicked: () -> Unit,
+    onSwipePreviewChanged: (String?, () -> Float) -> Unit = { _, _ -> },
+    tabletDisplayMode: TabletPlayerDisplayMode = TabletPlayerDisplayMode.FULLSCREEN,
+    onToggleTabletDisplayMode: () -> Unit = {}
 ) {
+    val shouldRenderMiniPlayer by remember {
+        derivedStateOf { playerContentExpansionFraction.value < 0.28f }
+    }
+
     currentSong?.let { currentSongNonNull ->
-        miniPlayerScheme?.let { readyScheme ->
-            CompositionLocalProvider(
-                LocalMaterialTheme provides readyScheme
-            ) {
-                val miniPlayerZIndex by remember {
-                    derivedStateOf {
-                        if (playerContentExpansionFraction.value < 0.5f) 1f else 0f
-                    }
-                }
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.TopCenter)
-                        .fillMaxWidth()
-                        .height(MiniPlayerHeight)
-                        .graphicsLayer {
-                            // Compute miniAlpha in the draw phase from the Animatable,
-                            // avoiding per-frame recomposition during gestures.
-                            alpha = (1f - playerContentExpansionFraction.value * 2f)
-                                .coerceIn(0f, 1f)
-                        }
-                        .layout { measurable, constraints ->
-                            val fraction = playerContentExpansionFraction.value
-                            val startPaddingPx = currentHorizontalPaddingStartPxProvider().toInt().coerceAtLeast(0)
-                            val endPaddingPx = currentHorizontalPaddingEndPxProvider().toInt().coerceAtLeast(0)
-                            
-                            val targetWidth = if (fraction > 0f) {
-                                (constraints.maxWidth - startPaddingPx - endPaddingPx).coerceAtLeast(0)
-                            } else {
-                                constraints.maxWidth
-                            }
-                            val placeable = measurable.measure(
-                                constraints.copy(
-                                    minWidth = targetWidth,
-                                    maxWidth = targetWidth
-                                )
-                            )
-                            layout(constraints.maxWidth, constraints.maxHeight) {
-                                val xOffset = if (fraction > 0f) startPaddingPx else 0
-                                placeable.placeRelative(xOffset, 0)
-                            }
-                        }
-                        .zIndex(miniPlayerZIndex)
+        if (shouldRenderMiniPlayer) {
+            miniPlayerScheme?.let { readyScheme ->
+                CompositionLocalProvider(
+                    LocalMaterialTheme provides readyScheme
                 ) {
-                    val isMiniPlayerVisible by remember {
-                        derivedStateOf { playerContentExpansionFraction.value < 0.01f }
+                    val miniPlayerZIndex by remember {
+                        derivedStateOf {
+                            if (playerContentExpansionFraction.value < 0.5f) 1f else 0f
+                        }
                     }
-                    MiniPlayerContentInternal(
-                        song = currentSongNonNull,
-                        isPlaying = infrequentPlayerState.isPlaying,
-                        isCastConnecting = isCastConnecting,
-                        isPreparingPlayback = isPreparingPlayback,
-                        onPlayPause = { playerViewModel.playPause() },
-                        onPrevious = { playerViewModel.previousSong() },
-                        onNext = { playerViewModel.nextSong() },
-                        canScroll = isMiniPlayerVisible && infrequentPlayerState.isPlaying,
-                        modifier = Modifier.fillMaxSize()
-                    )
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.TopCenter)
+                            .fillMaxWidth()
+                            .height(MiniPlayerHeight)
+                            .graphicsLayer {
+                                val f = playerContentExpansionFraction.value.coerceIn(0f, 1f)
+                                alpha = (1f - (f / 0.22f)).coerceIn(0f, 1f)
+                                translationY = -f * 24f
+                            }
+                            .layout { measurable, constraints ->
+                                val fraction = playerContentExpansionFraction.value
+                                val startPaddingPx = currentHorizontalPaddingStartPxProvider().toInt().coerceAtLeast(0)
+                                val endPaddingPx = currentHorizontalPaddingEndPxProvider().toInt().coerceAtLeast(0)
+                                val isFullScreenCoordinateSpace =
+                                    constraints.maxWidth > (startPaddingPx + endPaddingPx + 64)
+
+                                val targetWidth = if (fraction > 0f && isFullScreenCoordinateSpace) {
+                                    (constraints.maxWidth - startPaddingPx - endPaddingPx).coerceAtLeast(0)
+                                } else {
+                                    constraints.maxWidth
+                                }
+                                val placeable = measurable.measure(
+                                    constraints.copy(
+                                        minWidth = targetWidth,
+                                        maxWidth = targetWidth
+                                    )
+                                )
+                                layout(constraints.maxWidth, constraints.maxHeight) {
+                                    val xOffset = if (fraction > 0f && isFullScreenCoordinateSpace) startPaddingPx else 0
+                                    placeable.placeRelative(xOffset, 0)
+                                }
+                            }
+                            .zIndex(miniPlayerZIndex)
+                    ) {
+                        val isMiniPlayerVisible by remember {
+                            derivedStateOf { playerContentExpansionFraction.value < 0.01f }
+                        }
+                        MiniPlayerContentInternal(
+                            song = currentSongNonNull,
+                            isPlaying = infrequentPlayerState.isPlaying,
+                            isCastConnecting = isCastConnecting,
+                            isPreparingPlayback = isPreparingPlayback,
+                            onPlayPause = { playerViewModel.playPause() },
+                            onPrevious = { playerViewModel.previousSong() },
+                            onNext = { playerViewModel.nextSong() },
+                            canScroll = isMiniPlayerVisible && infrequentPlayerState.isPlaying,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
                 }
             }
         }
@@ -138,8 +149,7 @@ internal fun BoxScope.UnifiedPlayerMiniAndFullLayers(
                 LocalMaterialTheme provides albumColorScheme
             ) {
                 val fullPlayerScale by remember(bottomSheetOpenFraction) {
-                    // Keep the depth effect, but avoid aggressive full-screen rescaling on every frame.
-                    derivedStateOf { lerp(1f, 0.972f, bottomSheetOpenFraction) }
+                    derivedStateOf { lerp(1f, 0.95f, bottomSheetOpenFraction) }
                 }
 
                 val fullPlayerZIndex by remember {
@@ -167,15 +177,13 @@ internal fun BoxScope.UnifiedPlayerMiniAndFullLayers(
 
                 Box(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .requiredHeight(containerHeight)
+                        .fillMaxSize()
                         .graphicsLayer {
-                            // Read from FullPlayerVisualState lazy getters in the draw phase;
-                            // these read Animatable.value internally → re-draw only, no recomposition.
+                            val combinedScale = fullPlayerScale * fullPlayerVisualState.contentScale
                             alpha = fullPlayerVisualState.contentAlpha
                             translationY = fullPlayerVisualState.translationY
-                            scaleX = fullPlayerScale
-                            scaleY = fullPlayerScale
+                            scaleX = combinedScale
+                            scaleY = combinedScale
                         }
                         .zIndex(fullPlayerZIndex)
                         .offset { fullPlayerOffset }
@@ -187,6 +195,9 @@ internal fun BoxScope.UnifiedPlayerMiniAndFullLayers(
                     }
                     val isPlayingProvider = remember {
                         { latestInfrequentPlayerState.value.isPlaying }
+                    }
+                    val isBufferingProvider = remember {
+                        { latestInfrequentPlayerState.value.isBuffering }
                     }
                     val playWhenReadyProvider = remember {
                         { latestInfrequentPlayerState.value.playWhenReady }
@@ -236,6 +247,7 @@ internal fun BoxScope.UnifiedPlayerMiniAndFullLayers(
                         playerViewModel = playerViewModel,
                         currentPositionProvider = currentPositionProvider,
                         isPlayingProvider = isPlayingProvider,
+                        isBufferingProvider = isBufferingProvider,
                         playWhenReadyProvider = playWhenReadyProvider,
                         repeatModeProvider = repeatModeProvider,
                         isShuffleEnabledProvider = isShuffleEnabledProvider,
@@ -255,105 +267,12 @@ internal fun BoxScope.UnifiedPlayerMiniAndFullLayers(
                         onShowCastClicked = onShowCastClicked,
                         onShuffleToggle = onShuffleToggle,
                         onRepeatToggle = onRepeatToggle,
-                        onFavoriteToggle = onFavoriteToggle
+                        onFavoriteToggle = onFavoriteToggle,
+                        onSwipePreviewChanged = onSwipePreviewChanged,
+                        tabletDisplayMode = tabletDisplayMode,
+                        onToggleTabletDisplayMode = onToggleTabletDisplayMode
                     )
                 }
-            }
-        }
-    }
-}
-
-@OptIn(UnstableApi::class)
-@Composable
-internal fun UnifiedPlayerPrewarmLayer(
-    prewarmFullPlayer: Boolean,
-    currentSong: Song?,
-    containerHeight: Dp,
-    albumColorScheme: ColorScheme,
-    currentQueueSourceName: String,
-    infrequentPlayerState: StablePlayerState,
-    carouselStyle: String,
-    fullPlayerLoadingTweaks: FullPlayerLoadingTweaks,
-    playerViewModel: PlayerViewModel,
-    currentPositionProvider: () -> Long,
-    isCastConnecting: Boolean,
-    isFavorite: Boolean,
-    onShowQueueClicked: () -> Unit,
-    onQueueDragStart: () -> Unit,
-    onQueueDrag: (Float) -> Unit,
-    onQueueRelease: (Float, Float) -> Unit
-) {
-    if (prewarmFullPlayer && currentSong != null) {
-        // Scoped queue collection: the prewarmed FullPlayer owns its own
-        // subscription, keeping the queue out of the outer sheet's state.
-        val currentPlaybackQueue by playerViewModel.queueFlow
-            .collectAsStateWithLifecycle()
-        CompositionLocalProvider(
-            LocalMaterialTheme provides albumColorScheme
-        ) {
-            Box(
-                modifier = Modifier
-                    .height(containerHeight)
-                    .fillMaxWidth()
-                    .alpha(0f)
-                    .clipToBounds()
-            ) {
-                // Memoize closures the same way the main layer does to avoid creating
-                // new lambda instances on every recomposition.
-                val latestInfrequentPlayerState = rememberUpdatedState(infrequentPlayerState)
-                val latestIsFavorite = rememberUpdatedState(isFavorite)
-                val isPlayingProvider = remember { { latestInfrequentPlayerState.value.isPlaying } }
-                val playWhenReadyProvider = remember { { latestInfrequentPlayerState.value.playWhenReady } }
-                val repeatModeProvider = remember { { latestInfrequentPlayerState.value.repeatMode } }
-                val isShuffleEnabledProvider = remember { { latestInfrequentPlayerState.value.isShuffleEnabled } }
-                val totalDurationProvider = remember { { latestInfrequentPlayerState.value.totalDuration } }
-                val lyricsProvider = remember { { latestInfrequentPlayerState.value.lyrics } }
-                val isFavoriteProvider = remember { { latestIsFavorite.value } }
-                val onPlayPause = remember(playerViewModel) { playerViewModel::playPause }
-                val onSeek = remember(playerViewModel) { playerViewModel::seekTo }
-                val onNext = remember(playerViewModel) { playerViewModel::nextSong }
-                val onPrevious = remember(playerViewModel) { playerViewModel::previousSong }
-                val onShuffleToggle = remember(playerViewModel) { { playerViewModel.toggleShuffle() } }
-                val onRepeatToggle = remember(playerViewModel) { playerViewModel::cycleRepeatMode }
-                val onFavoriteToggle = remember(playerViewModel) { playerViewModel::toggleFavorite }
-
-                FullPlayerContent(
-                    currentSong = currentSong,
-                    currentPlaybackQueue = currentPlaybackQueue,
-                    currentQueueSourceName = currentQueueSourceName,
-                    currentMediaItemIndex = infrequentPlayerState.currentMediaItemIndex,
-                    isShuffleEnabled = infrequentPlayerState.isShuffleEnabled,
-                    shuffleTransitionInProgress = infrequentPlayerState.isShuffleTransitionInProgress,
-                    repeatMode = infrequentPlayerState.repeatMode,
-                    allowRealtimeUpdates = false,
-                    expansionFractionProvider = { 1f },
-                    currentSheetState = PlayerSheetState.EXPANDED,
-                    carouselStyle = carouselStyle,
-                    loadingTweaks = fullPlayerLoadingTweaks,
-                    playerViewModel = playerViewModel,
-                    currentPositionProvider = currentPositionProvider,
-                    isPlayingProvider = isPlayingProvider,
-                    playWhenReadyProvider = playWhenReadyProvider,
-                    repeatModeProvider = repeatModeProvider,
-                    isShuffleEnabledProvider = isShuffleEnabledProvider,
-                    totalDurationProvider = totalDurationProvider,
-                    lyricsProvider = lyricsProvider,
-                    isCastConnecting = isCastConnecting,
-                    isFavoriteProvider = isFavoriteProvider,
-                    onShowQueueClicked = onShowQueueClicked,
-                    onQueueDragStart = onQueueDragStart,
-                    onQueueDrag = onQueueDrag,
-                    onQueueRelease = onQueueRelease,
-                    onPlayPause = onPlayPause,
-                    onSeek = onSeek,
-                    onNext = onNext,
-                    onPrevious = onPrevious,
-                    onCollapse = {},
-                    onShowCastClicked = {},
-                    onShuffleToggle = onShuffleToggle,
-                    onRepeatToggle = onRepeatToggle,
-                    onFavoriteToggle = onFavoriteToggle
-                )
             }
         }
     }

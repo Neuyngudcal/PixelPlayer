@@ -84,7 +84,8 @@ fun WavySliderExpressive(
     val density = LocalDensity.current
     val strokeWidthPx = with(density) { strokeWidth.toPx() }
     val thumbRadiusPx = with(density) { thumbRadius.toPx() }
-    val trackEdgePaddingPx = with(density) { trackEdgePadding.coerceAtLeast(0.dp).toPx() }
+    val effectiveTrackEdgePadding = max(trackEdgePadding.coerceAtLeast(0.dp), thumbRadius)
+    val trackEdgePaddingPx = with(density) { effectiveTrackEdgePadding.toPx() }
     val thumbLineHeightPx = with(density) { thumbLineHeightWhenInteracting.toPx() }
 
     val stroke = remember(strokeWidthPx) {
@@ -241,7 +242,7 @@ fun WavySliderExpressive(
                 progress = { renderedNormalizedProgress.floatValue },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = trackEdgePadding.coerceAtLeast(0.dp))
+                    .padding(horizontal = effectiveTrackEdgePadding)
                     // Decorative layer: avoid duplicate semantics updates from the visual track.
                     .clearAndSetSemantics { },
                 color = activeTrackColor,

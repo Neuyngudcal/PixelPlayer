@@ -40,7 +40,6 @@ import androidx.media3.session.SessionError
 import androidx.media3.session.SessionResult
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
-import com.google.common.util.concurrent.SettableFuture
 import com.theveloper.pixelplay.PixelPlayApplication
 import com.theveloper.pixelplay.MainActivity
 import com.theveloper.pixelplay.R
@@ -63,15 +62,19 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import timber.log.Timber
 import com.theveloper.pixelplay.data.equalizer.EqualizerManager
 import com.theveloper.pixelplay.data.model.WidgetThemeColors
-import com.theveloper.pixelplay.data.preferences.AlbumArtColorAccuracy
 import com.theveloper.pixelplay.data.preferences.AlbumArtPaletteStyle
+import com.theveloper.pixelplay.data.preferences.ThemeContrastLevel
 import com.theveloper.pixelplay.presentation.viewmodel.ColorSchemeProcessor
+import com.theveloper.pixelplay.ui.theme.SystemContrastObserver
+import com.theveloper.pixelplay.ui.theme.quantizeContrastLevel
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
@@ -158,6 +161,8 @@ class MusicService : MediaLibraryService() {
     @Inject
     lateinit var colorSchemeProcessor: ColorSchemeProcessor
     @Inject
+    lateinit var systemContrastObserver: SystemContrastObserver
+    @Inject
     lateinit var autoMediaBrowseTree: AutoMediaBrowseTree
     @Inject
     lateinit var wearStatePublisher: WearStatePublisher
@@ -167,6 +172,8 @@ class MusicService : MediaLibraryService() {
     lateinit var navidromeRepository: NavidromeRepository
     @Inject
     lateinit var listeningStatsTracker: ListeningStatsTracker
+    @Inject
+    lateinit var sleepTimerCoordinator: SleepTimerCoordinator
     @Inject
     @AppScope
     lateinit var appScope: CoroutineScope
@@ -190,14 +197,13 @@ class MusicService : MediaLibraryService() {
     private var keepPlayingInBackground = true
     private var isManualShuffleEnabled = false
     private var persistentShuffleEnabled = false
-    // Holds the previous main-thread UncaughtExceptionHandler so we can restore it in onDestroy.
-    private var previousMainThreadExceptionHandler: Thread.UncaughtExceptionHandler? = null
     // --- Counted Play State ---
     private var countedPlayActive = false
     private var countedPlayTarget = 0
     private var countedPlayCount = 0
     private var countedOriginalId: String? = null
     private var countedPlayListener: Player.Listener? = null
+    private var countedPlayAttachedPlayer: Player? = null
     private val alarmManager by lazy {
         getSystemService(Context.ALARM_SERVICE) as AlarmManager
     }
@@ -225,8 +231,17 @@ class MusicService : MediaLibraryService() {
     }
     private var playbackSnapshotPersistJob: Job? = null
     private var playbackSnapshotUnloadWriteJob: Job? = null
+    private var unloadFlushJob: Job? = null
     private var isRestoringPlaybackSnapshot = false
     private var isPlaybackUnloadInProgress = false
+    private val pendingAsyncStartupCount = AtomicInteger(0)
+    private val pendingAsyncStartupFlow = MutableStateFlow(0)
+    private var deferredForegroundReconcileJob: Job? = null
+    private var latestReconcileStartId: Int = 0
+    private var reconcileRequestsStopSelf: Boolean = false
+    private val sleepTimerExpirationHandler: () -> Unit = {
+        handleSleepTimerExpiredInProcess()
+    }
     private val audioManager by lazy {
         getSystemService(Context.AUDIO_SERVICE) as AudioManager
     }
@@ -268,6 +283,7 @@ class MusicService : MediaLibraryService() {
         private const val MEDIA_SESSION_BUTTON_DEBOUNCE_MS = 250L
         private const val DEFERRED_SERVICE_STARTUP_WORK_DELAY_MS = 1_000L
         private const val PAUSED_RESTORE_PREPARE_QUEUE_LIMIT = 50
+        private const val WIDGET_UNLOAD_FLUSH_TIMEOUT_MS = 1_500L
         private val pendingMediaButtonForegroundStarts = AtomicInteger(0)
 
         private const val APP_PACKAGE_PREFIX = "com.theveloper.pixelplay"
@@ -324,6 +340,20 @@ class MusicService : MediaLibraryService() {
     private val playerSwapListener: (Player) -> Unit = { newPlayer ->
         publishMediaSessionPlayer(newPlayer, "Swapped MediaSession player to new instance.")
         replayGainProcessor.prepareForTransition(newPlayer)
+        countedPlayListener?.let { listener ->
+            countedPlayAttachedPlayer?.takeIf { it !== newPlayer }?.removeListener(listener)
+            if (countedPlayActive || countedOriginalId != null) {
+                if (countedPlayAttachedPlayer !== newPlayer) {
+                    newPlayer.removeListener(listener)
+                    newPlayer.addListener(listener)
+                    countedPlayAttachedPlayer = newPlayer
+                }
+            } else {
+                newPlayer.removeListener(listener)
+                countedPlayAttachedPlayer = null
+                countedPlayListener = null
+            }
+        }
     }
 
     private val transitionDisplayPlayerListener: (Player) -> Unit = { displayPlayer ->
@@ -396,36 +426,21 @@ class MusicService : MediaLibraryService() {
     }
 
     override fun onCreate() {
-        // Media3's Cast SDK callback path (MediaSessionImpl$$ExternalSyntheticLambda →
-        // Util.postOrRun → MediaNotificationManager.updateNotificationInternal) calls
-        // Service.startForeground() directly, bypassing onUpdateNotification() entirely.
-        // Since startForeground() is final we cannot override it. Instead we intercept
-        // ForegroundServiceStartNotAllowedException on the main thread before it reaches
-        // ActivityThread and crashes the process.
-        val existingHandler = Thread.currentThread().uncaughtExceptionHandler
-        previousMainThreadExceptionHandler = existingHandler
-        Thread.currentThread().setUncaughtExceptionHandler { thread, throwable ->
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
-                throwable is ForegroundServiceStartNotAllowedException
-            ) {
-                Timber.tag(TAG).w(throwable, "Suppressed ForegroundServiceStartNotAllowedException from Media3/Cast internal path")
-            } else {
-                existingHandler?.uncaughtException(thread, throwable)
-            }
-        }
-
         // A media-button startForegroundService() can reach MusicService directly (not always
         // through PixelPlayMediaButtonReceiver), so the pending counter is only a hint. Promote
         // immediately on cold start before super.onCreate(): Hilt injection and MediaLibraryService
         // startup can otherwise consume Android's 5-second FGS deadline before onStartCommand()
         // receives the media-button intent.
-        temporaryForegroundStartedInOnCreate =
+        val shouldAttemptTempForeground =
             consumePendingMediaButtonForegroundStart() || Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
-        if (temporaryForegroundStartedInOnCreate) {
+        temporaryForegroundStartedInOnCreate = if (shouldAttemptTempForeground) {
             startTemporaryForegroundForCommand()
+        } else {
+            false
         }
 
         super.onCreate()
+        sleepTimerCoordinator.registerServiceExpirationHandler(sleepTimerExpirationHandler)
         listeningStatsTracker.initialize(appScope)
         
         // Ensure engine is ready (re-initialize if service was restarted)
@@ -439,6 +454,12 @@ class MusicService : MediaLibraryService() {
         // Handle player swaps (crossfade) to keep MediaSession in sync
         engine.setOnPlayerAboutToBeReleasedListener { oldPlayer ->
             oldPlayer.removeListener(playerListener)
+            countedPlayListener?.let { listener ->
+                if (countedPlayAttachedPlayer === oldPlayer) {
+                    oldPlayer.removeListener(listener)
+                    countedPlayAttachedPlayer = null
+                }
+            }
         }
         engine.addPlayerSwapListener(playerSwapListener)
         engine.addTransitionDisplayPlayerListener(transitionDisplayPlayerListener)
@@ -587,6 +608,7 @@ class MusicService : MediaLibraryService() {
                     MusicNotificationProvider.CUSTOM_COMMAND_SET_SHUFFLE_STATE,
                     MusicNotificationProvider.CUSTOM_COMMAND_CYCLE_REPEAT_MODE,
                     MusicNotificationProvider.CUSTOM_COMMAND_COUNTED_PLAY,
+                    MusicNotificationProvider.CUSTOM_COMMAND_CANCEL_COUNTED_PLAY,
                     MusicNotificationProvider.CUSTOM_COMMAND_SET_SLEEP_TIMER_DURATION,
                     MusicNotificationProvider.CUSTOM_COMMAND_SET_SLEEP_TIMER_END_OF_TRACK,
                     MusicNotificationProvider.CUSTOM_COMMAND_CANCEL_SLEEP_TIMER,
@@ -830,19 +852,25 @@ class MusicService : MediaLibraryService() {
                 controller: MediaSession.ControllerInfo,
                 mediaItems: MutableList<MediaItem>
             ): ListenableFuture<MutableList<MediaItem>> {
+                incrementPendingAsyncStartup()
                 return serviceScope.future {
-                    if (mediaItems.size == 1 && !controller.packageName.startsWith(APP_PACKAGE_PREFIX)) {
-                        resolveContextQueueForRequestedItem(mediaItems.first(), controller)?.let { queue ->
-                            grantArtworkUriPermissions(controller.packageName, queue.mediaItems)
-                            return@future queue.mediaItems
+                    try {
+                        engine.expandWindowedQueueIfNeeded()
+                        if (mediaItems.size == 1 && !controller.packageName.startsWith(APP_PACKAGE_PREFIX)) {
+                            resolveContextQueueForRequestedItem(mediaItems.first(), controller)?.let { queue ->
+                                grantArtworkUriPermissions(controller.packageName, queue.mediaItems)
+                                return@future queue.mediaItems
+                            }
                         }
+                        resolveMediaItemsByIds(mediaItems).also { resolvedItems ->
+                            grantArtworkUriPermissions(
+                                controller.packageName,
+                                resolvedItems.trustedArtworkGrantItems
+                            )
+                        }.mediaItems
+                    } finally {
+                        decrementPendingAsyncStartup()
                     }
-                    resolveMediaItemsByIds(mediaItems).also { resolvedItems ->
-                        grantArtworkUriPermissions(
-                            controller.packageName,
-                            resolvedItems.trustedArtworkGrantItems
-                        )
-                    }.mediaItems
                 }
             }
 
@@ -853,38 +881,43 @@ class MusicService : MediaLibraryService() {
                 startIndex: Int,
                 startPositionMs: Long
             ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> {
+                incrementPendingAsyncStartup()
                 return serviceScope.future {
-                    val requestedIndex = startIndex.coerceIn(0, (mediaItems.size - 1).coerceAtLeast(0))
-                    val requestedItem = mediaItems.getOrNull(requestedIndex)
+                    try {
+                        val requestedIndex = startIndex.coerceIn(0, (mediaItems.size - 1).coerceAtLeast(0))
+                        val requestedItem = mediaItems.getOrNull(requestedIndex)
 
-                    val contextQueue = if (requestedItem != null && !controller.packageName.startsWith(APP_PACKAGE_PREFIX)) {
-                        resolveContextQueueForRequestedItem(requestedItem, controller)
-                    } else {
-                        null
-                    }
-                    if (contextQueue != null) {
-                        grantArtworkUriPermissions(controller.packageName, contextQueue.mediaItems)
-                        return@future MediaSession.MediaItemsWithStartPosition(
-                            contextQueue.mediaItems,
-                            contextQueue.startIndex,
+                        val contextQueue = if (requestedItem != null && !controller.packageName.startsWith(APP_PACKAGE_PREFIX)) {
+                            resolveContextQueueForRequestedItem(requestedItem, controller)
+                        } else {
+                            null
+                        }
+                        if (contextQueue != null) {
+                            grantArtworkUriPermissions(controller.packageName, contextQueue.mediaItems)
+                            return@future MediaSession.MediaItemsWithStartPosition(
+                                contextQueue.mediaItems,
+                                contextQueue.startIndex,
+                                startPositionMs
+                            )
+                        }
+
+                        val resolvedItems = resolveMediaItemsByIds(mediaItems)
+                        grantArtworkUriPermissions(
+                            controller.packageName,
+                            resolvedItems.trustedArtworkGrantItems
+                        )
+                        val safeStartIndex = requestedIndex.coerceIn(
+                            0,
+                            (resolvedItems.mediaItems.size - 1).coerceAtLeast(0)
+                        )
+                        MediaSession.MediaItemsWithStartPosition(
+                            resolvedItems.mediaItems,
+                            safeStartIndex,
                             startPositionMs
                         )
+                    } finally {
+                        decrementPendingAsyncStartup()
                     }
-
-                    val resolvedItems = resolveMediaItemsByIds(mediaItems)
-                    grantArtworkUriPermissions(
-                        controller.packageName,
-                        resolvedItems.trustedArtworkGrantItems
-                    )
-                    val safeStartIndex = requestedIndex.coerceIn(
-                        0,
-                        (resolvedItems.mediaItems.size - 1).coerceAtLeast(0)
-                    )
-                    MediaSession.MediaItemsWithStartPosition(
-                        resolvedItems.mediaItems,
-                        safeStartIndex,
-                        startPositionMs
-                    )
                 }
             }
         }
@@ -901,15 +934,23 @@ class MusicService : MediaLibraryService() {
         if (temporaryForegroundStartedInOnCreate) {
             serviceScope.launch {
                 delay(2_000L)
-                if (mediaSession?.player?.hasForegroundPlaybackIntent() != true) {
+                pendingAsyncStartupFlow.first { it == 0 }
+                if (!isPlaybackUnloadInProgress &&
+                    mediaSession?.player?.hasForegroundPlaybackIntent() != true
+                ) {
                     stopForeground(STOP_FOREGROUND_REMOVE)
                 }
             }
         }
+        incrementPendingAsyncStartup()
         serviceScope.launch {
-            restorePlaybackQueueSnapshotIfNeeded()
-            mediaSession?.let { refreshMediaSessionUi(it) }
-            widgetUpdateManager.requestFullUpdate(true)
+            try {
+                restorePlaybackQueueSnapshotIfNeeded()
+                mediaSession?.let { refreshMediaSessionUi(it) }
+                widgetUpdateManager.requestFullUpdate(true)
+            } finally {
+                decrementPendingAsyncStartup()
+            }
         }
 
         serviceScope.launch {
@@ -968,6 +1009,13 @@ class MusicService : MediaLibraryService() {
 
     private fun cancelDurationSleepTimerInternal() {
         alarmManager.cancel(createSleepTimerPendingIntent())
+        sleepTimerCoordinator.cancelPendingAlarms(this)
+    }
+
+    private fun handleSleepTimerExpiredInProcess() {
+        Timber.tag(TAG).d("Sleep timer expired. Pausing player.")
+        cancelDurationSleepTimerInternal()
+        (mediaSession?.player ?: engine.masterPlayer).pause()
     }
 
     private fun setDurationSleepTimer(minutes: Int) {
@@ -1030,7 +1078,7 @@ class MusicService : MediaLibraryService() {
         Timber.tag(TAG).d("Sleep timers cancelled from Wear")
     }
 
-    private fun startTemporaryForegroundForCommand() {
+    private fun startTemporaryForegroundForCommand(): Boolean {
         val notification = NotificationCompat.Builder(
             this,
             PixelPlayApplication.NOTIFICATION_CHANNEL_ID
@@ -1047,15 +1095,61 @@ class MusicService : MediaLibraryService() {
         // Pass mediaPlayback explicitly. On API 34+ a missing/mismatched type can throw
         // MissingForegroundServiceTypeException; ServiceCompat picks the right overload
         // per API level and matches the manifest-declared foregroundServiceType.
-        try {
+        return try {
             ServiceCompat.startForeground(
                 this,
                 NOTIFICATION_ID,
                 notification,
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
             )
+            true
         } catch (e: Exception) {
             Timber.tag(TAG).w(e, "Failed to promote service to foreground for external command")
+            false
+        }
+    }
+
+    private fun incrementPendingAsyncStartup() {
+        pendingAsyncStartupFlow.value = pendingAsyncStartupCount.incrementAndGet()
+    }
+
+    private fun decrementPendingAsyncStartup() {
+        val remaining = pendingAsyncStartupCount.decrementAndGet().coerceAtLeast(0)
+        pendingAsyncStartupFlow.value = remaining
+    }
+
+    private fun reconcileTemporaryForegroundAfterStartup(startId: Int, allowStopSelf: Boolean) {
+        if (mediaSession?.player?.hasForegroundPlaybackIntent() == true) {
+            reconcileRequestsStopSelf = false
+            return
+        }
+        if (allowStopSelf) {
+            reconcileRequestsStopSelf = true
+        }
+        latestReconcileStartId = startId
+
+        if (pendingAsyncStartupCount.get() <= 0) {
+            deferredForegroundReconcileJob?.cancel()
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            if (reconcileRequestsStopSelf) {
+                stopSelfResult(startId)
+                reconcileRequestsStopSelf = false
+            }
+            return
+        }
+
+        deferredForegroundReconcileJob?.cancel()
+        deferredForegroundReconcileJob = serviceScope.launch {
+            pendingAsyncStartupFlow.first { it <= 0 }
+            if (!isPlaybackUnloadInProgress &&
+                mediaSession?.player?.hasForegroundPlaybackIntent() != true
+            ) {
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                if (reconcileRequestsStopSelf) {
+                    stopSelfResult(latestReconcileStartId)
+                    reconcileRequestsStopSelf = false
+                }
+            }
         }
     }
 
@@ -1093,15 +1187,16 @@ class MusicService : MediaLibraryService() {
                 PlayerActions.REPEAT -> true
                 else -> false
             }
-        if (needsTemporaryForeground && !startedTemporaryForegroundInOnCreate) {
-            startTemporaryForegroundForCommand()
-        }
+        val startedForegroundInThisCall =
+            needsTemporaryForeground && !startedTemporaryForegroundInOnCreate && startTemporaryForegroundForCommand()
 
         intent?.action?.let { action ->
             Timber.tag(TAG).d("onStartCommand widget action: %s", action)
             val player = mediaSession?.player ?: engine.masterPlayer
             when (action) {
                 PlayerActions.PLAY_PAUSE -> {
+                    isPlaybackUnloadInProgress = false
+                    unloadFlushJob?.cancel()
                     if (player.playbackState == Player.STATE_IDLE) {
                         player.prepare()
                     }
@@ -1109,25 +1204,34 @@ class MusicService : MediaLibraryService() {
                     widgetUpdateManager.requestFullUpdate(true)
                 }
                 PlayerActions.NEXT -> {
+                    isPlaybackUnloadInProgress = false
+                    unloadFlushJob?.cancel()
                     player.seekToNext()
                     widgetUpdateManager.requestFullUpdate(true)
                 }
                 PlayerActions.PREVIOUS -> {
+                    isPlaybackUnloadInProgress = false
+                    unloadFlushJob?.cancel()
                     player.seekToPrevious()
                     widgetUpdateManager.requestFullUpdate(true)
                 }
                 PlayerActions.FAVORITE -> {
                     val songId = player.currentMediaItem?.mediaId
                     if (!songId.isNullOrBlank()) {
+                        incrementPendingAsyncStartup()
                         serviceScope.launch {
-                            val updatedFavorite = musicRepository.toggleFavoriteStatus(songId)
-                            favoriteSongIds = if (updatedFavorite) {
-                                favoriteSongIds + songId
-                            } else {
-                                favoriteSongIds - songId
+                            try {
+                                val updatedFavorite = musicRepository.toggleFavoriteStatus(songId)
+                                favoriteSongIds = if (updatedFavorite) {
+                                    favoriteSongIds + songId
+                                } else {
+                                    favoriteSongIds - songId
+                                }
+                                mediaSession?.let { refreshMediaSessionUi(it) }
+                                widgetUpdateManager.requestFullUpdate(true)
+                            } finally {
+                                decrementPendingAsyncStartup()
                             }
-                            mediaSession?.let { refreshMediaSessionUi(it) }
-                            widgetUpdateManager.requestFullUpdate(true)
                         }
                     }
                 }
@@ -1140,6 +1244,8 @@ class MusicService : MediaLibraryService() {
                             for (i in 0 until timeline.windowCount) {
                                 timeline.getWindow(i, window)
                                 if (window.mediaItem.mediaId.toLongOrNull() == songId) {
+                                    isPlaybackUnloadInProgress = false
+                                    unloadFlushJob?.cancel()
                                     player.seekTo(i, C.TIME_UNSET)
                                     player.prepare()
                                     player.play()
@@ -1169,20 +1275,20 @@ class MusicService : MediaLibraryService() {
                     widgetUpdateManager.requestFullUpdate(true)
                 }
                 ACTION_SLEEP_TIMER_EXPIRED -> {
-                    Timber.tag(TAG).d("Sleep timer expired action received. Pausing player.")
-                    cancelDurationSleepTimerInternal()
-                    player.pause()
+                    handleSleepTimerExpiredInProcess()
+                }
+                Intent.ACTION_MEDIA_BUTTON -> {
+                    isPlaybackUnloadInProgress = false
+                    unloadFlushJob?.cancel()
                 }
             }
         }
         val startCommandResult = super.onStartCommand(intent, flags, startId)
-        if (needsTemporaryForeground || startedTemporaryForegroundInOnCreate) {
-            if (mediaSession?.player?.hasForegroundPlaybackIntent() != true) {
-                stopForeground(STOP_FOREGROUND_REMOVE)
-                if (needsTemporaryForeground) {
-                    stopSelfResult(startId)
-                }
-            }
+        if (startedForegroundInThisCall || startedTemporaryForegroundInOnCreate) {
+            reconcileTemporaryForegroundAfterStartup(
+                startId = startId,
+                allowStopSelf = needsTemporaryForeground,
+            )
         }
         return startCommandResult
     }
@@ -1290,6 +1396,10 @@ class MusicService : MediaLibraryService() {
         }
 
         override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+            if (playWhenReady) {
+                isPlaybackUnloadInProgress = false
+                unloadFlushJob?.cancel()
+            }
             when {
                 playWhenReady -> clearHeadsetReconnectResume()
                 !resumeOnHeadsetReconnectEnabled -> clearHeadsetReconnectResume()
@@ -1491,11 +1601,15 @@ class MusicService : MediaLibraryService() {
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession? = mediaSession
 
     override fun onDestroy() {
+        sleepTimerCoordinator.unregisterServiceExpirationHandler(sleepTimerExpirationHandler)
+        cancelDurationSleepTimerInternal()
         PlaybackActivityTracker.setPlaybackActive(false)
         listeningStatsTracker.finalizeCurrentSession(forceSynchronousPersistence = true)
         reportNavidromePlayback("stopped")
         stopNavidromePlaybackReporting()
         playbackSnapshotPersistJob?.cancel()
+        deferredForegroundReconcileJob?.cancel()
+        unloadFlushJob?.cancel()
         mediaSessionButtonRefreshJob?.cancel()
         followUpMediaSessionUiRefreshJob?.cancel()
         widgetUpdateManager.cancel()
@@ -1511,6 +1625,12 @@ class MusicService : MediaLibraryService() {
         engine.setOnPlayerAboutToBeReleasedListener {}
         mediaSession?.player?.removeListener(playerListener)
         engine.masterPlayer.removeListener(playerListener)
+        countedPlayListener?.let { listener ->
+            countedPlayAttachedPlayer?.removeListener(listener)
+            engine.masterPlayer.removeListener(listener)
+        }
+        countedPlayAttachedPlayer = null
+        countedPlayListener = null
 
         mediaSession?.run {
             release()
@@ -1519,8 +1639,6 @@ class MusicService : MediaLibraryService() {
         engine.release()
         controller.release()
         serviceScope.cancel()
-        Thread.currentThread().setUncaughtExceptionHandler(previousMainThreadExceptionHandler)
-        previousMainThreadExceptionHandler = null
         super.onDestroy()
     }
 
@@ -1999,13 +2117,15 @@ class MusicService : MediaLibraryService() {
         )
 
         // Merge theme preference reads into a single context switch
-        val (playerTheme, paletteStyle, colorAccuracyLevel) = withContext(Dispatchers.IO) {
+        val (playerTheme, paletteStyle, contrastPref) = withContext(Dispatchers.IO) {
             Triple(
                 themePreferencesRepository.playerThemePreferenceFlow.first(),
-                AlbumArtPaletteStyle.fromStorageKey(themePreferencesRepository.albumArtPaletteStyleFlow.first().storageKey),
-                AlbumArtColorAccuracy.clamp(themePreferencesRepository.albumArtColorAccuracyFlow.first())
+                themePreferencesRepository.albumArtPaletteStyleFlow.first(),
+                themePreferencesRepository.themeContrastLevelFlow.first()
             )
         }
+        val effectiveContrast = contrastPref.resolve(systemContrastObserver.currentContrast())
+        val contrastBucket = quantizeContrastLevel(effectiveContrast)
 
         val schemePair: ColorSchemePair? = when {
             Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && playerTheme == ThemePreference.DYNAMIC ->
@@ -2014,22 +2134,22 @@ class MusicService : MediaLibraryService() {
                     dark = dynamicDarkColorScheme(applicationContext)
                 )
             artUriString != null ->
-                // Skip heavy palette recomputation when art, style, and accuracy haven't changed
+                // Skip recomputation when art, style, and effective contrast haven't changed
                 if (
                     artUriString == cachedSchemeArtUri &&
                     paletteStyle == cachedSchemePaletteStyle &&
-                    colorAccuracyLevel == cachedSchemeColorAccuracy
+                    contrastBucket == cachedSchemeContrastBucket
                 ) {
                     cachedColorSchemePair
                 } else {
                     colorSchemeProcessor.getOrGenerateColorScheme(
                         albumArtUri = artUriString,
                         paletteStyle = paletteStyle,
-                        colorAccuracyLevel = colorAccuracyLevel
+                        contrastLevel = effectiveContrast
                     ).also {
                         cachedSchemeArtUri = artUriString
                         cachedSchemePaletteStyle = paletteStyle
-                        cachedSchemeColorAccuracy = colorAccuracyLevel
+                        cachedSchemeContrastBucket = contrastBucket
                         cachedColorSchemePair = it
                     }
                 }
@@ -2139,10 +2259,10 @@ class MusicService : MediaLibraryService() {
         }
     }
 
-    // Color scheme cache: skip recomputation when art URI, palette style, and accuracy haven't changed
+    // Color scheme cache: skip recomputation when art URI, palette style, and contrast haven't changed
     private var cachedSchemeArtUri: String? = null
     private var cachedSchemePaletteStyle: AlbumArtPaletteStyle? = null
-    private var cachedSchemeColorAccuracy: Int = AlbumArtColorAccuracy.DEFAULT
+    private var cachedSchemeContrastBucket: Int = 0
     private var cachedColorSchemePair: ColorSchemePair? = null
     private var cachedWidgetArtSourceKey: String? = null
     private var cachedWidgetArtResolvedUri: String? = null
@@ -2400,6 +2520,11 @@ class MusicService : MediaLibraryService() {
     }
 
     override fun onUpdateNotification(session: MediaSession, startInForegroundRequired: Boolean) {
+        if (isPlaybackUnloadInProgress) {
+            runCatching { super.onUpdateNotification(session, false) }
+            return
+        }
+
         val hasPlaybackIntent = session.player.hasForegroundPlaybackIntent()
 
         // Android 12+ (API 31+): keep the service foreground while playback is intended,
@@ -2415,7 +2540,19 @@ class MusicService : MediaLibraryService() {
         try {
             super.onUpdateNotification(session, shouldStartInForeground)
         } catch (e: Exception) {
-            Timber.tag(TAG).w(e, "onUpdateNotification suppressed: ${e.message}")
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+                e is ForegroundServiceStartNotAllowedException
+            ) {
+                Timber.tag(TAG).w(
+                    e,
+                    "onUpdateNotification foreground start blocked; falling back to non-foreground update",
+                )
+                if (shouldStartInForeground) {
+                    runCatching { super.onUpdateNotification(session, false) }
+                }
+            } else {
+                Timber.tag(TAG).w(e, "onUpdateNotification suppressed: %s", e.message)
+            }
         }
     }
 
@@ -2499,6 +2636,7 @@ class MusicService : MediaLibraryService() {
             reason
         )
         isPlaybackUnloadInProgress = true
+        unloadFlushJob?.cancel()
         followUpMediaSessionUiRefreshJob?.cancel()
         mediaSessionButtonRefreshJob?.cancel()
         widgetUpdateManager.cancel()
@@ -2508,6 +2646,7 @@ class MusicService : MediaLibraryService() {
         val player = sessionToRelease?.player ?: engine.masterPlayer
 
         clearHeadsetReconnectResume()
+        sleepTimerCoordinator.unregisterServiceExpirationHandler(sleepTimerExpirationHandler)
         cancelDurationSleepTimerInternal()
         endOfTrackTimerSongId = null
 
@@ -2523,10 +2662,26 @@ class MusicService : MediaLibraryService() {
         player.stop()
         player.clearMediaItems()
 
-        widgetUpdateManager.requestFullUpdate(true)
         stopForeground(STOP_FOREGROUND_REMOVE)
 
-        stopSelf()
+        // Synchronously await widget/Wear flush before calling stopSelf(), because onDestroy()
+        // cancels serviceScope and would abort the 250ms debounced widget update.
+        unloadFlushJob = serviceScope.launch {
+            try {
+                withTimeoutOrNull(WIDGET_UNLOAD_FLUSH_TIMEOUT_MS) {
+                    widgetUpdateManager.flushImmediateUpdate()
+                }
+            } catch (t: Throwable) {
+                Timber.tag(TAG).w(t, "Failed to flush widget update before stopSelf()")
+            } finally {
+                val activePlayer = mediaSession?.player ?: engine.masterPlayer
+                if (isPlaybackUnloadInProgress && !activePlayer.hasForegroundPlaybackIntent()) {
+                    stopSelf()
+                } else {
+                    Timber.tag(TAG).d("Skipping stopSelf(); playback resumed during widget flush")
+                }
+            }
+        }
     }
 
     private fun persistPlaybackSnapshotOnUnload() {
@@ -2852,7 +3007,7 @@ class MusicService : MediaLibraryService() {
                     countedPlayCount++
 
                     if (countedPlayCount > countedPlayTarget) {
-                        player.pause()
+                        (mediaSession?.player ?: engine.masterPlayer).pause()
                         stopCountedPlay()
                         return
                     }
@@ -2878,24 +3033,31 @@ class MusicService : MediaLibraryService() {
         }
 
         countedPlayListener = listener
+        countedPlayAttachedPlayer = player
         player.addListener(listener)
     }
 
     fun stopCountedPlay(restoreRepeatMode: Boolean = true) {
-        if (!countedPlayActive) return
+        if (!countedPlayActive && countedPlayListener == null && countedPlayAttachedPlayer == null) return
 
+        val wasActive = countedPlayActive
         countedPlayActive = false
         countedPlayTarget = 0
         countedPlayCount = 0
         countedOriginalId = null
 
-        countedPlayListener?.let {
-            engine.masterPlayer.removeListener(it)
+        val attachedPlayer = countedPlayAttachedPlayer
+        countedPlayListener?.let { listener ->
+            attachedPlayer?.removeListener(listener)
+            if (engine.masterPlayer !== attachedPlayer) {
+                engine.masterPlayer.removeListener(listener)
+            }
         }
+        countedPlayAttachedPlayer = null
         countedPlayListener = null
 
         // Restore normal repeat mode (OFF) only when not triggered by a user repeat-mode change
-        if (restoreRepeatMode) {
+        if (wasActive && restoreRepeatMode) {
             engine.masterPlayer.repeatMode = Player.REPEAT_MODE_OFF
         }
     }
@@ -2903,15 +3065,6 @@ class MusicService : MediaLibraryService() {
     /**
      * Bridges a suspend block into a [ListenableFuture] for Media3 callback methods.
      */
-    private fun <T> CoroutineScope.future(block: suspend () -> T): ListenableFuture<T> {
-        val future = SettableFuture.create<T>()
-        launch(Dispatchers.IO) {
-            try {
-                future.set(block())
-            } catch (e: Exception) {
-                future.setException(e)
-            }
-        }
-        return future
-    }
+    private fun <T> CoroutineScope.future(block: suspend () -> T): ListenableFuture<T> =
+        launchListenableFuture(block = block)
 }

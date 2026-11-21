@@ -101,13 +101,13 @@ object AudioMetadataReader {
                 val discNumber = discString?.substringBefore('/')?.toIntOrNull()
                 val year = propertyMap["DATE"]?.firstOrNull()?.takeIf { it.isNotBlank() }?.take(4)?.toIntOrNull()
                     ?: propertyMap["YEAR"]?.firstOrNull()?.takeIf { it.isNotBlank() }?.toIntOrNull()
-                val replayGainTrackGainDb = extractReplayGainDb(
+                val replayGainTrackGainDb = ReplayGainTagParser.extractGainDb(
                     propertyMap = propertyMap,
-                    keys = listOf("REPLAYGAIN_TRACK_GAIN", "REPLAYGAIN_TRACK_GAIN_DB", "R128_TRACK_GAIN")
+                    keys = ReplayGainTagParser.TRACK_GAIN_KEYS
                 )
-                val replayGainAlbumGainDb = extractReplayGainDb(
+                val replayGainAlbumGainDb = ReplayGainTagParser.extractGainDb(
                     propertyMap = propertyMap,
-                    keys = listOf("REPLAYGAIN_ALBUM_GAIN", "REPLAYGAIN_ALBUM_GAIN_DB", "R128_ALBUM_GAIN")
+                    keys = ReplayGainTagParser.ALBUM_GAIN_KEYS
                 )
 
                 if (VERBOSE) Log.w(TAG, "TagLib result for ${file.name}: title=$title, artist=$artist, album=$album, genre=$genre")
@@ -237,29 +237,5 @@ object AudioMetadataReader {
             Log.e(TAG, "JAudioTagger fallback FAILED for: ${file.name}", e)
             null
         }
-    }
-
-    private fun extractReplayGainDb(
-        propertyMap: Map<String, Array<String>>,
-        keys: List<String>
-    ): Float? {
-        for (key in keys) {
-            val rawValue = propertyMap[key]?.firstOrNull() ?: continue
-            val parsedValue = parseReplayGainDb(rawValue)
-            if (parsedValue != null) {
-                return parsedValue
-            }
-        }
-        return null
-    }
-
-    private fun parseReplayGainDb(rawValue: String?): Float? {
-        val cleanedValue = rawValue
-            ?.trim()
-            ?.replace(',', '.')
-            ?.replace(Regex("(?i)[dD][bB]"), "")
-            ?.trim()
-            ?: return null
-        return cleanedValue.toFloatOrNull()
     }
 }

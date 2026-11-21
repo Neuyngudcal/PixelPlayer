@@ -3,7 +3,6 @@ package com.theveloper.pixelplay.data.preferences
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
-import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -17,7 +16,7 @@ class ThemePreferencesRepository @Inject constructor(
     private object Keys {
         val PLAYER_THEME_PREFERENCE = stringPreferencesKey("player_theme_preference_v2")
         val ALBUM_ART_PALETTE_STYLE = stringPreferencesKey("album_art_palette_style_v1")
-        val ALBUM_ART_COLOR_ACCURACY = intPreferencesKey("album_art_color_accuracy_v1")
+        val THEME_CONTRAST_LEVEL = stringPreferencesKey("theme_contrast_level_v1")
         val APP_THEME_MODE = stringPreferencesKey("app_theme_mode")
     }
 
@@ -33,8 +32,8 @@ class ThemePreferencesRepository @Inject constructor(
         AlbumArtPaletteStyle.fromStorageKey(preferences[Keys.ALBUM_ART_PALETTE_STYLE])
     }
 
-    val albumArtColorAccuracyFlow: Flow<Int> = dataStore.data.map { preferences ->
-        AlbumArtColorAccuracy.clamp(preferences[Keys.ALBUM_ART_COLOR_ACCURACY] ?: AlbumArtColorAccuracy.DEFAULT)
+    val themeContrastLevelFlow: Flow<ThemeContrastLevel> = dataStore.data.map { preferences ->
+        ThemeContrastLevel.fromStorageKey(preferences[Keys.THEME_CONTRAST_LEVEL])
     }
 
     suspend fun setPlayerThemePreference(themeMode: String) =
@@ -59,16 +58,16 @@ class ThemePreferencesRepository @Inject constructor(
             preferences[Keys.ALBUM_ART_PALETTE_STYLE] = style.storageKey
         }
 
-    suspend fun setAlbumArtColorAccuracy(level: Int) =
+    suspend fun setThemeContrastLevel(level: ThemeContrastLevel) =
         dataStore.edit { preferences ->
-            preferences[Keys.ALBUM_ART_COLOR_ACCURACY] = AlbumArtColorAccuracy.clamp(level)
+            preferences[Keys.THEME_CONTRAST_LEVEL] = level.storageKey
         }
 
     suspend fun setAlbumArtPaletteSettings(
         style: AlbumArtPaletteStyle,
-        accuracyLevel: Int
+        contrastLevel: ThemeContrastLevel
     ) = dataStore.edit { preferences ->
         preferences[Keys.ALBUM_ART_PALETTE_STYLE] = style.storageKey
-        preferences[Keys.ALBUM_ART_COLOR_ACCURACY] = AlbumArtColorAccuracy.clamp(accuracyLevel)
+        preferences[Keys.THEME_CONTRAST_LEVEL] = contrastLevel.storageKey
     }
 }

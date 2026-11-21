@@ -171,7 +171,8 @@ internal fun Modifier.miniPlayerDismissHorizontalGesture(
                 change.consume()
                 handler.onHorizontalDrag(dragAmount)
             },
-            onDragEnd = { handler.onDragEnd() }
+            onDragEnd = { handler.onDragEnd() },
+            onDragCancel = { handler.onDragEnd() }
         )
     }
 }

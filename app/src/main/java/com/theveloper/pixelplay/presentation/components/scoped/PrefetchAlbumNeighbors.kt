@@ -7,13 +7,17 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.platform.LocalContext
+import coil.memory.MemoryCache
 import coil.request.CachePolicy
+import coil.request.Disposable
 import coil.size.Size
 import com.theveloper.pixelplay.data.model.Song
 import com.theveloper.pixelplay.presentation.components.albumArtMemoryCacheKey
 import com.theveloper.pixelplay.presentation.components.safeAlbumArtTargetSize
 import com.theveloper.pixelplay.utils.LocalArtworkUri
 import kotlinx.collections.immutable.ImmutableList
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 
 @Composable
@@ -24,7 +28,7 @@ fun PrefetchAlbumNeighborsImg(
 ) {
     if (current == null) return
     val context = LocalContext.current
-    val loader = remember { coil.ImageLoader(context) }
+    val loader = coil.Coil.imageLoader(context)
     val index = remember(current, queue) { queue.indexOfFirst { it.id == current.id } }
     LaunchedEffect(index, queue) {
         if (index == -1) return@LaunchedEffect
@@ -69,36 +73,63 @@ fun PrefetchAlbumNeighbors(
         safeAlbumArtTargetSize(targetSize)
     }
 
-    LaunchedEffect(pagerState, queue, anchorIndex, requestTargetSize) {
-        snapshotFlow { 
-            // If the user is manually scrolling, follow the PagerState.
-            // If the Pager is idle, prioritize the provided anchorIndex (which is tied to the current song)
-            // to avoid fetching neighbors of a stale index after a queue shift.
-            if (pagerState.isScrollInProgress) pagerState.currentPage 
-            else anchorIndex ?: pagerState.currentPage 
+    val latestAnchorIndex = androidx.compose.runtime.rememberUpdatedState(anchorIndex)
+    val completedUris = remember(queue, requestTargetSize) { mutableSetOf<String>() }
+
+    LaunchedEffect(pagerState, queue, requestTargetSize, radius) {
+        snapshotFlow {
+            (latestAnchorIndex.value ?: pagerState.currentPage) to pagerState.isScrollInProgress
         }
             .distinctUntilChanged()
-            .collect { page ->
+            .collectLatest { (page, isScrolling) ->
+                // Defer neighbor prefetch while the carousel is actively scrolling/dragging so
+                // high-resolution bitmap decodes never compete with 60/120fps transition frames.
+                if (isScrolling) return@collectLatest
+                delay(140L)
+
                 val indices = (page - radius..page + radius)
                     .filter { it in queue.indices && it != page }
-                indices.forEach { idx ->
-                    queue[idx].albumArtUriString?.let { uri ->
-                        val diskPolicy = if (LocalArtworkUri.isLocalArtworkUri(uri)) coil.request.CachePolicy.DISABLED else coil.request.CachePolicy.ENABLED
-                        val memoryCacheKey = albumArtMemoryCacheKey(uri, requestTargetSize)
-                        val req = coil.request.ImageRequest.Builder(context)
-                            .data(uri)
-                            .size(requestTargetSize)
-                            .memoryCachePolicy(coil.request.CachePolicy.ENABLED)
-                            .apply {
-                                if (memoryCacheKey != null) {
-                                    memoryCacheKey(memoryCacheKey)
-                                }
+                val inFlightDisposables = mutableListOf<Pair<String, Disposable>>()
+                val memoryCache = imageLoader.memoryCache
+                try {
+                    indices.forEach { idx ->
+                        queue[idx].albumArtUriString?.let { uri ->
+                            val memoryCacheKey = albumArtMemoryCacheKey(uri, requestTargetSize)
+                            if (memoryCacheKey != null && memoryCache?.get(MemoryCache.Key(memoryCacheKey)) != null) {
+                                completedUris.add(uri)
+                                return@let
                             }
-                            .diskCachePolicy(diskPolicy)
-                            .networkCachePolicy(coil.request.CachePolicy.ENABLED)
-                            .allowHardware(true)
-                            .build()
-                        imageLoader.enqueue(req) // fire-and-forget
+                            if (uri in completedUris) return@let
+                            val diskPolicy = if (LocalArtworkUri.isLocalArtworkUri(uri)) {
+                                CachePolicy.DISABLED
+                            } else {
+                                CachePolicy.ENABLED
+                            }
+                            val req = coil.request.ImageRequest.Builder(context)
+                                .data(uri)
+                                .size(requestTargetSize)
+                                .memoryCachePolicy(CachePolicy.ENABLED)
+                                .apply {
+                                    if (memoryCacheKey != null) {
+                                        memoryCacheKey(memoryCacheKey)
+                                    }
+                                }
+                                .diskCachePolicy(diskPolicy)
+                                .networkCachePolicy(CachePolicy.ENABLED)
+                                .allowHardware(true)
+                                .build()
+                            inFlightDisposables.add(uri to imageLoader.enqueue(req))
+                        }
+                    }
+                    inFlightDisposables.forEach { (uri, disposable) ->
+                        disposable.job.await()
+                        completedUris.add(uri)
+                    }
+                } finally {
+                    inFlightDisposables.forEach { (_, disposable) ->
+                        if (!disposable.isDisposed) {
+                            disposable.dispose()
+                        }
                     }
                 }
             }

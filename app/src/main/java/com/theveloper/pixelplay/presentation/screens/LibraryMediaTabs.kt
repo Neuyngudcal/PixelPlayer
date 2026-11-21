@@ -1,7 +1,6 @@
 @file:OptIn(
     ExperimentalMaterial3ExpressiveApi::class,
-    ExperimentalMaterial3Api::class,
-    kotlinx.coroutines.FlowPreview::class
+    ExperimentalMaterial3Api::class
 )
 
 package com.theveloper.pixelplay.presentation.screens
@@ -38,11 +37,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -51,9 +48,6 @@ import androidx.media3.common.util.UnstableApi
 import androidx.navigation.NavController
 import androidx.paging.LoadState
 import androidx.paging.compose.LazyPagingItems
-import coil.imageLoader
-import coil.request.ImageRequest
-import coil.size.Size
 import com.theveloper.pixelplay.R
 import com.theveloper.pixelplay.data.model.Album
 import com.theveloper.pixelplay.data.model.Artist
@@ -62,17 +56,15 @@ import com.theveloper.pixelplay.data.model.Song
 import com.theveloper.pixelplay.data.model.SortOption
 import com.theveloper.pixelplay.data.model.StorageFilter
 import com.theveloper.pixelplay.presentation.components.ExpressiveScrollBar
+import com.theveloper.pixelplay.ui.theme.LocalPixelPlayWindowInfo
 import com.theveloper.pixelplay.ui.theme.LocalShowScrollbar
+import com.theveloper.pixelplay.ui.theme.LocalSpacing
 import com.theveloper.pixelplay.presentation.components.MiniPlayerHeight
 import com.theveloper.pixelplay.presentation.components.PlaylistContainer
 import com.theveloper.pixelplay.presentation.components.albumFastScrollLabel
 import com.theveloper.pixelplay.presentation.components.artistFastScrollLabel
-import com.theveloper.pixelplay.presentation.viewmodel.ColorSchemePair
 import com.theveloper.pixelplay.presentation.viewmodel.PlayerViewModel
 import com.theveloper.pixelplay.presentation.viewmodel.PlaylistUiState
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import androidx.compose.ui.text.style.TextOverflow
@@ -81,7 +73,7 @@ import androidx.compose.ui.text.style.TextOverflow
 @Composable
 fun LibraryAlbumsTab(
     albums: LazyPagingItems<Album>,
-    isLoading: Boolean,
+    @Suppress("UNUSED_PARAMETER") isLoading: Boolean,
     playerViewModel: PlayerViewModel,
     bottomBarHeight: Dp,
     isListView: Boolean,
@@ -106,8 +98,6 @@ fun LibraryAlbumsTab(
 
     val dummyListState = rememberLazyListState()
     val dummyGridState = rememberLazyGridState()
-    val context = LocalContext.current
-    val imageLoader = context.imageLoader
 
     val albumFastScrollLabelProvider = remember(albums, currentAlbumSortOption) {
         { index: Int ->
@@ -152,73 +142,8 @@ fun LibraryAlbumsTab(
         pendingAlbumSortScrollReset = false
     }
 
-    // P2-3: Debounce 150ms to avoid firing on every scroll frame.
-    // Reduced prefetchCount from 10 to 4 to lower memory/IO pressure.
-    LaunchedEffect(albums, gridState, listState, isListView) {
-        if (isListView) {
-            snapshotFlow { listState.layoutInfo }
-                .debounce(150)
-                .distinctUntilChanged()
-                .collect { layoutInfo ->
-                    val visibleItemsInfo = layoutInfo.visibleItemsInfo
-                    if (visibleItemsInfo.isNotEmpty() && albums.itemCount > 0) {
-                        val lastVisibleItemIndex = visibleItemsInfo.last().index
-                        val totalItemsCount = albums.itemCount
-                        val prefetchThreshold = 5
-                        val prefetchCount = 4
-
-                        if (totalItemsCount > lastVisibleItemIndex + 1 && lastVisibleItemIndex + prefetchThreshold >= totalItemsCount - prefetchCount) {
-                            val startIndexToPrefetch = lastVisibleItemIndex + 1
-                            val endIndexToPrefetch = (startIndexToPrefetch + prefetchCount).coerceAtMost(totalItemsCount)
-
-                            (startIndexToPrefetch until endIndexToPrefetch).forEach { indexToPrefetch ->
-                                val album = albums.peek(indexToPrefetch)
-                                album?.albumArtUriString?.let { uri ->
-                                    val request = ImageRequest.Builder(context)
-                                        .data(uri)
-                                        .size(Size(256, 256))
-                                        .build()
-                                    imageLoader.enqueue(request)
-                                }
-                            }
-                        }
-                    }
-                }
-        } else {
-            snapshotFlow { gridState.layoutInfo }
-                .debounce(150)
-                .distinctUntilChanged()
-                .collect { layoutInfo ->
-                    val visibleItemsInfo = layoutInfo.visibleItemsInfo
-                    if (visibleItemsInfo.isNotEmpty() && albums.itemCount > 0) {
-                        val lastVisibleItemIndex = visibleItemsInfo.last().index
-                        val totalItemsCount = albums.itemCount
-                        val prefetchThreshold = 5
-                        val prefetchCount = 4
-
-                        if (totalItemsCount > lastVisibleItemIndex + 1 && lastVisibleItemIndex + prefetchThreshold >= totalItemsCount - prefetchCount) {
-                            val startIndexToPrefetch = lastVisibleItemIndex + 1
-                            val endIndexToPrefetch = (startIndexToPrefetch + prefetchCount).coerceAtMost(totalItemsCount)
-
-                            (startIndexToPrefetch until endIndexToPrefetch).forEach { indexToPrefetch ->
-                                val album = albums.peek(indexToPrefetch)
-                                album?.albumArtUriString?.let { uri ->
-                                    val request = ImageRequest.Builder(context)
-                                        .data(uri)
-                                        .size(Size(256, 256))
-                                        .build()
-                                    imageLoader.enqueue(request)
-                                }
-                            }
-                        }
-                    }
-            }
-        }
-    }
-
     val refreshState = albums.loadState.refresh
-    val reachedEndOfPagination = albums.loadState.append.endOfPaginationReached
-    val shouldShowInitialLoading = albums.itemCount == 0 && isLoading
+    val shouldShowInitialLoading = albums.itemCount == 0 && refreshState is LoadState.Loading
 
     when {
         refreshState is LoadState.Error && albums.itemCount == 0 -> {
@@ -264,16 +189,17 @@ fun LibraryAlbumsTab(
                     items(8, key = { "skeleton_album_list_$it" }) {
                         AlbumListItem(
                             album = Album.empty(),
-                            albumColorSchemePairFlow = playerViewModel.themeStateHolder.emptyAlbumColorSchemeFlow,
                             onClick = {},
                             isLoading = true
                         )
                     }
                 }
             } else {
+                val windowInfo = LocalPixelPlayWindowInfo.current
+                val spacing = LocalSpacing.current
                 LazyVerticalGrid(
                     modifier = Modifier
-                        .padding(start = 14.dp, end = 14.dp, bottom = 6.dp)
+                        .padding(start = spacing.screenHorizontal, end = spacing.screenHorizontal, bottom = 6.dp)
                         .clip(
                             RoundedCornerShape(
                                 topStart = 16.dp,
@@ -283,7 +209,7 @@ fun LibraryAlbumsTab(
                             )
                         )
                         .fillMaxSize(),
-                    columns = GridCells.Fixed(2),
+                    columns = GridCells.Adaptive(minSize = windowInfo.mediaGridMinCellSize),
                     contentPadding = PaddingValues(bottom = bottomBarHeight + MiniPlayerHeight + ListExtraBottomGap + 4.dp),
                     verticalArrangement = Arrangement.spacedBy(14.dp),
                     horizontalArrangement = Arrangement.spacedBy(14.dp)
@@ -349,9 +275,6 @@ fun LibraryAlbumsTab(
                                 ) { index ->
                                     val album = albums[index]
                                     if (album != null) {
-                                        val albumSpecificColorSchemeFlow = remember(album.albumArtUriString) {
-                                            playerViewModel.themeStateHolder.getAlbumColorSchemeFlow(album.albumArtUriString ?: "")
-                                        }
                                         val rememberedOnClick = remember(album.id, onAlbumClick) {
                                             { onAlbumClick(album.id) }
                                         }
@@ -363,7 +286,6 @@ fun LibraryAlbumsTab(
                                         }
                                         AlbumListItem(
                                             album = album,
-                                            albumColorSchemePairFlow = albumSpecificColorSchemeFlow,
                                             onClick = rememberedOnClick,
                                             isLoading = false,
                                             isSelectionMode = isSelectionMode,
@@ -375,7 +297,6 @@ fun LibraryAlbumsTab(
                                     } else {
                                         AlbumListItem(
                                             album = Album.empty(),
-                                            albumColorSchemePairFlow = playerViewModel.themeStateHolder.emptyAlbumColorSchemeFlow,
                                             onClick = {},
                                             isLoading = true
                                         )
@@ -395,10 +316,29 @@ fun LibraryAlbumsTab(
                                 dragLabelProvider = albumFastScrollLabelProvider
                             )
                         } else {
+                            val windowInfo = LocalPixelPlayWindowInfo.current
+                            val spacing = LocalSpacing.current
                             val activeGridState = if (albums.itemCount > 0) gridState else dummyGridState
+                            val gridSpacing = if (windowInfo.isTabletLayout) spacing.md else spacing.sm
+
+                            LibraryGridScrollIdleEffects(
+                                gridState = activeGridState,
+                                itemCount = albums.itemCount,
+                                peekArtUri = { index -> albums.peek(index)?.albumArtUriString },
+                                themeStateHolder = playerViewModel.themeStateHolder
+                            )
+
                             LazyVerticalGrid(
                                 modifier = Modifier
-                                    .padding(start = 14.dp, end = if (LocalShowScrollbar.current && (activeGridState.canScrollForward || activeGridState.canScrollBackward)) 24.dp else 14.dp, bottom = 6.dp)
+                                    .padding(
+                                        start = spacing.screenHorizontal,
+                                        end = if (LocalShowScrollbar.current && (activeGridState.canScrollForward || activeGridState.canScrollBackward)) {
+                                            spacing.screenHorizontal + 10.dp
+                                        } else {
+                                            spacing.screenHorizontal
+                                        },
+                                        bottom = 6.dp
+                                    )
                                     .clip(
                                         RoundedCornerShape(
                                             topStart = 16.dp,
@@ -408,10 +348,10 @@ fun LibraryAlbumsTab(
                                         )
                                     ),
                                 state = activeGridState,
-                                columns = GridCells.Fixed(2),
+                                columns = GridCells.Adaptive(minSize = windowInfo.mediaGridMinCellSize),
                                 contentPadding = PaddingValues(bottom = bottomBarHeight + MiniPlayerHeight + ListExtraBottomGap + 4.dp),
-                                verticalArrangement = Arrangement.spacedBy(8.dp),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                verticalArrangement = Arrangement.spacedBy(gridSpacing),
+                                horizontalArrangement = Arrangement.spacedBy(gridSpacing)
                             ) {
                                 items(
                                     count = albums.itemCount,
@@ -421,7 +361,10 @@ fun LibraryAlbumsTab(
                                     val album = albums[index]
                                     if (album != null) {
                                         val albumSpecificColorSchemeFlow = remember(album.albumArtUriString) {
-                                            playerViewModel.themeStateHolder.getAlbumColorSchemeFlow(album.albumArtUriString ?: "")
+                                            playerViewModel.themeStateHolder.getAlbumColorSchemeFlow(
+                                                album.albumArtUriString ?: "",
+                                                eager = false
+                                            )
                                         }
                                         val rememberedOnClick = remember(album.id, onAlbumClick) {
                                             { onAlbumClick(album.id) }

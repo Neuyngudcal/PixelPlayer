@@ -84,17 +84,16 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.theveloper.pixelplay.R
 import com.theveloper.pixelplay.data.model.Song
 import com.theveloper.pixelplay.data.preferences.CollagePattern
+import com.theveloper.pixelplay.presentation.components.AdaptiveFloatingPane
 import com.theveloper.pixelplay.presentation.components.AlbumArtCollage
-import com.theveloper.pixelplay.presentation.components.BetaInfoBottomSheet
-import com.theveloper.pixelplay.presentation.components.Beta05CleanInstallDisclaimerDialog
-import com.theveloper.pixelplay.presentation.components.ChangelogBottomSheet
-import com.theveloper.pixelplay.presentation.netease.dashboard.NeteaseDashboardViewModel
-import com.theveloper.pixelplay.presentation.jellyfin.dashboard.JellyfinDashboardViewModel
-import com.theveloper.pixelplay.presentation.navidrome.dashboard.NavidromeDashboardViewModel
-import com.theveloper.pixelplay.presentation.qqmusic.dashboard.QqMusicDashboardViewModel
 import com.theveloper.pixelplay.presentation.components.DailyMixSection
 import com.theveloper.pixelplay.presentation.components.HomeGradientTopBar
-import com.theveloper.pixelplay.presentation.components.HomeOptionsBottomSheet
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.widthIn
+import com.theveloper.pixelplay.ui.theme.LocalPixelPlayWindowInfo
+import com.theveloper.pixelplay.ui.theme.LocalSpacing
 import com.theveloper.pixelplay.presentation.components.MiniPlayerHeight
 import com.theveloper.pixelplay.presentation.components.RecentlyPlayedSection
 import com.theveloper.pixelplay.presentation.components.RecentlyPlayedSectionMinSongsToShow
@@ -105,8 +104,6 @@ import com.theveloper.pixelplay.presentation.model.collectRecentlyPlayedSongIds
 import com.theveloper.pixelplay.presentation.model.mapRecentlyPlayedSongs
 import com.theveloper.pixelplay.presentation.components.subcomps.PlayingEqIcon
 import com.theveloper.pixelplay.presentation.navigation.Screen
-import com.theveloper.pixelplay.presentation.components.StreamingProviderSheet
-import com.theveloper.pixelplay.presentation.telegram.auth.TelegramLoginActivity
 import com.theveloper.pixelplay.presentation.viewmodel.PlayerViewModel
 import com.theveloper.pixelplay.presentation.viewmodel.SettingsViewModel
 import com.theveloper.pixelplay.presentation.viewmodel.StatsViewModel
@@ -140,7 +137,6 @@ fun HomeScreen(
     val statsViewModel: StatsViewModel = hiltViewModel()
     val collagePattern by playerViewModel.collagePattern.collectAsStateWithLifecycle()
     val collageAutoRotate by playerViewModel.collageAutoRotate.collectAsStateWithLifecycle()
-    val beta05CleanInstallDisclaimerDismissed by playerViewModel.beta05CleanInstallDisclaimerDismissed.collectAsStateWithLifecycle()
     val dailyMixSongs by playerViewModel.dailyMixSongs.collectAsStateWithLifecycle()
     val curatedYourMixSongs by playerViewModel.yourMixSongs.collectAsStateWithLifecycle()
     val homeMixPreviewSongs by playerViewModel.homeMixPreviewSongs.collectAsStateWithLifecycle()
@@ -250,19 +246,13 @@ fun HomeScreen(
     }.collectAsStateWithLifecycle(initialValue = false)
 
     // Padding inferior si hay canción en reproducción
+    val windowInfo = LocalPixelPlayWindowInfo.current
     val bottomPadding = if (currentSong != null) MiniPlayerHeight else 0.dp
     val navBarCompactMode by playerViewModel.navBarCompactMode.collectAsStateWithLifecycle()
-    val bottomGradientHeight = resolveMainScreenBottomGradientHeight(navBarCompactMode)
-
-    var showOptionsBottomSheet by remember { mutableStateOf(false) }
-    var showChangelogBottomSheet by remember { mutableStateOf(false) }
-    var showBetaInfoBottomSheet by remember { mutableStateOf(false) }
-    var showStreamingProviderSheet by remember { mutableStateOf(false) }
-    var cleanInstallDisclaimerDismissedThisSession by rememberSaveable { mutableStateOf(false) }
-    val sheetState = rememberModalBottomSheetState()
-    val betaSheetState = rememberModalBottomSheetState()
-    val scope = rememberCoroutineScope()
-    LocalContext.current
+    val bottomGradientHeight = resolveMainScreenBottomGradientHeight(
+        compactMode = navBarCompactMode,
+        useNavigationRail = windowInfo.useNavigationRail
+    )
 
     val homeStatsOverview by statsViewModel.homeOverview.collectAsStateWithLifecycle()
 
@@ -309,48 +299,142 @@ fun HomeScreen(
 
     // Drawer state for sidebar
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
-    val shouldShowCleanInstallDisclaimer =
-        beta05CleanInstallDisclaimerDismissed == false &&
-            !cleanInstallDisclaimerDismissedThisSession
 
-    Box(
-        modifier = Modifier.fillMaxSize()
-    ) {
-        Scaffold(
-            modifier = Modifier.fillMaxSize(),
-            topBar = {
-                HomeGradientTopBar(
-                    onNavigationIconClick = {
-                        navController.navigateSafely(Screen.Settings.route)
-                    },
-                    onMoreOptionsClick = {
-                        showChangelogBottomSheet = true
-                    },
-                    onBetaClick = {
-                        showBetaInfoBottomSheet = true
-                    },
-                    onTelegramClick = {
-                         showStreamingProviderSheet = true
-                    },
-                    onMenuClick = {
-                        // onOpenSidebar() // Disabled
-                    },
-                    isScrolled = isScrolledPastThreshold.value
-                )
-            }
-        ) { innerPadding ->
-            LazyColumn(
-                state = listState,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(MaterialTheme.colorScheme.background),
-                contentPadding = PaddingValues(
-                    top = innerPadding.calculateTopPadding(),
-                    bottom = paddingValuesParent.calculateBottomPadding()
-                            + 38.dp + bottomPadding
-                ),
-                verticalArrangement = Arrangement.spacedBy(24.dp)
-            ) {
+    val spacing = LocalSpacing.current
+    val homeFeedList: @Composable (Modifier, PaddingValues) -> Unit = { listMod, listPadding ->
+        LazyColumn(
+            state = listState,
+            modifier = listMod,
+            contentPadding = listPadding,
+            verticalArrangement = Arrangement.spacedBy(spacing.xxl)
+        ) {
+            if (windowInfo.useTwoColumnHome && yourMixSongs.isNotEmpty() && (dailyMixSongs.isNotEmpty() || homeStatsOverview != null)) {
+                // Tablet 2-Column Hero Dashboard: Left = Your Mix Collage, Right = Daily Mix & Quick Stats
+                item(
+                    key = "tablet_hero_two_column",
+                    contentType = "tablet_hero_two_column"
+                ) {
+                    val basePattern = collagePattern
+                    val isAutoRotate = collageAutoRotate
+                    val patterns = remember { CollagePattern.entries }
+                    val activePattern = if (isAutoRotate) {
+                        var rotationIndex by rememberSaveable { mutableIntStateOf(-1) }
+                        LaunchedEffect(Unit) { rotationIndex++ }
+                        remember(rotationIndex) {
+                            patterns[rotationIndex.coerceAtLeast(0) % patterns.size]
+                        }
+                    } else {
+                        basePattern
+                    }
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = spacing.sm),
+                        horizontalArrangement = Arrangement.spacedBy(spacing.xl),
+                        verticalAlignment = Alignment.Top
+                    ) {
+                        Column(
+                            modifier = Modifier.weight(0.45f),
+                            verticalArrangement = Arrangement.spacedBy(spacing.lg)
+                        ) {
+                            YourMixHeader(
+                                song = yourMixSong,
+                                isShuffleEnabled = isShuffleEnabled,
+                                onPlayShuffled = {
+                                    if (usesFallbackHomeMix) {
+                                        playerViewModel.shuffleAllSongs(queueName = "Your Mix")
+                                    } else {
+                                        playerViewModel.playSongsShuffled(
+                                            songsToPlay = yourMixSongs,
+                                            queueName = "Your Mix",
+                                            startAtZero = true,
+                                        )
+                                    }
+                                }
+                            )
+                            AlbumArtCollage(
+                                modifier = Modifier.fillMaxWidth(),
+                                songs = yourMixSongs,
+                                padding = 14.dp,
+                                height = 360.dp,
+                                pattern = activePattern,
+                                onSongClick = { song ->
+                                    if (usesFallbackHomeMix) {
+                                        playerViewModel.showAndPlaySongFromLibrary(song, queueName = "Your Mix")
+                                    } else {
+                                        playerViewModel.showAndPlaySong(song, yourMixSongs, "Your Mix")
+                                    }
+                                }
+                            )
+                        }
+
+                        Column(
+                            modifier = Modifier.weight(0.55f),
+                            verticalArrangement = Arrangement.spacedBy(spacing.xl)
+                        ) {
+                            if (dailyMixSongs.isNotEmpty()) {
+                                DailyMixSection(
+                                    songs = dailyMixSongs,
+                                    onClickOpen = {
+                                        navController.navigateSafely(Screen.DailyMixScreen.route)
+                                    },
+                                    onNavigateToAlbum = { song ->
+                                        navController.navigateSafelyReplacing(
+                                            route = Screen.AlbumDetail.createRoute(song.albumId),
+                                            patternToPop = Screen.AlbumDetail.route
+                                        )
+                                    },
+                                    onNavigateToArtist = { song ->
+                                        navController.navigateSafelyReplacing(
+                                            route = Screen.ArtistDetail.createRoute(song.artistId),
+                                            patternToPop = Screen.ArtistDetail.route
+                                        )
+                                    },
+                                    onNavigateToGenre = { song ->
+                                        song.genre?.let {
+                                            navController.navigateSafely(Screen.GenreDetail.createRoute(java.net.URLEncoder.encode(it, "UTF-8")))
+                                        }
+                                    },
+                                    playerViewModel = playerViewModel
+                                )
+                            }
+                            if (homeStatsOverview != null) {
+                                StatsOverviewCard(
+                                    summary = homeStatsOverview,
+                                    onClick = { navController.navigateSafely(Screen.Stats.route) }
+                                )
+                            }
+                        }
+                    }
+                }
+
+                if (recentlyPlayedSongs.size >= RecentlyPlayedSectionMinSongsToShow) {
+                    item(
+                        key = "recently_played_section",
+                        contentType = "recently_played_section"
+                    ) {
+                        RecentlyPlayedSection(
+                            songs = recentlyPlayedSongs,
+                            onSongClick = { song ->
+                                if (recentlyPlayedQueue.isNotEmpty()) {
+                                    playerViewModel.playSongs(
+                                        songsToPlay = recentlyPlayedQueue,
+                                        startSong = song,
+                                        queueName = "Recently Played"
+                                    )
+                                }
+                            },
+                            onOpenAllClick = {
+                                navController.navigateSafely(Screen.RecentlyPlayed.route)
+                            },
+                            themeStateHolder = playerViewModel.themeStateHolder,
+                            currentSongId = currentSong?.id,
+                            contentPadding = PaddingValues(horizontal = spacing.screenHorizontal)
+                        )
+                    }
+                }
+            } else {
                 if (yourMixSongs.isEmpty()) {
                     item(
                         key = "your_mix_placeholder",
@@ -500,99 +584,92 @@ fun HomeScreen(
                 }
             }
         }
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .align(Alignment.BottomCenter)
-                .height(bottomGradientHeight)
-                .background(
-                    brush = Brush.verticalGradient(
-                        colorStops = arrayOf(
-                            0.0f to Color.Transparent,
-                            0.2f to Color.Transparent,
-                            0.8f to MaterialTheme.colorScheme.surfaceContainerLowest,
-                            1.0f to MaterialTheme.colorScheme.surfaceContainerLowest
-                        )
+    }
+
+    val bottomFadeColor = if (windowInfo.useNavigationRail) {
+        MaterialTheme.colorScheme.surfaceContainerLowest
+    } else {
+        MaterialTheme.colorScheme.background
+    }
+    val bottomFadeBrush = remember(bottomFadeColor) {
+        Brush.verticalGradient(
+            colorStops = arrayOf(
+                0.0f to Color.Transparent,
+                0.2f to Color.Transparent,
+                0.8f to bottomFadeColor,
+                1.0f to bottomFadeColor
+            )
+        )
+    }
+
+    if (windowInfo.useNavigationRail) {
+        AdaptiveFloatingPane(
+            enabled = true,
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLowest
+        ) {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.TopCenter
+            ) {
+                homeFeedList(
+                    Modifier
+                        .fillMaxSize()
+                        .then(if (windowInfo.useTwoColumnHome) Modifier.widthIn(max = 1280.dp) else Modifier),
+                    PaddingValues(
+                        top = spacing.lg,
+                        bottom = bottomPadding + 24.dp
                     )
                 )
-        ) {
-
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .align(Alignment.BottomCenter)
+                        .height(bottomGradientHeight)
+                        .background(brush = bottomFadeBrush)
+                )
+            }
         }
-    }
-    if (showOptionsBottomSheet) {
-        ModalBottomSheet(
-            onDismissRequest = { showOptionsBottomSheet = false },
-            sheetState = sheetState
+    } else {
+        Box(
+            modifier = Modifier.fillMaxSize()
         ) {
-            HomeOptionsBottomSheet(
-                onNavigateToMashup = {
-                    scope.launch {
-                        sheetState.hide()
-                    }.invokeOnCompletion {
-                        if (!sheetState.isVisible) {
-                            showOptionsBottomSheet = false
-                            navController.navigateSafely(Screen.DJSpace.route)
-                        }
-                    }
+            val effectiveBottomContentPadding = paddingValuesParent.calculateBottomPadding() + 38.dp + bottomPadding
+
+            Scaffold(
+                modifier = Modifier.fillMaxSize(),
+                topBar = {
+                    HomeGradientTopBar(
+                        onNavigationIconClick = {
+                            navController.navigateSafely(Screen.Settings.route)
+                        },
+                        isScrolled = isScrolledPastThreshold.value,
+                        showSettingsButton = true
+                    )
                 }
+            ) { innerPadding ->
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(MaterialTheme.colorScheme.background),
+                    contentAlignment = Alignment.TopCenter
+                ) {
+                    homeFeedList(
+                        Modifier.fillMaxSize(),
+                        PaddingValues(
+                            top = innerPadding.calculateTopPadding(),
+                            bottom = effectiveBottomContentPadding
+                        )
+                    )
+                }
+            }
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .align(Alignment.BottomCenter)
+                    .height(bottomGradientHeight)
+                    .background(brush = bottomFadeBrush)
             )
         }
-    }
-    if (showChangelogBottomSheet) {
-        ModalBottomSheet(
-            onDismissRequest = { showChangelogBottomSheet = false },
-            sheetState = sheetState
-        ) {
-            ChangelogBottomSheet()
-        }
-    }
-    if (showBetaInfoBottomSheet) {
-        ModalBottomSheet(
-            onDismissRequest = { showBetaInfoBottomSheet = false },
-            sheetState = betaSheetState,
-            //contentWindowInsets = { WindowInsets.statusBars.only(WindowInsets.statusBars) }
-        ) {
-            BetaInfoBottomSheet()
-        }
-    }
-    if (showStreamingProviderSheet) {
-        val neteaseViewModel: NeteaseDashboardViewModel = hiltViewModel()
-        val qqMusicViewModel: QqMusicDashboardViewModel = hiltViewModel()
-        val navidromeViewModel: NavidromeDashboardViewModel = hiltViewModel()
-        val jellyfinViewModel: JellyfinDashboardViewModel = hiltViewModel()
-        val isNeteaseLoggedIn by neteaseViewModel.isLoggedIn.collectAsStateWithLifecycle()
-        val isQqMusicLoggedIn by qqMusicViewModel.isLoggedIn.collectAsStateWithLifecycle()
-        val isNavidromeLoggedIn by navidromeViewModel.isLoggedIn.collectAsStateWithLifecycle()
-        val isJellyfinLoggedIn by jellyfinViewModel.isLoggedIn.collectAsStateWithLifecycle()
-        StreamingProviderSheet(
-            onDismissRequest = { showStreamingProviderSheet = false },
-            isNeteaseLoggedIn = isNeteaseLoggedIn,
-            onNavigateToNeteaseDashboard = {
-                navController.navigateSafely(Screen.NeteaseDashboard.route)
-            },
-            isQqMusicLoggedIn = isQqMusicLoggedIn,
-            onNavigateToQqMusicDashboard = {
-                navController.navigateSafely(Screen.QqMusicDashboard.route)
-            },
-            isNavidromeLoggedIn = isNavidromeLoggedIn,
-            onNavigateToNavidromeDashboard = {
-                navController.navigateSafely(Screen.NavidromeDashboard.route)
-            },
-            isJellyfinLoggedIn = isJellyfinLoggedIn,
-            onNavigateToJellyfinDashboard = {
-                navController.navigateSafely(Screen.JellyfinDashboard.route)
-            }
-        )
-    }
-    if (shouldShowCleanInstallDisclaimer) {
-        Beta05CleanInstallDisclaimerDialog(
-            onDismiss = { dontShowAgain ->
-                cleanInstallDisclaimerDismissedThisSession = true
-                if (dontShowAgain) {
-                    playerViewModel.setBeta05CleanInstallDisclaimerDismissed(true)
-                }
-            }
-        )
     }
 }
 

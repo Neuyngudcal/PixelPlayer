@@ -7,62 +7,83 @@ import androidx.media3.common.audio.AudioProcessor.AudioFormat
 import androidx.media3.common.util.UnstableApi
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import kotlin.math.roundToInt
 
 /**
  * An [AudioProcessor] that downmixes 5.1 (6-channel) and 7.1 (8-channel) surround audio
- * to stereo (2-channel) PCM using the standard Dolby downmix matrix coefficients.
+ * to stereo (2-channel) PCM using headroom-normalized ITU-R BS.775 downmix coefficients.
  *
- * Downmix matrix:
+ * Unnormalized ITU/Dolby matrix weights:
  * ```
- *   L = FL + 0.707·FC + 0.707·SL [+ 0.707·SBL] + 0.707·LFE
- *   R = FR + 0.707·FC + 0.707·SR [+ 0.707·SBR] + 0.707·LFE
+ *   L_raw = FL + 0.7071·FC + 0.7071·SL [+ 0.7071·SBL] + 0.5·LFE
+ *   R_raw = FR + 0.7071·FC + 0.7071·SR [+ 0.7071·SBR] + 0.5·LFE
  * ```
+ * Each output channel divides by its L1 gain sum (`sum(|w_i|)`) so full-scale multi-channel
+ * signals stay strictly within `[-1.0, 1.0]` / `[Short.MIN_VALUE, Short.MAX_VALUE]` without clipping.
  *
  * FFmpeg output channel order assumed:
  * - 5.1: FL, FR, FC, LFE, SL, SR
  * - 7.1: FL, FR, FC, LFE, SL, SR, SBL, SBR
  *
- * This processor is only active for 6-channel or 8-channel 16-bit PCM input.
+ * This processor is only active for 6-channel or 8-channel 16-bit/float PCM input.
  * All other formats are passed through without modification.
  */
 @UnstableApi
 class SurroundDownmixProcessor : AudioProcessor {
 
-    companion object {
-        /** Dolby standard surround downmix coefficient: 1/√2 ≈ 0.707 */
-        private const val COEFF_SURROUND = 0.707f
+    internal data class DownmixCoefficients(
+        val front: Float,
+        val center: Float,
+        val surround: Float,
+        val back: Float,
+        val lfe: Float,
+    )
 
-        /** LFE (subwoofer) mix coefficient */
-        private const val COEFF_LFE = 0.707f
+    companion object {
+        /** Standard ITU-R BS.775 center/surround weight: 1/√2 ≈ 0.7071 */
+        private const val WEIGHT_CENTER = 0.70710677f
+        private const val WEIGHT_SURROUND = 0.70710677f
+        /** Subdued LFE weight (-6 dB) before headroom normalization */
+        private const val WEIGHT_LFE = 0.5f
+
+        private const val L1_SUM_51 = 1.0f + WEIGHT_CENTER + WEIGHT_SURROUND + WEIGHT_LFE
+        private const val L1_SUM_71 = 1.0f + WEIGHT_CENTER + WEIGHT_SURROUND + WEIGHT_SURROUND + WEIGHT_LFE
+
+        internal val COEFFS_51 = DownmixCoefficients(
+            front = 1.0f / L1_SUM_51,
+            center = WEIGHT_CENTER / L1_SUM_51,
+            surround = WEIGHT_SURROUND / L1_SUM_51,
+            back = 0f,
+            lfe = WEIGHT_LFE / L1_SUM_51,
+        )
+
+        internal val COEFFS_71 = DownmixCoefficients(
+            front = 1.0f / L1_SUM_71,
+            center = WEIGHT_CENTER / L1_SUM_71,
+            surround = WEIGHT_SURROUND / L1_SUM_71,
+            back = WEIGHT_SURROUND / L1_SUM_71,
+            lfe = WEIGHT_LFE / L1_SUM_71,
+        )
 
         /** Largest supported surround layout (7.1). */
         private const val MAX_SUPPORTED_CHANNELS = 8
 
-        // 5.1 channel indices (FFmpeg order)
-        private const val FL_51  = 0
-        private const val FR_51  = 1
-        private const val FC_51  = 2
-        private const val LFE_51 = 3
-        private const val SL_51  = 4
-        private const val SR_51  = 5
-
-        // 7.1 channel indices (FFmpeg order)
-        private const val FL_71  = 0
-        private const val FR_71  = 1
-        private const val FC_71  = 2
-        private const val LFE_71 = 3
-        private const val SL_71  = 4
-        private const val SR_71  = 5
-        private const val SBL_71 = 6
-        private const val SBR_71 = 7
+        // Shared FFmpeg channel indices (FL..SR match between 5.1 and 7.1)
+        private const val CH_FL = 0
+        private const val CH_FR = 1
+        private const val CH_FC = 2
+        private const val CH_LFE = 3
+        private const val CH_SL = 4
+        private const val CH_SR = 5
+        private const val CH_SBL = 6
+        private const val CH_SBR = 7
     }
 
     private var inputFormat: AudioFormat = AudioFormat.NOT_SET
     private var outputFormat: AudioFormat = AudioFormat.NOT_SET
     private var outputBuffer: ByteBuffer = AudioProcessor.EMPTY_BUFFER
     private var inputEnded = false
-    private val floatScratch = FloatArray(MAX_SUPPORTED_CHANNELS)
-    private val shortScratch = ShortArray(MAX_SUPPORTED_CHANNELS)
+    private val frameScratch = FloatArray(MAX_SUPPORTED_CHANNELS)
 
     override fun configure(inputAudioFormat: AudioFormat): AudioFormat {
         val isSupported = (inputAudioFormat.channelCount == 6 || inputAudioFormat.channelCount == 8)
@@ -89,50 +110,53 @@ class SurroundDownmixProcessor : AudioProcessor {
         if (!isActive()) return
 
         val channelCount = inputFormat.channelCount
+        val isFloat = inputFormat.encoding == C.ENCODING_PCM_FLOAT
+        val sampleBytes = if (isFloat) Float.SIZE_BYTES else Short.SIZE_BYTES
+        val bytesPerFrame = channelCount * sampleBytes
+        val frameCount = inputBuffer.remaining() / bytesPerFrame
 
-        if (inputFormat.encoding == C.ENCODING_PCM_FLOAT) {
-            val bytesPerFrame = channelCount * Float.SIZE_BYTES
-            val frameCount = inputBuffer.remaining() / bytesPerFrame
-            outputBuffer = ensureOutputBuffer(frameCount * 2 * Float.SIZE_BYTES)
+        if (frameCount == 0) {
+            // Leave trailing partial-frame bytes unconsumed so Media3 re-presents them next call.
+            outputBuffer = AudioProcessor.EMPTY_BUFFER
+            return
+        }
 
-            val floatInput = inputBuffer.duplicate().order(ByteOrder.nativeOrder()).asFloatBuffer()
-            repeat(frameCount) {
-                floatInput.get(floatScratch, 0, channelCount)
-                val left: Float
-                val right: Float
-                if (channelCount == 6) {
-                    left = downmix51Left(floatScratch)
-                    right = downmix51Right(floatScratch)
-                } else {
-                    left = downmix71Left(floatScratch)
-                    right = downmix71Right(floatScratch)
-                }
+        val matrix = if (channelCount == 6) COEFFS_51 else COEFFS_71
+        val hasBackChannels = channelCount == 8
+        outputBuffer = ensureOutputBuffer(frameCount * 2 * sampleBytes)
+
+        val reader = inputBuffer.duplicate().order(ByteOrder.nativeOrder())
+        repeat(frameCount) {
+            for (ch in 0 until channelCount) {
+                frameScratch[ch] = if (isFloat) reader.float else reader.short.toFloat()
+            }
+            val backLeft = if (hasBackChannels) matrix.back * frameScratch[CH_SBL] else 0f
+            val backRight = if (hasBackChannels) matrix.back * frameScratch[CH_SBR] else 0f
+            val left = matrix.front * frameScratch[CH_FL] +
+                matrix.center * frameScratch[CH_FC] +
+                matrix.surround * frameScratch[CH_SL] +
+                backLeft +
+                matrix.lfe * frameScratch[CH_LFE]
+            val right = matrix.front * frameScratch[CH_FR] +
+                matrix.center * frameScratch[CH_FC] +
+                matrix.surround * frameScratch[CH_SR] +
+                backRight +
+                matrix.lfe * frameScratch[CH_LFE]
+
+            if (isFloat) {
                 outputBuffer.putFloat(left.coerceIn(-1f, 1f))
                 outputBuffer.putFloat(right.coerceIn(-1f, 1f))
+            } else {
+                outputBuffer.putShort(
+                    left.roundToInt().coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt()).toShort()
+                )
+                outputBuffer.putShort(
+                    right.roundToInt().coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt()).toShort()
+                )
             }
-            inputBuffer.position(inputBuffer.limit())
-        } else {
-            val bytesPerFrame = channelCount * Short.SIZE_BYTES
-            val frameCount = inputBuffer.remaining() / bytesPerFrame
-            outputBuffer = ensureOutputBuffer(frameCount * 2 * Short.SIZE_BYTES)
-
-            val shortInput = inputBuffer.duplicate().order(ByteOrder.nativeOrder()).asShortBuffer()
-            repeat(frameCount) {
-                shortInput.get(shortScratch, 0, channelCount)
-                val left: Float
-                val right: Float
-                if (channelCount == 6) {
-                    left = downmix51Left(shortScratch)
-                    right = downmix51Right(shortScratch)
-                } else {
-                    left = downmix71Left(shortScratch)
-                    right = downmix71Right(shortScratch)
-                }
-                outputBuffer.putShort(left.toInt().coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt()).toShort())
-                outputBuffer.putShort(right.toInt().coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt()).toShort())
-            }
-            inputBuffer.position(inputBuffer.limit())
         }
+
+        inputBuffer.position(inputBuffer.position() + frameCount * bytesPerFrame)
         outputBuffer.flip()
     }
 
@@ -168,41 +192,5 @@ class SurroundDownmixProcessor : AudioProcessor {
         flush()
         inputFormat = AudioFormat.NOT_SET
         outputFormat = AudioFormat.NOT_SET
-    }
-
-    /** Left channel for a 5.1 surround frame (FL, FR, FC, LFE, SL, SR). */
-    private fun downmix51Left(s: ShortArray): Float {
-        return s[FL_51] + COEFF_SURROUND * s[FC_51] + COEFF_SURROUND * s[SL_51] + COEFF_LFE * s[LFE_51]
-    }
-
-    /** Right channel for a 5.1 surround frame (FL, FR, FC, LFE, SL, SR). */
-    private fun downmix51Right(s: ShortArray): Float {
-        return s[FR_51] + COEFF_SURROUND * s[FC_51] + COEFF_SURROUND * s[SR_51] + COEFF_LFE * s[LFE_51]
-    }
-
-    /** Left channel for a 7.1 surround frame (FL, FR, FC, LFE, SL, SR, SBL, SBR). */
-    private fun downmix71Left(s: ShortArray): Float {
-        return s[FL_71] + COEFF_SURROUND * s[FC_71] + COEFF_SURROUND * s[SL_71] + COEFF_SURROUND * s[SBL_71] + COEFF_LFE * s[LFE_71]
-    }
-
-    /** Right channel for a 7.1 surround frame (FL, FR, FC, LFE, SL, SR, SBL, SBR). */
-    private fun downmix71Right(s: ShortArray): Float {
-        return s[FR_71] + COEFF_SURROUND * s[FC_71] + COEFF_SURROUND * s[SR_71] + COEFF_SURROUND * s[SBR_71] + COEFF_LFE * s[LFE_71]
-    }
-
-    private fun downmix51Left(s: FloatArray): Float {
-        return s[FL_51] + COEFF_SURROUND * s[FC_51] + COEFF_SURROUND * s[SL_51] + COEFF_LFE * s[LFE_51]
-    }
-
-    private fun downmix51Right(s: FloatArray): Float {
-        return s[FR_51] + COEFF_SURROUND * s[FC_51] + COEFF_SURROUND * s[SR_51] + COEFF_LFE * s[LFE_51]
-    }
-
-    private fun downmix71Left(s: FloatArray): Float {
-        return s[FL_71] + COEFF_SURROUND * s[FC_71] + COEFF_SURROUND * s[SL_71] + COEFF_SURROUND * s[SBL_71] + COEFF_LFE * s[LFE_71]
-    }
-
-    private fun downmix71Right(s: FloatArray): Float {
-        return s[FR_71] + COEFF_SURROUND * s[FC_71] + COEFF_SURROUND * s[SR_71] + COEFF_SURROUND * s[SBR_71] + COEFF_LFE * s[LFE_71]
     }
 }

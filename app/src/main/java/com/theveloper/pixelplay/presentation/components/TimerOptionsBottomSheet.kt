@@ -9,13 +9,16 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material3.AlertDialog
@@ -47,6 +50,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import com.theveloper.pixelplay.presentation.components.player.PlayerCardOverlayDialog
+import com.theveloper.pixelplay.presentation.components.player.PlayerCardOverlaySheet
 import com.theveloper.pixelplay.ui.theme.GoogleSansRounded
 import racra.compose.smooth_corner_rect_library.AbsoluteSmoothCornerShape
 import kotlin.math.roundToInt
@@ -70,7 +75,8 @@ fun TimerOptionsBottomSheet(
     onSetPredefinedTimer: (minutes: Int) -> Unit,
     onSetEndOfTrackTimer: (enable: Boolean) -> Unit,
     onOpenCustomTimePicker: () -> Unit,
-    onCancelTimer: () -> Unit
+    onCancelTimer: () -> Unit,
+    isContainedInCard: Boolean = false
 ) {
     var showCustomTimePicker by rememberSaveable { mutableStateOf(false) }
     val context = LocalContext.current
@@ -111,12 +117,10 @@ fun TimerOptionsBottomSheet(
         }
     }
 
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = sheetState
-    ) {
+    val timerContent: @Composable () -> Unit = {
         Column(
             modifier = Modifier
+                .then(if (isContainedInCard) Modifier.verticalScroll(rememberScrollState()) else Modifier)
                 .padding(horizontal = 18.dp, vertical = 4.dp)
                 .fillMaxWidth(),
             horizontalAlignment = Alignment.CenterHorizontally
@@ -396,56 +400,126 @@ fun TimerOptionsBottomSheet(
                     Text(stringResource(R.string.sleep_timer_cancel_timer))
                 }
             }
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(if (isContainedInCard) 8.dp else 16.dp))
         }
     }
 
-    if (showCustomTimePicker) {
-        val initialHour = 0    // Default to 0 hours for a duration
-        val initialMinute = 15 // Default to 15 minutes for a duration
+    val customTimePickerDialog: @Composable () -> Unit = {
+        if (showCustomTimePicker) {
+            val initialHour = 0    // Default to 0 hours for a duration
+            val initialMinute = 15 // Default to 15 minutes for a duration
 
-        val timePickerState = rememberTimePickerState(
-            initialHour = initialHour,
-            initialMinute = initialMinute,
-            is24Hour = true // Consistent with your previous setting (24-hour format)
-        )
+            val timePickerState = rememberTimePickerState(
+                initialHour = initialHour,
+                initialMinute = initialMinute,
+                is24Hour = true // Consistent with your previous setting (24-hour format)
+            )
 
-        AlertDialog(
-            onDismissRequest = {
-                showCustomTimePicker = false // Dismiss the M3 dialog
-                // No need to call onDismiss() for the bottom sheet here,
-                // as that's handled by the confirm button or if the user specifically dismisses the bottom sheet.
-            },
-            title = { Text(stringResource(R.string.sleep_timer_ui_set_custom_duration)) },
-            text = {
-                TimePicker(state = timePickerState)
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        val hour = timePickerState.hour
-                        val minute = timePickerState.minute
-                        val totalMinutes = hour * 60 + minute
-
-                        if (totalMinutes > 0) { // Ensure some time is set
-                            onSetPredefinedTimer(totalMinutes) // Your existing callback
+            if (isContainedInCard) {
+                PlayerCardOverlayDialog(
+                    onDismissRequest = { showCustomTimePicker = false },
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+                ) {
+                    Text(
+                        text = stringResource(R.string.sleep_timer_ui_set_custom_duration),
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Box(
+                        modifier = Modifier
+                            .weight(1f, fill = false)
+                            .fillMaxWidth()
+                            .verticalScroll(rememberScrollState()),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        TimePicker(state = timePickerState)
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)
+                    ) {
+                        TextButton(
+                            onClick = { showCustomTimePicker = false }
+                        ) {
+                            Text(
+                                stringResource(R.string.common_cancel),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
                         }
-                        showCustomTimePicker = false // Dismiss the M3 dialog
-                        onDismiss() // Dismiss the bottom sheet after setting time, as per original logic
+                        TextButton(
+                            onClick = {
+                                val totalMinutes = timePickerState.hour * 60 + timePickerState.minute
+                                if (totalMinutes > 0) {
+                                    onSetPredefinedTimer(totalMinutes)
+                                }
+                                showCustomTimePicker = false
+                                onDismiss()
+                            }
+                        ) {
+                            Text(stringResource(R.string.common_ok))
+                        }
                     }
-                ) {
-                    Text(stringResource(R.string.common_ok))
                 }
-            },
-            dismissButton = {
-                TextButton(
-                    onClick = {
+            } else {
+                AlertDialog(
+                    onDismissRequest = {
                         showCustomTimePicker = false // Dismiss the M3 dialog
+                    },
+                    title = { Text(stringResource(R.string.sleep_timer_ui_set_custom_duration)) },
+                    text = {
+                        TimePicker(state = timePickerState)
+                    },
+                    confirmButton = {
+                        TextButton(
+                            onClick = {
+                                val hour = timePickerState.hour
+                                val minute = timePickerState.minute
+                                val totalMinutes = hour * 60 + minute
+
+                                if (totalMinutes > 0) { // Ensure some time is set
+                                    onSetPredefinedTimer(totalMinutes) // Your existing callback
+                                }
+                                showCustomTimePicker = false // Dismiss the M3 dialog
+                                onDismiss() // Dismiss the bottom sheet after setting time, as per original logic
+                            }
+                        ) {
+                            Text(stringResource(R.string.common_ok))
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(
+                            onClick = {
+                                showCustomTimePicker = false // Dismiss the M3 dialog
+                            }
+                        ) {
+                            Text(stringResource(R.string.common_cancel), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
                     }
-                ) {
-                    Text(stringResource(R.string.common_cancel), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
+                )
             }
-        )
+        }
+    }
+
+    if (isContainedInCard) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            PlayerCardOverlaySheet(
+                onDismissRequest = onDismiss,
+                containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+            ) {
+                timerContent()
+            }
+            customTimePickerDialog()
+        }
+    } else {
+        ModalBottomSheet(
+            onDismissRequest = onDismiss,
+            sheetState = sheetState
+        ) {
+            timerContent()
+        }
+        customTimePickerDialog()
     }
 }

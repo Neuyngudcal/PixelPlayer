@@ -147,6 +147,8 @@ class PlayerViewModelTest {
         coEvery { mockUserPreferencesRepository.foldersSortOptionFlow } returns flowOf("FolderNameAZ") // Added missing mock
         coEvery { mockUserPreferencesRepository.persistentShuffleEnabledFlow } returns flowOf(false) // Added missing mock
         coEvery { mockUserPreferencesRepository.isShuffleOnFlow } returns flowOf(false) // Added missing mock
+        coEvery { mockUserPreferencesRepository.isAlbumsListViewFlow } returns flowOf(false)
+        coEvery { mockUserPreferencesRepository.isSongsGridViewFlow } returns flowOf(false)
         every { mockUserPreferencesRepository.repeatModeFlow } returns _repeatModeFlow
         coEvery { mockThemePreferencesRepository.playerThemePreferenceFlow } returns flowOf("Global")
         coEvery { mockAiPreferencesRepository.aiProvider } returns flowOf("GEMINI")

@@ -3,8 +3,7 @@ package com.theveloper.pixelplay.data.navidrome
 
 import android.content.Context
 import android.content.SharedPreferences
-import androidx.security.crypto.EncryptedSharedPreferences
-import androidx.security.crypto.MasterKey
+import com.theveloper.pixelplay.data.security.SecureSharedPreferencesFactory
 import com.theveloper.pixelplay.R
 import com.theveloper.pixelplay.data.database.AlbumEntity
 import com.theveloper.pixelplay.data.database.ArtistEntity
@@ -81,21 +80,7 @@ class NavidromeRepository @Inject constructor(
         private const val LIBRARY_PLAYLIST_ID = "__library__"
     }
 
-    private val prefs: SharedPreferences = try {
-        val masterKey = MasterKey.Builder(context)
-            .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-            .build()
-        EncryptedSharedPreferences.create(
-            context,
-            PREFS_NAME,
-            masterKey,
-            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-        )
-    } catch (e: Exception) {
-        Timber.e(e, "$TAG: Failed to create EncryptedSharedPreferences, falling back to plain")
-        context.getSharedPreferences("${PREFS_NAME}_plain", Context.MODE_PRIVATE)
-    }
+    private val prefs: SharedPreferences = SecureSharedPreferencesFactory.create(context, PREFS_NAME)
 
     private val _isLoggedInFlow = MutableStateFlow(false)
     val isLoggedInFlow: StateFlow<Boolean> = _isLoggedInFlow.asStateFlow()

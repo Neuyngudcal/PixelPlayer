@@ -7,16 +7,25 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.map
 import com.theveloper.pixelplay.data.ai.provider.AiProvider
+import com.theveloper.pixelplay.data.security.AiSecretsStore
+import com.theveloper.pixelplay.data.security.SecretStore
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onStart
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import javax.inject.Inject
 import javax.inject.Singleton
 
 @Singleton
 class AiPreferencesRepository @Inject constructor(
-    private val dataStore: DataStore<Preferences>
+    private val dataStore: DataStore<Preferences>,
+    @AiSecretsStore private val secretStore: SecretStore
 ) {
     companion object {
         val DEFAULT_SYSTEM_PROMPT = """
@@ -57,15 +66,81 @@ class AiPreferencesRepository @Inject constructor(
         val OFFLINE_USE_GPU = booleanPreferencesKey("offline_use_gpu")
         val OFFLINE_LAST_BENCHMARK_SPEED = floatPreferencesKey("offline_last_benchmark_speed")
 
-        fun getApiKey(provider: AiProvider) = stringPreferencesKey("${provider.name.lowercase()}_api_key")
+        // Android AICore (Gemini Nano NPU) preferences
+        val AICORE_SUPPORTED = booleanPreferencesKey("aicore_supported")
+        val AICORE_BASE_MODEL_NAME = stringPreferencesKey("aicore_base_model_name")
+
+        fun apiKeyName(provider: AiProvider): String = "${provider.name.lowercase()}_api_key"
+        fun getApiKey(provider: AiProvider) = stringPreferencesKey(apiKeyName(provider))
         fun getModel(provider: AiProvider) = stringPreferencesKey("${provider.name.lowercase()}_model")
         fun getSystemPrompt(provider: AiProvider) = stringPreferencesKey("${provider.name.lowercase()}_system_prompt")
         fun getBaseUrl(provider: AiProvider) = stringPreferencesKey("${provider.name.lowercase()}_base_url")
     }
 
+    private val migrationMutex = Mutex()
+
+    @Volatile
+    private var migrationCompleted = false
+
+    private val apiKeysState = MutableStateFlow(readAllApiKeysFromSecretStore())
+
+    private val migratedApiKeysFlow: Flow<Map<AiProvider, String>> = apiKeysState
+        .onStart { migratePlaintextApiKeysIfNeeded() }
+
+    private fun readAllApiKeysFromSecretStore(): Map<AiProvider, String> {
+        return AiProvider.entries.associateWith { provider ->
+            secretStore.getSecret(Keys.apiKeyName(provider))?.trim().orEmpty()
+        }
+    }
+
+    /**
+     * One-time idempotent migration from legacy plaintext DataStore API keys to encrypted [SecretStore].
+     */
+    suspend fun migratePlaintextApiKeysIfNeeded() {
+        if (migrationCompleted) return
+        migrationMutex.withLock {
+            if (migrationCompleted) return
+            val snapshot = dataStore.data.first()
+            val keysToRemove = mutableListOf<Preferences.Key<String>>()
+            var allPersisted = true
+
+            for (provider in AiProvider.entries) {
+                val prefKey = Keys.getApiKey(provider)
+                if (!snapshot.contains(prefKey)) continue
+
+                val legacyPlaintext = snapshot[prefKey]?.trim().orEmpty()
+                if (legacyPlaintext.isEmpty()) {
+                    keysToRemove += prefKey
+                    continue
+                }
+
+                val existingSecret = secretStore.getSecret(prefKey.name)?.trim().orEmpty()
+                if (existingSecret.isNotEmpty()) {
+                    keysToRemove += prefKey
+                } else if (secretStore.putSecret(prefKey.name, legacyPlaintext)) {
+                    keysToRemove += prefKey
+                } else {
+                    allPersisted = false
+                }
+            }
+
+            if (keysToRemove.isNotEmpty()) {
+                dataStore.edit { preferences ->
+                    keysToRemove.forEach { key -> preferences.remove(key) }
+                }
+            }
+
+            apiKeysState.value = readAllApiKeysFromSecretStore()
+            if (allPersisted) {
+                migrationCompleted = true
+            }
+        }
+    }
+
     // Generic accessors for AiHandler
     fun getApiKey(provider: AiProvider): Flow<String> =
-        dataStore.data.map { preferences -> preferences[Keys.getApiKey(provider)]?.trim() ?: "" }
+        migratedApiKeysFlow
+            .map { keys -> keys[provider].orEmpty() }
             .distinctUntilChanged()
 
     fun getModel(provider: AiProvider): Flow<String> =
@@ -82,7 +157,18 @@ class AiPreferencesRepository @Inject constructor(
             .distinctUntilChanged()
 
     suspend fun setApiKey(provider: AiProvider, apiKey: String) {
-        dataStore.edit { preferences -> preferences[Keys.getApiKey(provider)] = apiKey.trim() }
+        migratePlaintextApiKeysIfNeeded()
+        val trimmed = apiKey.trim()
+        val keyName = Keys.apiKeyName(provider)
+        if (trimmed.isEmpty()) {
+            secretStore.removeSecret(keyName)
+        } else {
+            secretStore.putSecret(keyName, trimmed)
+        }
+        dataStore.edit { preferences ->
+            preferences.remove(Keys.getApiKey(provider))
+        }
+        apiKeysState.value = readAllApiKeysFromSecretStore()
     }
 
     suspend fun setModel(provider: AiProvider, model: String) {
@@ -150,7 +236,7 @@ class AiPreferencesRepository @Inject constructor(
     val customBaseUrl: Flow<String> = getBaseUrl(AiProvider.CUSTOM)
 
     val aiProvider: Flow<String> =
-        dataStore.data.map { preferences -> preferences[Keys.AI_PROVIDER] ?: "GEMINI" }
+        dataStore.data.map { preferences -> preferences[Keys.AI_PROVIDER] ?: AiProvider.ANDROID_AICORE.name }
             .distinctUntilChanged()
 
     /**
@@ -158,15 +244,19 @@ class AiPreferencesRepository @Inject constructor(
      * avoiding combining 14 separate DataStore flows in PlayerViewModel.
      */
     val hasActiveProviderConfigured: Flow<Boolean> =
-        dataStore.data.map { preferences ->
-            val providerName = preferences[Keys.AI_PROVIDER] ?: "GEMINI"
-            if (providerName == AiProvider.OFFLINE_GGUF.name) {
-                val path = preferences[Keys.ACTIVE_OFFLINE_MODEL_PATH]?.trim().orEmpty()
-                val passed = preferences[Keys.OFFLINE_HARDWARE_PASSED] ?: false
-                path.isNotEmpty() && passed
-            } else {
-                val provider = AiProvider.fromString(providerName)
-                preferences[Keys.getApiKey(provider)]?.trim().isNullOrEmpty().not()
+        combine(dataStore.data, migratedApiKeysFlow) { preferences, apiKeys ->
+            val providerName = preferences[Keys.AI_PROVIDER] ?: AiProvider.ANDROID_AICORE.name
+            when (providerName) {
+                AiProvider.ANDROID_AICORE.name -> true
+                AiProvider.OFFLINE_GGUF.name -> {
+                    val path = preferences[Keys.ACTIVE_OFFLINE_MODEL_PATH]?.trim().orEmpty()
+                    val passed = preferences[Keys.OFFLINE_HARDWARE_PASSED] ?: false
+                    path.isNotEmpty() && passed
+                }
+                else -> {
+                    val provider = AiProvider.fromString(providerName)
+                    !apiKeys[provider].isNullOrEmpty()
+                }
             }
         }.distinctUntilChanged()
 
@@ -237,6 +327,21 @@ class AiPreferencesRepository @Inject constructor(
     val offlineLastBenchmarkSpeed: Flow<Float> =
         dataStore.data.map { preferences -> preferences[Keys.OFFLINE_LAST_BENCHMARK_SPEED] ?: 0f }
             .distinctUntilChanged()
+
+    val aiCoreSupported: Flow<Boolean> =
+        dataStore.data.map { preferences -> preferences[Keys.AICORE_SUPPORTED] ?: false }
+            .distinctUntilChanged()
+
+    val aiCoreBaseModelName: Flow<String> =
+        dataStore.data.map { preferences -> preferences[Keys.AICORE_BASE_MODEL_NAME] ?: "" }
+            .distinctUntilChanged()
+
+    suspend fun setAiCoreStatus(supported: Boolean, baseModelName: String) {
+        dataStore.edit { preferences ->
+            preferences[Keys.AICORE_SUPPORTED] = supported
+            preferences[Keys.AICORE_BASE_MODEL_NAME] = baseModelName
+        }
+    }
 
     suspend fun setActiveOfflineModel(
         modelId: String,

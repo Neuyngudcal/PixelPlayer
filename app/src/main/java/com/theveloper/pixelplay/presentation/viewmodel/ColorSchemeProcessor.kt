@@ -5,122 +5,328 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.drawable.BitmapDrawable
 import android.os.Trace
-import android.util.LruCache
-import androidx.compose.material3.ColorScheme
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.toArgb
 import androidx.core.graphics.createBitmap
 import coil.imageLoader
+import coil.memory.MemoryCache
 import coil.request.CachePolicy
 import coil.request.ImageRequest
 import coil.size.Size
-import com.theveloper.pixelplay.data.preferences.AlbumArtColorAccuracy
-import com.theveloper.pixelplay.data.preferences.AlbumArtPaletteStyle
 import com.theveloper.pixelplay.data.database.AlbumArtThemeDao
 import com.theveloper.pixelplay.data.database.AlbumArtThemeEntity
-import com.theveloper.pixelplay.data.database.StoredColorSchemeValues
-import com.theveloper.pixelplay.data.database.toComposeColor
-import com.theveloper.pixelplay.utils.LocalArtworkUri
-import com.theveloper.pixelplay.ui.theme.clearExtractedColorCache
-import com.theveloper.pixelplay.ui.theme.extractSeedColor
+import com.theveloper.pixelplay.data.preferences.AlbumArtPaletteStyle
+import com.theveloper.pixelplay.presentation.components.albumArtMemoryCacheKey
+import com.theveloper.pixelplay.ui.theme.GOOGLE_EXTRACTION_MAX_DIMENSION
+import com.theveloper.pixelplay.ui.theme.extractSeedColorArgb
 import com.theveloper.pixelplay.ui.theme.generateColorSchemeFromSeed
+import com.theveloper.pixelplay.ui.theme.quantizeContrastLevel
+import com.theveloper.pixelplay.utils.LocalArtworkUri
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Efficient color scheme processor for album art.
- * 
- * Optimizations:
- * - In-memory LRU cache to avoid disk reads for recently accessed schemes
- * - Mutex-protected processing to avoid duplicate work
- * - Batched bitmap operations on IO dispatcher
- * - Reduced bitmap size (128x128) for faster processing
- * 
- * Extracted from PlayerViewModel to improve modularity.
+ * Two-tier Google Material Color Utilities processor for album and artist artwork.
+ *
+ * - **Tier 1 (Seed Cache — style & contrast independent):**
+ *   In-memory LRU (`uri -> seedArgb`) backed by Room `album_art_themes` (3 columns).
+ *   Concurrent requests for the same URI coalesce onto a single bitmap decode + Celebi quantization.
+ * - **Tier 2 (Scheme Cache — fast RAM LRU):**
+ *   In-memory LRU (`uri|style|contrast -> ColorSchemePair`). Generating a 48-role light+dark
+ *   [ColorSchemePair] from a cached seed takes < 0.15ms, so changing palette style or system
+ *   contrast never re-decodes bitmaps.
  */
 @Singleton
 class ColorSchemeProcessor @Inject constructor(
     @ApplicationContext private val context: Context,
     private val albumArtThemeDao: AlbumArtThemeDao
 ) {
-    // In-memory LRU cache for faster access (avoids DB reads for hot paths)
-    private val memoryCache = LruCache<String, ColorSchemePair>(64)
-    private val processingMutex = Mutex()
-    private val inProgressUris = mutableSetOf<String>()
+    private val seedMemoryCache = SynchronizedLruCache<String, Int>(512)
+    private val schemeMemoryCache = SynchronizedLruCache<String, ColorSchemePair>(256)
+    private val seedExtractionMutex = Mutex()
+    private val extractionSemaphore = Semaphore(permits = 2)
+    private val inFlightSeedRequests = mutableMapOf<String, CompletableDeferred<Int?>>()
+
+    val requestChannel = Channel<String>(capacity = 32, onBufferOverflow = BufferOverflow.DROP_OLDEST)
 
     /**
-     * Channel for queuing color scheme requests.
-     * Used by PlayerViewModel for background processing.
-     * Capacity is bounded with DROP_OLDEST to prevent unbounded growth during rapid
-     * track changes (e.g. fast seek through a large playlist).
+     * Pure O(1) RAM lookup for the fully-synthesized [ColorSchemePair].
+     * Never synthesizes on the calling thread, making it safe for scrolling item composition.
      */
-    val requestChannel = Channel<String>(capacity = 32, onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST)
-
-    /**
-     * Gets or generates a color scheme for the given album art URI.
-     * Checks memory cache first, then database, then generates new.
-     * All heavy operations are performed on appropriate dispatchers.
-     */
-    /**
-     * Gets or generates a color scheme for the given album art URI.
-     * Checks memory cache first, then database, then generates new.
-     * @param forceRefresh If true, bypasses caches and forces regeneration from source image.
-     */
-    suspend fun getOrGenerateColorScheme(
+    fun getCachedSchemeOnlyFromMemory(
         albumArtUri: String,
         paletteStyle: AlbumArtPaletteStyle,
-        colorAccuracyLevel: Int = AlbumArtColorAccuracy.DEFAULT,
-        forceRefresh: Boolean = false
+        contrastLevel: Double = 0.0
     ): ColorSchemePair? {
-        Trace.beginSection("ColorSchemeProcessor.getOrGenerate")
+        if (albumArtUri.isBlank()) return null
+        val schemeKey = buildSchemeCacheKey(albumArtUri, paletteStyle, contrastLevel)
+        return schemeMemoryCache.get(schemeKey)
+    }
+
+    /**
+     * Fast synchronous RAM lookup for hot paths (preloaded track skips, carousel swipes).
+     */
+    fun getCachedColorSchemeFromMemory(
+        albumArtUri: String,
+        paletteStyle: AlbumArtPaletteStyle,
+        contrastLevel: Double = 0.0
+    ): ColorSchemePair? {
+        val schemeKey = buildSchemeCacheKey(albumArtUri, paletteStyle, contrastLevel)
+        schemeMemoryCache.get(schemeKey)?.let { return it }
+
+        // If seed is already resident in RAM, synthesize the 48-role scheme immediately (< 0.15ms).
+        val cachedSeed = seedMemoryCache.get(albumArtUri) ?: return null
+        return generateColorSchemeFromSeed(
+            seedColor = Color(cachedSeed),
+            paletteStyle = paletteStyle,
+            contrastLevel = contrastLevel
+        ).also { pair ->
+            schemeMemoryCache.put(schemeKey, pair)
+        }
+    }
+
+    /**
+     * Returns the extracted Google MCU seed color ARGB for [albumArtUri], checking RAM LRU,
+     * coalescing in-flight work, checking Room seed cache, and finally decoding & quantizing.
+     */
+    suspend fun getOrExtractSeedColor(
+        albumArtUri: String,
+        forceRefresh: Boolean = false,
+        persistToDatabase: Boolean = true
+    ): Int? {
+        if (albumArtUri.isBlank()) return null
+
+        Trace.beginSection("ColorSchemeProcessor.getOrExtractSeed")
         try {
-            val resolvedAccuracyLevel = AlbumArtColorAccuracy.clamp(colorAccuracyLevel)
-            val cacheKey = buildCacheKey(albumArtUri, paletteStyle, resolvedAccuracyLevel)
             if (!forceRefresh) {
-                loadCachedColorScheme(
+                seedMemoryCache.get(albumArtUri)?.let { return it }
+            }
+
+            if (forceRefresh) {
+                return extractAndCacheSeedColor(
                     albumArtUri = albumArtUri,
-                    paletteStyle = paletteStyle,
-                    colorAccuracyLevel = resolvedAccuracyLevel
-                )?.let { schemePair ->
-                    Trace.endSection()
-                    return schemePair
+                    forceRefresh = true,
+                    persistToDatabase = persistToDatabase
+                )
+            }
+
+            val (deferred, isOwner) = seedExtractionMutex.withLock {
+                val existing = inFlightSeedRequests[albumArtUri]
+                if (existing != null) {
+                    existing to false
+                } else {
+                    CompletableDeferred<Int?>().also { created ->
+                        inFlightSeedRequests[albumArtUri] = created
+                    } to true
                 }
             }
 
-            // 3. Generate new color scheme
-            return generateAndCacheColorScheme(
-                albumArtUri = albumArtUri,
-                paletteStyle = paletteStyle,
-                colorAccuracyLevel = resolvedAccuracyLevel,
-                forceRefresh = forceRefresh
-            )
+            if (!isOwner) {
+                return deferred.await()
+            }
+
+            return try {
+                val seed = loadCachedSeedColor(albumArtUri)
+                    ?: extractAndCacheSeedColor(
+                        albumArtUri = albumArtUri,
+                        forceRefresh = false,
+                        persistToDatabase = persistToDatabase
+                    )
+                deferred.complete(seed)
+                seed
+            } catch (t: Throwable) {
+                deferred.complete(null)
+                throw t
+            } finally {
+                seedExtractionMutex.withLock {
+                    if (inFlightSeedRequests[albumArtUri] === deferred) {
+                        inFlightSeedRequests.remove(albumArtUri)
+                    }
+                }
+            }
         } finally {
             Trace.endSection()
         }
     }
 
+    /**
+     * Gets or generates a 48-role light+dark [ColorSchemePair] for [albumArtUri] using Google's
+     * Material Color Utilities pipeline and the requested [paletteStyle] & [contrastLevel].
+     */
+    suspend fun getOrGenerateColorScheme(
+        albumArtUri: String,
+        paletteStyle: AlbumArtPaletteStyle,
+        contrastLevel: Double = 0.0,
+        forceRefresh: Boolean = false
+    ): ColorSchemePair? {
+        if (albumArtUri.isBlank()) return null
+
+        Trace.beginSection("ColorSchemeProcessor.getOrGenerate")
+        try {
+            val schemeKey = buildSchemeCacheKey(albumArtUri, paletteStyle, contrastLevel)
+            if (!forceRefresh) {
+                schemeMemoryCache.get(schemeKey)?.let { return it }
+            }
+
+            val seedArgb = getOrExtractSeedColor(
+                albumArtUri = albumArtUri,
+                forceRefresh = forceRefresh,
+                persistToDatabase = true
+            ) ?: return null
+
+            val schemePair = withContext(Dispatchers.Default) {
+                generateColorSchemeFromSeed(
+                    seedColor = Color(seedArgb),
+                    paletteStyle = paletteStyle,
+                    contrastLevel = contrastLevel
+                )
+            }
+            schemeMemoryCache.put(schemeKey, schemePair)
+            return schemePair
+        } finally {
+            Trace.endSection()
+        }
+    }
+
+    /**
+     * Hydrates dynamic [ColorSchemePair]s for a batch of visible/upcoming artwork URIs
+     * (e.g. after scroll settles), using RAM cache -> batch Room seed query -> semaphore-bounded
+     * bitmap extraction with cooperative cancellation.
+     */
+    suspend fun getOrGenerateColorSchemesBatch(
+        albumArtUris: List<String>,
+        paletteStyle: AlbumArtPaletteStyle,
+        contrastLevel: Double = 0.0,
+        onSchemeReady: (String, ColorSchemePair) -> Unit
+    ) {
+        val uniqueUris = albumArtUris.asSequence()
+            .filter { it.isNotBlank() }
+            .distinct()
+            .toList()
+        if (uniqueUris.isEmpty()) return
+
+        val missingSchemes = mutableListOf<String>()
+        for (uri in uniqueUris) {
+            val cachedScheme = getCachedSchemeOnlyFromMemory(uri, paletteStyle, contrastLevel)
+            if (cachedScheme != null) {
+                onSchemeReady(uri, cachedScheme)
+            } else {
+                missingSchemes.add(uri)
+            }
+        }
+        if (missingSchemes.isEmpty()) return
+
+        val seedHits = mutableListOf<Pair<String, Int>>()
+        val missingSeeds = mutableListOf<String>()
+        for (uri in missingSchemes) {
+            val seed = seedMemoryCache.get(uri)
+            if (seed != null) {
+                seedHits.add(uri to seed)
+            } else {
+                missingSeeds.add(uri)
+            }
+        }
+
+        if (seedHits.isNotEmpty()) {
+            val generatedPairs = withContext(Dispatchers.Default) {
+                seedHits.map { (uri, seed) ->
+                    uri to generateColorSchemeFromSeed(
+                        seedColor = Color(seed),
+                        paletteStyle = paletteStyle,
+                        contrastLevel = contrastLevel
+                    )
+                }
+            }
+            generatedPairs.forEach { (uri, pair) ->
+                schemeMemoryCache.put(buildSchemeCacheKey(uri, paletteStyle, contrastLevel), pair)
+                onSchemeReady(uri, pair)
+            }
+        }
+        if (missingSeeds.isEmpty()) return
+
+        currentCoroutineContext().ensureActive()
+
+        val dbEntities = withContext(Dispatchers.IO) {
+            missingSeeds.chunked(200).flatMap { chunk ->
+                albumArtThemeDao.getSeedsByUris(chunk, SEED_ALGORITHM_VERSION)
+            }
+        }
+        if (dbEntities.isNotEmpty()) {
+            dbEntities.forEach { entity ->
+                seedMemoryCache.put(entity.albumArtUriString, entity.seedColorArgb)
+            }
+            val dbPairs = withContext(Dispatchers.Default) {
+                dbEntities.map { entity ->
+                    entity.albumArtUriString to generateColorSchemeFromSeed(
+                        seedColor = Color(entity.seedColorArgb),
+                        paletteStyle = paletteStyle,
+                        contrastLevel = contrastLevel
+                    )
+                }
+            }
+            dbPairs.forEach { (uri, pair) ->
+                schemeMemoryCache.put(buildSchemeCacheKey(uri, paletteStyle, contrastLevel), pair)
+                onSchemeReady(uri, pair)
+            }
+        }
+
+        val dbUriSet = dbEntities.mapTo(HashSet(dbEntities.size)) { it.albumArtUriString }
+        val uncachedUris = missingSeeds.filter { it !in dbUriSet }
+        for (uri in uncachedUris) {
+            currentCoroutineContext().ensureActive()
+            val pair = extractionSemaphore.withPermit {
+                getOrGenerateColorScheme(
+                    albumArtUri = uri,
+                    paletteStyle = paletteStyle,
+                    contrastLevel = contrastLevel
+                )
+            }
+            if (pair != null) {
+                onSchemeReady(uri, pair)
+            }
+        }
+    }
+
+    /**
+     * Fast preview generator for settings screens: reuses the cached seed without writing new
+     * uncached preview rows if the caller only needs an ephemeral preview.
+     */
     suspend fun getPreviewColorScheme(
         albumArtUri: String,
         paletteStyle: AlbumArtPaletteStyle,
-        colorAccuracyLevel: Int = AlbumArtColorAccuracy.DEFAULT
+        contrastLevel: Double = 0.0
     ): ColorSchemePair? {
-        val resolvedAccuracyLevel = AlbumArtColorAccuracy.clamp(colorAccuracyLevel)
-        return loadCachedColorScheme(
+        if (albumArtUri.isBlank()) return null
+
+        val schemeKey = buildSchemeCacheKey(albumArtUri, paletteStyle, contrastLevel)
+        schemeMemoryCache.get(schemeKey)?.let { return it }
+
+        val seedArgb = getOrExtractSeedColor(
             albumArtUri = albumArtUri,
-            paletteStyle = paletteStyle,
-            colorAccuracyLevel = resolvedAccuracyLevel
-        ) ?: generateAndCacheColorScheme(
-            albumArtUri = albumArtUri,
-            paletteStyle = paletteStyle,
-            colorAccuracyLevel = resolvedAccuracyLevel,
+            forceRefresh = false,
             persistToDatabase = false
-        )
+        ) ?: return null
+
+        return withContext(Dispatchers.Default) {
+            generateColorSchemeFromSeed(
+                seedColor = Color(seedArgb),
+                paletteStyle = paletteStyle,
+                contrastLevel = contrastLevel
+            )
+        }.also { pair ->
+            schemeMemoryCache.put(schemeKey, pair)
+        }
     }
 
     private data class ExtractedBitmapHolder(
@@ -128,62 +334,58 @@ class ColorSchemeProcessor @Inject constructor(
         val ownsBitmap: Boolean
     )
 
-    /**
-     * Generates a color scheme from the album art bitmap.
-     * All processing done on Default dispatcher for CPU-bound work.
-     */
-    private suspend fun generateAndCacheColorScheme(
+    private suspend fun loadCachedSeedColor(albumArtUri: String): Int? {
+        seedMemoryCache.get(albumArtUri)?.let { return it }
+
+        val persistedSeed = withContext(Dispatchers.IO) {
+            albumArtThemeDao.getSeedByUri(albumArtUri, SEED_ALGORITHM_VERSION)
+        } ?: return null
+
+        seedMemoryCache.put(albumArtUri, persistedSeed)
+        return persistedSeed
+    }
+
+    private suspend fun extractAndCacheSeedColor(
         albumArtUri: String,
-        paletteStyle: AlbumArtPaletteStyle,
-        colorAccuracyLevel: Int,
-        persistToDatabase: Boolean = true,
-        forceRefresh: Boolean = false
-    ): ColorSchemePair? {
-        Trace.beginSection("ColorSchemeProcessor.generate")
+        forceRefresh: Boolean,
+        persistToDatabase: Boolean
+    ): Int? {
+        Trace.beginSection("ColorSchemeProcessor.extractSeed")
         try {
-            val cacheKey = buildCacheKey(albumArtUri, paletteStyle, colorAccuracyLevel)
-            // Load bitmap on IO dispatcher
             val bitmapHolder = withContext(Dispatchers.IO) {
-                loadBitmapForColorExtraction(albumArtUri, forceRefresh)
+                loadBitmapForColorExtraction(albumArtUri, skipCache = forceRefresh)
             } ?: return null
 
-            // Extract colors on Default dispatcher (CPU-bound)
-            val schemePair = withContext(Dispatchers.Default) {
-                val seed = extractSeedColor(
-                    bitmap = bitmapHolder.bitmap,
-                    config = com.theveloper.pixelplay.ui.theme.ColorExtractionConfig(
-                        accuracyLevel = colorAccuracyLevel
-                    )
-                )
-                // Only recycle if we allocated a temporary rasterized copy; never recycle
-                // a Bitmap owned by Coil's MemoryCache.
-                if (bitmapHolder.ownsBitmap) {
-                    bitmapHolder.bitmap.recycle()
+            val seedArgb = withContext(Dispatchers.Default) {
+                try {
+                    extractSeedColorArgb(bitmapHolder.bitmap)
+                } finally {
+                    // Only recycle temporary rasterized bitmaps; never recycle Coil MemoryCache bitmaps.
+                    if (bitmapHolder.ownsBitmap && !bitmapHolder.bitmap.isRecycled) {
+                        bitmapHolder.bitmap.recycle()
+                    }
                 }
-                generateColorSchemeFromSeed(
-                    seedColor = seed,
-                    paletteStyle = paletteStyle
-                )
             }
 
-            // Cache to memory
-            memoryCache.put(cacheKey, schemePair)
+            if (forceRefresh) {
+                removeUriFromSchemeCache(albumArtUri)
+            }
+            seedMemoryCache.put(albumArtUri, seedArgb)
 
             if (persistToDatabase) {
                 withContext(Dispatchers.IO) {
-                    albumArtThemeDao.insertTheme(
-                        mapColorSchemePairToEntity(
-                            uri = albumArtUri,
-                            paletteStyle = paletteStyle,
-                            colorAccuracyLevel = colorAccuracyLevel,
-                            pair = schemePair
+                    albumArtThemeDao.insertSeed(
+                        AlbumArtThemeEntity(
+                            albumArtUriString = albumArtUri,
+                            seedColorArgb = seedArgb,
+                            algorithmVersion = SEED_ALGORITHM_VERSION
                         )
                     )
                 }
             }
 
-            return schemePair
-        } catch (e: Exception) {
+            return seedArgb
+        } catch (_: Exception) {
             return null
         } finally {
             Trace.endSection()
@@ -191,24 +393,41 @@ class ColorSchemeProcessor @Inject constructor(
     }
 
     /**
-     * Loads a small bitmap optimized for color extraction.
-     * Reuses the decoded BitmapDrawable's bitmap directly when possible instead of
-     * allocating and drawing a duplicate Bitmap via Canvas.
+     * Loads a compact 112x112 software bitmap matching Android Framework `WallpaperColors`
+     * extraction bounds. Reuses Coil's decoded BitmapDrawable directly when readable.
      */
     private suspend fun loadBitmapForColorExtraction(uri: String, skipCache: Boolean): ExtractedBitmapHolder? {
         return try {
+            if (!skipCache) {
+                val memoryCache = context.imageLoader.memoryCache
+                if (memoryCache != null) {
+                    val candidateKeys = listOfNotNull(
+                        albumArtMemoryCacheKey(uri, Size(256, 256)),
+                        albumArtMemoryCacheKey(uri, Size(300, 300)),
+                        albumArtMemoryCacheKey(uri, Size(512, 512)),
+                        uri
+                    )
+                    for (cacheKey in candidateKeys) {
+                        val cachedBitmap = memoryCache[MemoryCache.Key(cacheKey)]?.bitmap
+                        if (cachedBitmap != null && !cachedBitmap.isRecycled && cachedBitmap.width > 0 && cachedBitmap.height > 0) {
+                            return ExtractedBitmapHolder(bitmap = cachedBitmap, ownsBitmap = false)
+                        }
+                    }
+                }
+            }
+
             val cachePolicy = if (skipCache) CachePolicy.DISABLED else CachePolicy.ENABLED
             val diskCachePolicy = if (LocalArtworkUri.isLocalArtworkUri(uri)) CachePolicy.DISABLED else cachePolicy
-            
+
             val request = ImageRequest.Builder(context)
                 .data(uri)
-                .allowHardware(false) // Required for pixel access
-                .size(Size(128, 128)) // Small size for fast processing
+                .allowHardware(false)
+                .size(Size(GOOGLE_EXTRACTION_MAX_DIMENSION, GOOGLE_EXTRACTION_MAX_DIMENSION))
                 .bitmapConfig(Bitmap.Config.ARGB_8888)
                 .memoryCachePolicy(cachePolicy)
                 .diskCachePolicy(diskCachePolicy)
                 .build()
-            
+
             val drawable = context.imageLoader.execute(request).drawable ?: return null
             if (drawable is BitmapDrawable) {
                 val existingBitmap = drawable.bitmap
@@ -216,10 +435,10 @@ class ColorSchemeProcessor @Inject constructor(
                     return ExtractedBitmapHolder(bitmap = existingBitmap, ownsBitmap = false)
                 }
             }
-            
+
             val rasterized = createBitmap(
-                drawable.intrinsicWidth.coerceAtLeast(1),
-                drawable.intrinsicHeight.coerceAtLeast(1)
+                drawable.intrinsicWidth.coerceIn(1, GOOGLE_EXTRACTION_MAX_DIMENSION),
+                drawable.intrinsicHeight.coerceIn(1, GOOGLE_EXTRACTION_MAX_DIMENSION)
             ).also { bmp ->
                 Canvas(bmp).let { canvas ->
                     drawable.setBounds(0, 0, canvas.width, canvas.height)
@@ -227,241 +446,75 @@ class ColorSchemeProcessor @Inject constructor(
                 }
             }
             ExtractedBitmapHolder(bitmap = rasterized, ownsBitmap = true)
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             null
         }
     }
 
-    /**
-     * Checks if a URI is currently being processed.
-     * Used to avoid duplicate work.
-     */
-    suspend fun markProcessing(uri: String): Boolean {
-        return processingMutex.withLock {
-            if (inProgressUris.contains(uri)) {
-                false
-            } else {
-                inProgressUris.add(uri)
-                true
-            }
-        }
-    }
-
-    /**
-     * Marks a URI as finished processing.
-     */
-    suspend fun markComplete(uri: String) {
-        processingMutex.withLock {
-            inProgressUris.remove(uri)
-        }
-    }
-
-    /**
-     * Clears the in-memory cache.
-     * Call when memory is low or on configuration changes.
-     */
     fun clearMemoryCache() {
-        memoryCache.evictAll()
+        schemeMemoryCache.evictAll()
+        seedMemoryCache.evictAll()
     }
 
-    /**
-     * Removes a specific URI from the cache.
-     */
     fun evictFromCache(uri: String) {
-        removeUriFromMemoryCache(uri)
+        seedMemoryCache.remove(uri)
+        removeUriFromSchemeCache(uri)
     }
 
-    /**
-     * Invalidates the color scheme for a URI in both memory and database.
-     */
     suspend fun invalidateScheme(uri: String) {
-        clearExtractedColorCache()
-        removeUriFromMemoryCache(uri)
+        evictFromCache(uri)
         withContext(Dispatchers.IO) {
             albumArtThemeDao.deleteThemesByUris(listOf(uri))
         }
     }
 
-    private fun removeUriFromMemoryCache(uri: String) {
+    private fun removeUriFromSchemeCache(uri: String) {
         val prefix = "$uri$CACHE_KEY_SEPARATOR"
-        memoryCache.snapshot().keys
+        schemeMemoryCache.keysSnapshot()
             .filter { key -> key == uri || key.startsWith(prefix) }
-            .forEach { key -> memoryCache.remove(key) }
+            .forEach { key -> schemeMemoryCache.remove(key) }
     }
 
-    // Mapping functions
-    private fun mapColorSchemePairToEntity(
+    private class SynchronizedLruCache<K, V>(
+        private val maxSize: Int
+    ) {
+        private val lock = Any()
+        private val map = object : LinkedHashMap<K, V>(maxSize + 1, 0.75f, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<K, V>?): Boolean {
+                return size > maxSize
+            }
+        }
+
+        fun get(key: K): V? = synchronized(lock) { map[key] }
+
+        fun put(key: K, value: V) {
+            synchronized(lock) {
+                map[key] = value
+            }
+        }
+
+        fun remove(key: K): V? = synchronized(lock) { map.remove(key) }
+
+        fun evictAll() {
+            synchronized(lock) {
+                map.clear()
+            }
+        }
+
+        fun keysSnapshot(): List<K> = synchronized(lock) { map.keys.toList() }
+    }
+
+    private fun buildSchemeCacheKey(
         uri: String,
         paletteStyle: AlbumArtPaletteStyle,
-        colorAccuracyLevel: Int,
-        pair: ColorSchemePair
-    ): AlbumArtThemeEntity {
-        fun mapScheme(cs: ColorScheme) = StoredColorSchemeValues(
-            primary = cs.primary.toHexString(),
-            onPrimary = cs.onPrimary.toHexString(),
-            primaryContainer = cs.primaryContainer.toHexString(),
-            onPrimaryContainer = cs.onPrimaryContainer.toHexString(),
-            secondary = cs.secondary.toHexString(),
-            onSecondary = cs.onSecondary.toHexString(),
-            secondaryContainer = cs.secondaryContainer.toHexString(),
-            onSecondaryContainer = cs.onSecondaryContainer.toHexString(),
-            tertiary = cs.tertiary.toHexString(),
-            onTertiary = cs.onTertiary.toHexString(),
-            tertiaryContainer = cs.tertiaryContainer.toHexString(),
-            onTertiaryContainer = cs.onTertiaryContainer.toHexString(),
-            background = cs.background.toHexString(),
-            onBackground = cs.onBackground.toHexString(),
-            surface = cs.surface.toHexString(),
-            onSurface = cs.onSurface.toHexString(),
-            surfaceVariant = cs.surfaceVariant.toHexString(),
-            onSurfaceVariant = cs.onSurfaceVariant.toHexString(),
-            error = cs.error.toHexString(),
-            onError = cs.onError.toHexString(),
-            outline = cs.outline.toHexString(),
-            errorContainer = cs.errorContainer.toHexString(),
-            onErrorContainer = cs.onErrorContainer.toHexString(),
-            inversePrimary = cs.inversePrimary.toHexString(),
-            inverseSurface = cs.inverseSurface.toHexString(),
-            inverseOnSurface = cs.inverseOnSurface.toHexString(),
-            surfaceTint = cs.surfaceTint.toHexString(),
-            outlineVariant = cs.outlineVariant.toHexString(),
-            scrim = cs.scrim.toHexString(),
-            surfaceBright = cs.surfaceBright.toHexString(),
-            surfaceDim = cs.surfaceDim.toHexString(),
-            surfaceContainer = cs.surfaceContainer.toHexString(),
-            surfaceContainerHigh = cs.surfaceContainerHigh.toHexString(),
-            surfaceContainerHighest = cs.surfaceContainerHighest.toHexString(),
-            surfaceContainerLow = cs.surfaceContainerLow.toHexString(),
-            surfaceContainerLowest = cs.surfaceContainerLowest.toHexString(),
-            primaryFixed = cs.primaryFixed.toHexString(),
-            primaryFixedDim = cs.primaryFixedDim.toHexString(),
-            onPrimaryFixed = cs.onPrimaryFixed.toHexString(),
-            onPrimaryFixedVariant = cs.onPrimaryFixedVariant.toHexString(),
-            secondaryFixed = cs.secondaryFixed.toHexString(),
-            secondaryFixedDim = cs.secondaryFixedDim.toHexString(),
-            onSecondaryFixed = cs.onSecondaryFixed.toHexString(),
-            onSecondaryFixedVariant = cs.onSecondaryFixedVariant.toHexString(),
-            tertiaryFixed = cs.tertiaryFixed.toHexString(),
-            tertiaryFixedDim = cs.tertiaryFixedDim.toHexString(),
-            onTertiaryFixed = cs.onTertiaryFixed.toHexString(),
-            onTertiaryFixedVariant = cs.onTertiaryFixedVariant.toHexString()
-        )
-        return AlbumArtThemeEntity(
-            albumArtUriString = uri,
-            paletteStyle = paletteStyleCacheKey(paletteStyle, colorAccuracyLevel),
-            lightThemeValues = mapScheme(pair.light),
-            darkThemeValues = mapScheme(pair.dark)
-        )
-    }
-
-    private fun mapEntityToColorSchemePair(entity: AlbumArtThemeEntity): ColorSchemePair {
-        fun mapStored(sv: StoredColorSchemeValues) = ColorScheme(
-            primary = sv.primary.toComposeColor(),
-            onPrimary = sv.onPrimary.toComposeColor(),
-            primaryContainer = sv.primaryContainer.toComposeColor(),
-            onPrimaryContainer = sv.onPrimaryContainer.toComposeColor(),
-            inversePrimary = sv.inversePrimary.toComposeColor(),
-            secondary = sv.secondary.toComposeColor(),
-            onSecondary = sv.onSecondary.toComposeColor(),
-            secondaryContainer = sv.secondaryContainer.toComposeColor(),
-            onSecondaryContainer = sv.onSecondaryContainer.toComposeColor(),
-            tertiary = sv.tertiary.toComposeColor(),
-            onTertiary = sv.onTertiary.toComposeColor(),
-            tertiaryContainer = sv.tertiaryContainer.toComposeColor(),
-            onTertiaryContainer = sv.onTertiaryContainer.toComposeColor(),
-            background = sv.background.toComposeColor(),
-            onBackground = sv.onBackground.toComposeColor(),
-            surface = sv.surface.toComposeColor(),
-            onSurface = sv.onSurface.toComposeColor(),
-            surfaceVariant = sv.surfaceVariant.toComposeColor(),
-            onSurfaceVariant = sv.onSurfaceVariant.toComposeColor(),
-            error = sv.error.toComposeColor(),
-            onError = sv.onError.toComposeColor(),
-            outline = sv.outline.toComposeColor(),
-            errorContainer = sv.errorContainer.toComposeColor(),
-            onErrorContainer = sv.onErrorContainer.toComposeColor(),
-            inverseSurface = sv.inverseSurface.toComposeColor(),
-            inverseOnSurface = sv.inverseOnSurface.toComposeColor(),
-            surfaceTint = sv.surfaceTint.toComposeColor(),
-            outlineVariant = sv.outlineVariant.toComposeColor(),
-            scrim = sv.scrim.toComposeColor(),
-            surfaceBright = sv.surfaceBright.toComposeColor(),
-            surfaceDim = sv.surfaceDim.toComposeColor(),
-            surfaceContainer = sv.surfaceContainer.toComposeColor(),
-            surfaceContainerHigh = sv.surfaceContainerHigh.toComposeColor(),
-            surfaceContainerHighest = sv.surfaceContainerHighest.toComposeColor(),
-            surfaceContainerLow = sv.surfaceContainerLow.toComposeColor(),
-            surfaceContainerLowest = sv.surfaceContainerLowest.toComposeColor(),
-            primaryFixed = sv.primaryFixed.toComposeColor(),
-            primaryFixedDim = sv.primaryFixedDim.toComposeColor(),
-            onPrimaryFixed = sv.onPrimaryFixed.toComposeColor(),
-            onPrimaryFixedVariant = sv.onPrimaryFixedVariant.toComposeColor(),
-            secondaryFixed = sv.secondaryFixed.toComposeColor(),
-            secondaryFixedDim = sv.secondaryFixedDim.toComposeColor(),
-            onSecondaryFixed = sv.onSecondaryFixed.toComposeColor(),
-            onSecondaryFixedVariant = sv.onSecondaryFixedVariant.toComposeColor(),
-            tertiaryFixed = sv.tertiaryFixed.toComposeColor(),
-            tertiaryFixedDim = sv.tertiaryFixedDim.toComposeColor(),
-            onTertiaryFixed = sv.onTertiaryFixed.toComposeColor(),
-            onTertiaryFixedVariant = sv.onTertiaryFixedVariant.toComposeColor()
-        )
-        return ColorSchemePair(
-            light = mapStored(entity.lightThemeValues),
-            dark = mapStored(entity.darkThemeValues)
-        )
-    }
-
-    private fun Color.toHexString(): String {
-        return String.format("#%08X", toArgb())
-    }
-
-    private fun buildCacheKey(
-        uri: String,
-        paletteStyle: AlbumArtPaletteStyle,
-        colorAccuracyLevel: Int
+        contrastLevel: Double
     ): String {
-        return "$uri$CACHE_KEY_SEPARATOR${paletteStyleCacheKey(paletteStyle, colorAccuracyLevel)}"
-    }
-
-    private fun paletteStyleCacheKey(
-        paletteStyle: AlbumArtPaletteStyle,
-        colorAccuracyLevel: Int
-    ): String {
-        return buildString {
-            append(paletteStyle.storageKey)
-            append(CACHE_KEY_SEPARATOR)
-            append("accuracy_")
-            append(AlbumArtColorAccuracy.clamp(colorAccuracyLevel))
-            append(CACHE_KEY_SEPARATOR)
-            append(CACHE_ALGORITHM_VERSION)
-        }
-    }
-
-    private suspend fun loadCachedColorScheme(
-        albumArtUri: String,
-        paletteStyle: AlbumArtPaletteStyle,
-        colorAccuracyLevel: Int
-    ): ColorSchemePair? {
-        val cacheKey = buildCacheKey(albumArtUri, paletteStyle, colorAccuracyLevel)
-
-        memoryCache.get(cacheKey)?.let { return it }
-
-        val cachedEntity = withContext(Dispatchers.IO) {
-            albumArtThemeDao.getThemeByUriAndStyle(
-                albumArtUri,
-                paletteStyleCacheKey(paletteStyle, colorAccuracyLevel)
-            )
-        }
-        if (cachedEntity == null) return null
-
-        return mapEntityToColorSchemePair(cachedEntity).also { schemePair ->
-            memoryCache.put(cacheKey, schemePair)
-        }
+        val contrastBucket = quantizeContrastLevel(contrastLevel)
+        return "$uri$CACHE_KEY_SEPARATOR${paletteStyle.storageKey}$CACHE_KEY_SEPARATOR$contrastBucket"
     }
 
     companion object {
-        private const val TAG = "ColorSchemeProcessor"
         private const val CACHE_KEY_SEPARATOR = "|"
-        private const val CACHE_ALGORITHM_VERSION = "algo_v7"
+        internal const val SEED_ALGORITHM_VERSION = 1
     }
 }

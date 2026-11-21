@@ -72,6 +72,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.navigation.NavController
 import com.theveloper.pixelplay.presentation.components.CollapsibleCommonTopBar
+import com.theveloper.pixelplay.presentation.components.LocalInsideFloatingPane
 import com.theveloper.pixelplay.presentation.viewmodel.ArtistSettingsViewModel
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
@@ -81,7 +82,8 @@ import androidx.compose.ui.text.style.TextOverflow
 @Composable
 fun WordDelimiterConfigScreen(
     navController: NavController,
-    viewModel: ArtistSettingsViewModel = hiltViewModel()
+    viewModel: ArtistSettingsViewModel = hiltViewModel(),
+    embeddedInPane: Boolean = false
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
@@ -93,7 +95,12 @@ fun WordDelimiterConfigScreen(
     val coroutineScope = rememberCoroutineScope()
     val lazyListState = rememberLazyListState()
 
-    val statusBarHeight = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+    val insideFloatingPane = LocalInsideFloatingPane.current
+    val statusBarHeight = if (embeddedInPane || insideFloatingPane) {
+        0.dp
+    } else {
+        WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+    }
     val minTopBarHeight = 64.dp + statusBarHeight
     val maxTopBarHeight = 180.dp
 
@@ -151,19 +158,54 @@ fun WordDelimiterConfigScreen(
     }
 
     Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.surface)
-            .nestedScroll(nestedScrollConnection)
+        modifier = if (embeddedInPane) {
+            Modifier.fillMaxSize()
+        } else {
+            Modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.surface)
+                .nestedScroll(nestedScrollConnection)
+        }
     ) {
         val currentTopBarHeightDp = with(density) { topBarHeight.value.toDp() }
 
         LazyColumn(
             state = lazyListState,
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(top = currentTopBarHeightDp + 8.dp, start = 16.dp, end = 16.dp, bottom = 100.dp),
+            contentPadding = PaddingValues(
+                top = if (embeddedInPane) 8.dp else currentTopBarHeightDp + 8.dp,
+                start = 16.dp,
+                end = 16.dp,
+                bottom = 100.dp
+            ),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
+            if (embeddedInPane) {
+                item {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        FilledIconButton(
+                            onClick = { showResetDialog = true },
+                            colors = IconButtonDefaults.filledIconButtonColors(
+                                containerColor = MaterialTheme.colorScheme.errorContainer,
+                                contentColor = MaterialTheme.colorScheme.onErrorContainer
+                            ),
+                            modifier = Modifier
+                                .width(52.dp)
+                                .height(36.dp),
+                            shape = CircleShape
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.RestartAlt,
+                                contentDescription = stringResource(R.string.common_reset_defaults),
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
+                }
+            }
             // Current Word Delimiters
             item {
                 Surface(
@@ -350,38 +392,40 @@ fun WordDelimiterConfigScreen(
             }
         }
 
-        CollapsibleCommonTopBar(
-            title = stringResource(R.string.word_delimiters_screen_title),
-            collapseFraction = collapseFraction,
-            headerHeight = currentTopBarHeightDp,
-            onBackClick = { navController.popBackStack() },
-            actions = {
-                Box(
-                    modifier = Modifier
-                        .height(48.dp)
-                        .padding(end = 16.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    FilledIconButton(
-                        onClick = { showResetDialog = true },
-                        colors = IconButtonDefaults.filledIconButtonColors(
-                            containerColor = MaterialTheme.colorScheme.errorContainer,
-                            contentColor = MaterialTheme.colorScheme.onErrorContainer
-                        ),
+        if (!embeddedInPane) {
+            CollapsibleCommonTopBar(
+                title = stringResource(R.string.word_delimiters_screen_title),
+                collapseFraction = collapseFraction,
+                headerHeight = currentTopBarHeightDp,
+                onBackClick = { navController.popBackStack() },
+                actions = {
+                    Box(
                         modifier = Modifier
-                            .width(52.dp)
-                            .height(36.dp),
-                        shape = CircleShape
+                            .height(48.dp)
+                            .padding(end = 16.dp),
+                        contentAlignment = Alignment.Center
                     ) {
-                        Icon(
-                            imageVector = Icons.Rounded.RestartAlt,
-                            contentDescription = stringResource(R.string.common_reset_defaults),
-                            modifier = Modifier.size(20.dp)
-                        )
+                        FilledIconButton(
+                            onClick = { showResetDialog = true },
+                            colors = IconButtonDefaults.filledIconButtonColors(
+                                containerColor = MaterialTheme.colorScheme.errorContainer,
+                                contentColor = MaterialTheme.colorScheme.onErrorContainer
+                            ),
+                            modifier = Modifier
+                                .width(52.dp)
+                                .height(36.dp),
+                            shape = CircleShape
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.RestartAlt,
+                                contentDescription = stringResource(R.string.common_reset_defaults),
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
                     }
                 }
-            }
-        )
+            )
+        }
 
         if (showResetDialog) {
             AlertDialog(

@@ -244,14 +244,6 @@
     <string name="settings_palette_style_expressive_desc">Смелые оттенки и высокий контраст.</string>
     <string name="settings_palette_style_fruit_salad">Fruit Salad</string>
     <string name="settings_palette_style_fruit_salad_desc">Игривые смещённые акценты.</string>
-    <string name="settings_palette_style_color_accuracy_title">Точность цветов</string>
-    <string name="settings_palette_style_color_accuracy_subtitle">0 сохраняет текущую настройку. Более высокие значения делают палитру ближе к доминирующему цвету обложки.</string>
-    <string name="settings_palette_style_accuracy_current">Текущая</string>
-    <string name="settings_palette_style_accuracy_more_accurate">Более точная</string>
-    <string name="settings_palette_style_accuracy_summary_current">0 • Текущая</string>
-    <string name="settings_palette_style_accuracy_summary_subtle">%1$d • Незначительная</string>
-    <string name="settings_palette_style_accuracy_summary_balanced">%1$d • Сбалансированная</string>
-    <string name="settings_palette_style_accuracy_summary_precise">%1$d • Точная</string>
 
     <!-- NavBarCornerRadiusScreen -->
     <string name="navbar_adjust_title">Настройка скругления</string>

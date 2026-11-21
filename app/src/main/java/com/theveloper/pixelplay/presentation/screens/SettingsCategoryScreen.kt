@@ -170,13 +170,17 @@ import com.theveloper.pixelplay.data.model.LyricsSourcePreference
 import com.theveloper.pixelplay.presentation.components.CollapsibleCommonTopBar
 import com.theveloper.pixelplay.presentation.components.ExpressiveTopBarContent
 import com.theveloper.pixelplay.presentation.components.FileExplorerDialog
+import com.theveloper.pixelplay.presentation.components.LocalInsideFloatingPane
 import com.theveloper.pixelplay.presentation.components.MiniPlayerHeight
 import com.theveloper.pixelplay.presentation.model.SettingsCategory
 import com.theveloper.pixelplay.presentation.navigation.Screen
 import com.theveloper.pixelplay.presentation.viewmodel.LyricsRefreshProgress
 import com.theveloper.pixelplay.presentation.viewmodel.PlayerViewModel
 import com.theveloper.pixelplay.presentation.viewmodel.SettingsViewModel
+import com.theveloper.pixelplay.presentation.screens.settings.SettingsDetailDestination
 import com.theveloper.pixelplay.ui.theme.GoogleSansRounded
+import com.theveloper.pixelplay.ui.theme.LocalPixelPlayWindowInfo
+import com.theveloper.pixelplay.ui.theme.LocalSpacing
 
 @androidx.annotation.OptIn(UnstableApi::class)
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
@@ -187,7 +191,9 @@ fun SettingsCategoryScreen(
     playerViewModel: PlayerViewModel,
     settingsViewModel: SettingsViewModel = hiltViewModel(),
     statsViewModel: com.theveloper.pixelplay.presentation.viewmodel.StatsViewModel = hiltViewModel(),
-    onBackClick: () -> Unit
+    onBackClick: () -> Unit,
+    embeddedInPane: Boolean = false,
+    onOpenSubDestination: ((SettingsDetailDestination) -> Unit)? = null
 ) {
     val category = SettingsCategory.fromId(categoryId) ?: return
     val context = LocalContext.current
@@ -327,7 +333,12 @@ fun SettingsCategoryScreen(
     val categoryTitle = stringResource(category.titleRes)
     val isLongTitle = categoryTitle.length > 13
     
-    val statusBarHeight = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+    val insideFloatingPane = LocalInsideFloatingPane.current
+    val statusBarHeight = if (embeddedInPane || insideFloatingPane) {
+        0.dp
+    } else {
+        WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+    }
     val minTopBarHeight = 64.dp + statusBarHeight
     val maxTopBarHeight = if (isLongTitle) 200.dp else 180.dp //for 2 lines use 220 and make text use \n
 
@@ -393,20 +404,24 @@ fun SettingsCategoryScreen(
         }
     }
 
+    val spacing = LocalSpacing.current
     Box(
-        modifier =
+        modifier = if (embeddedInPane) {
+            Modifier.fillMaxSize()
+        } else {
             Modifier.nestedScroll(nestedScrollConnection).fillMaxSize()
+        }
     ) {
         val currentTopBarHeightDp = with(density) { topBarHeight.value.toDp() }
-        
+
         LazyColumn(
             state = lazyListState,
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(
-                top = currentTopBarHeightDp + 8.dp,
-                start = 16.dp,
-                end = 16.dp,
-                bottom = MiniPlayerHeight + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 16.dp
+                top = if (embeddedInPane) spacing.sm else currentTopBarHeightDp + spacing.sm,
+                start = spacing.screenHorizontal,
+                end = spacing.screenHorizontal,
+                bottom = MiniPlayerHeight + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + spacing.lg
             )
         ) {
             item {
@@ -432,7 +447,10 @@ fun SettingsCategoryScreen(
                                     subtitle = stringResource(R.string.settings_artists_subtitle),
                                     leadingIcon = { Icon(Icons.Outlined.Person, null, tint = MaterialTheme.colorScheme.secondary) },
                                     trailingIcon = { Icon(Icons.Rounded.ChevronRight, stringResource(R.string.settings_cd_open), tint = MaterialTheme.colorScheme.onSurfaceVariant) },
-                                    onClick = { navController.navigateSafely(Screen.ArtistSettings.route) }
+                                    onClick = {
+                                        onOpenSubDestination?.invoke(SettingsDetailDestination.ArtistSettings)
+                                            ?: navController.navigateSafely(Screen.ArtistSettings.route)
+                                    }
                                 )
                             }
 
@@ -607,10 +625,16 @@ fun SettingsCategoryScreen(
                                 )
                                 SettingsItem(
                                     title = stringResource(R.string.settings_album_art_palette_title),
-                                    subtitle = stringResource(R.string.settings_album_art_palette_subtitle, uiState.albumArtPaletteStyle.label),
+                                    subtitle = stringResource(
+                                        R.string.settings_album_art_palette_subtitle,
+                                        albumArtPaletteStyleLabel(uiState.albumArtPaletteStyle)
+                                    ),
                                     leadingIcon = { Icon(Icons.Outlined.Style, null, tint = MaterialTheme.colorScheme.secondary) },
                                     trailingIcon = { Icon(Icons.Rounded.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
-                                    onClick = { navController.navigateSafely(Screen.PaletteStyle.route) }
+                                    onClick = {
+                                        onOpenSubDestination?.invoke(SettingsDetailDestination.PaletteStyle)
+                                            ?: navController.navigateSafely(Screen.PaletteStyle.route)
+                                    }
                                 )
                                 ThemeSelectorItem(
                                     label = stringResource(R.string.settings_carousel_style_title),
@@ -646,6 +670,14 @@ fun SettingsCategoryScreen(
                             }
 
                             SettingsSubsection(title = stringResource(R.string.settings_navigation_bar_section)) {
+                                if (LocalPixelPlayWindowInfo.current.useNavigationRail) {
+                                    Text(
+                                        text = stringResource(R.string.settings_navbar_tablet_note),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
+                                    )
+                                }
                                 ThemeSelectorItem(
                                     label = stringResource(R.string.settings_navbar_style_title),
                                     description = stringResource(R.string.settings_navbar_style_subtitle),
@@ -675,7 +707,10 @@ fun SettingsCategoryScreen(
                                     subtitle = stringResource(R.string.settings_navbar_corner_subtitle),
                                     leadingIcon = { Icon(painterResource(R.drawable.rounded_rounded_corner_24), null, tint = MaterialTheme.colorScheme.secondary) },
                                     trailingIcon = { Icon(Icons.Rounded.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
-                                    onClick = { navController.navigateSafely("nav_bar_corner_radius") }
+                                    onClick = {
+                                        onOpenSubDestination?.invoke(SettingsDetailDestination.NavBarCornerRadius)
+                                            ?: navController.navigateSafely("nav_bar_corner_radius")
+                                    }
                                 )
                             }
 
@@ -921,6 +956,8 @@ fun SettingsCategoryScreen(
                             val activeOfflineModelName by settingsViewModel.activeOfflineModelName.collectAsStateWithLifecycle()
                             val offlineHardwarePassed by settingsViewModel.offlineHardwarePassed.collectAsStateWithLifecycle()
                             val offlineLastBenchmarkSpeed by settingsViewModel.offlineLastBenchmarkSpeed.collectAsStateWithLifecycle()
+                            val aiCoreSupported by settingsViewModel.aiCoreSupported.collectAsStateWithLifecycle()
+                            val aiCoreBaseModelName by settingsViewModel.aiCoreBaseModelName.collectAsStateWithLifecycle()
 
                             // AI Provider Selection
                             SettingsSubsection(title = stringResource(R.string.settings_ai_provider_section)) {
@@ -953,10 +990,12 @@ fun SettingsCategoryScreen(
                                 )
                             }
 
-                            // Offline AI Model Hub Entry Section
-                            SettingsSubsection(title = "Offline AI (On-Device GGUF)") {
+                            // On-Device AI (Android AICore NPU & Offline GGUF) Hub Entry Section
+                            SettingsSubsection(title = "On-Device AI (Android AICore NPU & GGUF)") {
                                 Surface(
-                                    color = if (provider == com.theveloper.pixelplay.data.ai.provider.AiProvider.OFFLINE_GGUF)
+                                    color = if (provider == com.theveloper.pixelplay.data.ai.provider.AiProvider.ANDROID_AICORE ||
+                                        provider == com.theveloper.pixelplay.data.ai.provider.AiProvider.OFFLINE_GGUF
+                                    )
                                         MaterialTheme.colorScheme.secondaryContainer
                                     else MaterialTheme.colorScheme.surfaceContainer,
                                     shape = RoundedCornerShape(14.dp),
@@ -964,7 +1003,8 @@ fun SettingsCategoryScreen(
                                         .fillMaxWidth()
                                         .clip(RoundedCornerShape(14.dp))
                                         .clickable {
-                                            navController.navigateSafely(Screen.OfflineModelHub.route)
+                                            onOpenSubDestination?.invoke(SettingsDetailDestination.OfflineModelHub)
+                                                ?: navController.navigateSafely(Screen.OfflineModelHub.route)
                                         }
                                 ) {
                                     Row(
@@ -979,17 +1019,27 @@ fun SettingsCategoryScreen(
                                         )
                                         Column(modifier = Modifier.weight(1f)) {
                                             Text(
-                                                text = "Offline AI Model Hub",
+                                                text = "Kiểm tra NPU (AICore) & Mô hình Offline",
                                                 style = MaterialTheme.typography.titleSmall,
                                                 fontWeight = FontWeight.SemiBold
                                             )
-                                            val statusSubtitle = if (activeOfflineModelName.isNotBlank() && offlineHardwarePassed) {
-                                                val speedTag = if (offlineLastBenchmarkSpeed > 0f) {
-                                                    String.format(Locale.US, " (%.1f tok/s)", offlineLastBenchmarkSpeed)
-                                                } else ""
-                                                "Đang kích hoạt: $activeOfflineModelName$speedTag"
-                                            } else {
-                                                "Tải model đề xuất hoặc chọn file .gguf từ máy & kiểm tra phần cứng"
+                                            val statusSubtitle = when {
+                                                provider == com.theveloper.pixelplay.data.ai.provider.AiProvider.ANDROID_AICORE && aiCoreBaseModelName.isNotBlank() ->
+                                                    "Đang chạy Android AICore (NPU): $aiCoreBaseModelName"
+                                                provider == com.theveloper.pixelplay.data.ai.provider.AiProvider.ANDROID_AICORE && aiCoreSupported ->
+                                                    "Đang dùng Android AICore (NPU) • Chạm để xem model & nạp NPU"
+                                                provider == com.theveloper.pixelplay.data.ai.provider.AiProvider.ANDROID_AICORE ->
+                                                    "Chạm để kiểm tra thiết bị hỗ trợ AICore & thông tin model"
+                                                activeOfflineModelName.isNotBlank() && offlineHardwarePassed -> {
+                                                    val speedTag = if (offlineLastBenchmarkSpeed > 0f) {
+                                                        String.format(Locale.US, " (%.1f tok/s)", offlineLastBenchmarkSpeed)
+                                                    } else ""
+                                                    "Đang kích hoạt GGUF: $activeOfflineModelName$speedTag"
+                                                }
+                                                aiCoreSupported && aiCoreBaseModelName.isNotBlank() ->
+                                                    "Máy hỗ trợ AICore ($aiCoreBaseModelName) • Chạm để kích hoạt"
+                                                else ->
+                                                    "Kiểm tra hỗ trợ Android AICore (Gemini Nano NPU) hoặc quản lý file .gguf"
                                             }
                                             Text(
                                                 text = statusSubtitle,
@@ -1010,6 +1060,7 @@ fun SettingsCategoryScreen(
                             if (provider.requiresApiKey) {
                                 SettingsSubsection(title = stringResource(R.string.settings_credentials_section)) {
                                     val sourceLabel = when(provider) {
+                                        com.theveloper.pixelplay.data.ai.provider.AiProvider.ANDROID_AICORE -> "Android AICore (NPU)"
                                         com.theveloper.pixelplay.data.ai.provider.AiProvider.GEMINI -> stringResource(R.string.settings_ai_source_gemini)
                                         com.theveloper.pixelplay.data.ai.provider.AiProvider.DEEPSEEK -> stringResource(R.string.settings_ai_source_deepseek)
                                         com.theveloper.pixelplay.data.ai.provider.AiProvider.GROQ -> stringResource(R.string.settings_ai_source_groq)
@@ -1400,7 +1451,10 @@ fun SettingsCategoryScreen(
                                     subtitle = stringResource(R.string.settings_experimental_subtitle),
                                     leadingIcon = { Icon(Icons.Rounded.Science, null, tint = MaterialTheme.colorScheme.secondary) },
                                     trailingIcon = { Icon(Icons.Rounded.ChevronRight, stringResource(R.string.settings_cd_open), tint = MaterialTheme.colorScheme.onSurfaceVariant) },
-                                    onClick = { navController.navigateSafely(Screen.Experimental.route) }
+                                    onClick = {
+                                        onOpenSubDestination?.invoke(SettingsDetailDestination.Experimental)
+                                            ?: navController.navigateSafely(Screen.Experimental.route)
+                                    }
                                 )
                                 SettingsItem(
                                     title = stringResource(R.string.settings_test_setup_title),
@@ -1476,32 +1530,34 @@ fun SettingsCategoryScreen(
             }
         }
 
-        CollapsibleCommonTopBar(
-            collapseFraction = collapseFraction,
-            headerHeight = currentTopBarHeightDp,
-            onBackClick = onBackClick,
-            title = categoryTitle,
-            maxLines = titleMaxLines
-        )
+        if (!embeddedInPane) {
+            CollapsibleCommonTopBar(
+                collapseFraction = collapseFraction,
+                headerHeight = currentTopBarHeightDp,
+                onBackClick = onBackClick,
+                title = categoryTitle,
+                maxLines = titleMaxLines
+            )
 
-        // Block interaction during transition
-        var isTransitioning by remember { mutableStateOf(true) }
-        LaunchedEffect(Unit) {
-            kotlinx.coroutines.delay(com.theveloper.pixelplay.presentation.navigation.TRANSITION_DURATION.toLong())
-            isTransitioning = false
-        }
-        
-        if (isTransitioning) {
-            Box(modifier = Modifier
-                .fillMaxSize()
-                .pointerInput(Unit) {
-                   awaitPointerEventScope {
-                        while (true) {
-                            awaitPointerEvent()
+            // Block interaction during transition
+            var isTransitioning by remember { mutableStateOf(true) }
+            LaunchedEffect(Unit) {
+                kotlinx.coroutines.delay(com.theveloper.pixelplay.presentation.navigation.TRANSITION_DURATION.toLong())
+                isTransitioning = false
+            }
+
+            if (isTransitioning) {
+                Box(modifier = Modifier
+                    .fillMaxSize()
+                    .pointerInput(Unit) {
+                       awaitPointerEventScope {
+                            while (true) {
+                                awaitPointerEvent()
+                            }
                         }
                     }
-                }
-            )
+                )
+            }
         }
     }
 
@@ -1982,8 +2038,7 @@ private fun BackupSectionSelectionDialog(
                                 title = {
                                     Text(
                                         text = title,
-                                        style = MaterialTheme.typography.titleMedium.copy(
-                                            fontSize = 24.sp,
+                                        style = MaterialTheme.typography.headlineSmallEmphasized.copy(
                                             textGeometricTransform = TextGeometricTransform(scaleX = 1.2f),
                                         ),
                                         fontFamily = GoogleSansRounded,
@@ -2528,8 +2583,7 @@ private fun ImportFileSelectionDialog(
                                 title = {
                                     Text(
                                         text = stringResource(R.string.settings_import_backup_title),
-                                        style = MaterialTheme.typography.titleMedium.copy(
-                                            fontSize = 24.sp,
+                                        style = MaterialTheme.typography.headlineSmallEmphasized.copy(
                                             textGeometricTransform = TextGeometricTransform(scaleX = 1.2f),
                                         ),
                                         fontFamily = GoogleSansRounded,
@@ -2958,12 +3012,7 @@ private fun PaletteRegenerateSongSheetContent(
 
 @Composable
 private fun SettingsSubsectionHeader(title: String) {
-    Text(
-        text = title,
-        style = MaterialTheme.typography.labelMedium,
-        color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(start = 12.dp, top = 8.dp, bottom = 4.dp)
-    )
+    SettingsSectionHeader(title = title)
 }
 
 @Composable
@@ -2972,17 +3021,12 @@ private fun SettingsSubsection(
     addBottomSpace: Boolean = true,
     content: @Composable () -> Unit
 ) {
+    val spacing = LocalSpacing.current
     SettingsSubsectionHeader(title)
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(24.dp))
-            .background(Color.Transparent),
-        verticalArrangement = Arrangement.spacedBy(2.dp)
-    ) {
+    SettingsGroupCard {
         content()
     }
     if (addBottomSpace) {
-        Spacer(modifier = Modifier.height(10.dp))
+        Spacer(modifier = Modifier.height(spacing.xs))
     }
 }

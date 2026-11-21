@@ -72,6 +72,7 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.media3.common.util.UnstableApi
 import androidx.navigation.NavController
 import com.theveloper.pixelplay.presentation.components.CollapsibleCommonTopBar
+import com.theveloper.pixelplay.presentation.components.LocalInsideFloatingPane
 import com.theveloper.pixelplay.presentation.components.MiniPlayerHeight
 import com.theveloper.pixelplay.presentation.viewmodel.PlayerViewModel
 import com.theveloper.pixelplay.presentation.viewmodel.SettingsViewModel
@@ -87,7 +88,8 @@ fun ExperimentalSettingsScreen(
     navController: NavController,
     playerViewModel: PlayerViewModel,
     onNavigationIconClick: () -> Unit,
-    settingsViewModel: SettingsViewModel = hiltViewModel()
+    settingsViewModel: SettingsViewModel = hiltViewModel(),
+    embeddedInPane: Boolean = false
 ) {
     val uiState by settingsViewModel.uiState.collectAsStateWithLifecycle()
 
@@ -109,7 +111,12 @@ fun ExperimentalSettingsScreen(
     val coroutineScope = rememberCoroutineScope()
     val lazyListState = rememberLazyListState()
 
-    val statusBarHeight = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+    val insideFloatingPane = LocalInsideFloatingPane.current
+    val statusBarHeight = if (embeddedInPane || insideFloatingPane) {
+        0.dp
+    } else {
+        WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+    }
     val minTopBarHeight = 64.dp + statusBarHeight
     val maxTopBarHeight = 180.dp
 
@@ -165,19 +172,23 @@ fun ExperimentalSettingsScreen(
     }
 
     Box(
-        modifier = Modifier
-            .nestedScroll(nestedScrollConnection)
-            .fillMaxSize()
-            .graphicsLayer {
-                alpha = contentAlpha
-                translationY = contentOffset.toPx()
-            }
+        modifier = if (embeddedInPane) {
+            Modifier.fillMaxSize()
+        } else {
+            Modifier
+                .nestedScroll(nestedScrollConnection)
+                .fillMaxSize()
+                .graphicsLayer {
+                    alpha = contentAlpha
+                    translationY = contentOffset.toPx()
+                }
+        }
     ) {
         val currentTopBarHeightDp = with(density) { topBarHeight.value.toDp() }
 
         LazyColumn(
             state = lazyListState,
-            contentPadding = PaddingValues(top = currentTopBarHeightDp + 8.dp),
+            contentPadding = PaddingValues(top = if (embeddedInPane) 8.dp else currentTopBarHeightDp + 8.dp),
             modifier = Modifier.fillMaxSize()
         ) {
             item(key = "player_ui_tweaks_section") {
@@ -796,12 +807,14 @@ fun ExperimentalSettingsScreen(
             }
         }
 
-        CollapsibleCommonTopBar(
-            title = stringResource(R.string.settings_exp_screen_title),
-            collapseFraction = collapseFraction,
-            headerHeight = currentTopBarHeightDp,
-            onBackClick = onNavigationIconClick
-        )
+        if (!embeddedInPane) {
+            CollapsibleCommonTopBar(
+                title = stringResource(R.string.settings_exp_screen_title),
+                collapseFraction = collapseFraction,
+                headerHeight = currentTopBarHeightDp,
+                onBackClick = onNavigationIconClick
+            )
+        }
     }
 }
 

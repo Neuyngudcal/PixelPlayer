@@ -1,11 +1,7 @@
 package com.theveloper.pixelplay.presentation.components
 
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.core.spring
-import androidx.compose.animation.core.tween
-import androidx.compose.foundation.background
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -20,12 +16,13 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -188,6 +185,7 @@ fun ToggleSegmentButton(
 }
 
 
+@OptIn(androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun ToggleSegmentButtonContainer(
     modifier: Modifier,
@@ -199,29 +197,52 @@ private fun ToggleSegmentButtonContainer(
     onClick: () -> Unit,
     content: @Composable () -> Unit
 ) {
-    val targetBgColor = if (active) activeColor else inactiveColor
-    val bgColor by animateColorAsState(
-        targetValue = if (enabled) targetBgColor else targetBgColor.copy(alpha = 0.5f),
-        animationSpec = tween(durationMillis = 250),
-        label = ""
+    val motionScheme = androidx.compose.material3.MaterialTheme.motionScheme
+    val activeFractionState = animateFloatAsState(
+        targetValue = if (active) 1f else 0f,
+        animationSpec = motionScheme.defaultEffectsSpec(),
+        label = "segmentActiveFraction"
     )
-    val cornerRadius by animateDpAsState(
-        targetValue = if (active) activeCornerRadius else 8.dp,
-        animationSpec = spring(stiffness = Spring.StiffnessLow),
-        label = ""
+    val cornerRadiusState = animateDpAsState(
+        targetValue = if (active) activeCornerRadius else 14.dp,
+        animationSpec = motionScheme.fastSpatialSpec(),
+        label = "segmentCornerRadius"
     )
+    val contentScaleState = animateFloatAsState(
+        targetValue = if (active) 1f else 0.93f,
+        animationSpec = motionScheme.fastSpatialSpec(),
+        label = "segmentContentScale"
+    )
+    val latestActiveColor = rememberUpdatedState(activeColor)
+    val latestInactiveColor = rememberUpdatedState(inactiveColor)
+    val latestEnabled = rememberUpdatedState(enabled)
 
     Box(
         modifier = modifier
             .fillMaxSize()
-            .clip(RoundedCornerShape(cornerRadius))
-            .background(bgColor)
+            .graphicsLayer {
+                shape = RoundedCornerShape(cornerRadiusState.value.toPx())
+                clip = true
+            }
+            .drawBehind {
+                val baseColor = lerp(
+                    latestInactiveColor.value,
+                    latestActiveColor.value,
+                    activeFractionState.value
+                )
+                drawRect(color = if (latestEnabled.value) baseColor else baseColor.copy(alpha = 0.5f))
+            }
             .clickable(enabled = enabled, onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
         Box(
             modifier = Modifier
-                .graphicsLayer(alpha = if (enabled) 1f else 0.38f)
+                .graphicsLayer {
+                    alpha = if (latestEnabled.value) 1f else 0.38f
+                    val scale = contentScaleState.value
+                    scaleX = scale
+                    scaleY = scale
+                }
                 .padding(horizontal = 10.dp)
         ) {
             content()

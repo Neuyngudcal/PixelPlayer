@@ -42,6 +42,7 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
 import androidx.media3.common.util.UnstableApi
 import com.theveloper.pixelplay.data.model.Genre
+import com.theveloper.pixelplay.presentation.components.LocalInsideFloatingPane
 import com.theveloper.pixelplay.presentation.components.MiniPlayerHeight
 import com.theveloper.pixelplay.presentation.components.SmartImage
 import com.theveloper.pixelplay.presentation.components.getNavigationBarHeight
@@ -49,6 +50,8 @@ import com.theveloper.pixelplay.presentation.components.resolveNavBarOccupiedHei
 import com.theveloper.pixelplay.presentation.utils.GenreIconProvider
 import com.theveloper.pixelplay.presentation.viewmodel.PlayerViewModel
 import com.theveloper.pixelplay.ui.theme.LocalPixelPlayDarkTheme
+import com.theveloper.pixelplay.ui.theme.LocalPixelPlayWindowInfo
+import com.theveloper.pixelplay.ui.theme.LocalSpacing
 import androidx.compose.ui.res.stringResource
 import com.theveloper.pixelplay.R
 import racra.compose.smooth_corner_rect_library.AbsoluteSmoothCornerShape
@@ -95,11 +98,20 @@ fun GenreCategoriesGrid(
     val isGridView by playerViewModel.isGenreGridView.collectAsStateWithLifecycle()
     val navBarCompactMode by playerViewModel.navBarCompactMode.collectAsStateWithLifecycle()
 
+    val windowInfo = LocalPixelPlayWindowInfo.current
+    val spacing = LocalSpacing.current
+    val insideFloatingPane = LocalInsideFloatingPane.current
+    val bottomClearance = if (windowInfo.useNavigationRail) {
+        (if (insideFloatingPane) 0.dp else systemNavBarHeight) + MiniPlayerHeight + 28.dp
+    } else {
+        28.dp + resolveNavBarOccupiedHeight(systemNavBarHeight, navBarCompactMode) + MiniPlayerHeight
+    }
+
     LazyVerticalGrid(
-        columns = if (isGridView) GridCells.Fixed(2) else GridCells.Fixed(1),
+        columns = if (isGridView) GridCells.Adaptive(minSize = 180.dp) else GridCells.Fixed(1),
         modifier = modifier
             .fillMaxSize()
-            .padding(horizontal = 18.dp)
+            .padding(horizontal = spacing.screenHorizontal)
             .clip(AbsoluteSmoothCornerShape(
                 cornerRadiusTR = 24.dp,
                 smoothnessAsPercentTR = 70,
@@ -111,11 +123,11 @@ fun GenreCategoriesGrid(
                 smoothnessAsPercentBL = 70
             )),
         contentPadding = PaddingValues(
-            top = 8.dp,
-            bottom = 28.dp + resolveNavBarOccupiedHeight(systemNavBarHeight, navBarCompactMode) + MiniPlayerHeight
+            top = spacing.sm,
+            bottom = bottomClearance
         ),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp)
+        verticalArrangement = Arrangement.spacedBy(spacing.md),
+        horizontalArrangement = Arrangement.spacedBy(spacing.md)
     ) {
         item(span = { GridItemSpan(maxLineSpan) }) {
             androidx.compose.foundation.layout.Row(

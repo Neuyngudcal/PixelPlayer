@@ -42,6 +42,7 @@ import com.theveloper.pixelplay.presentation.viewmodel.PlaylistViewModel
 import com.theveloper.pixelplay.presentation.viewmodel.StablePlayerState
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.coroutines.flow.map
+import kotlin.math.abs
 import kotlin.math.roundToInt
 
 internal data class SaveQueueOverlayData(
@@ -90,7 +91,9 @@ internal fun UnifiedPlayerQueueLayer(
     onQueueDrag: (Float) -> Unit,
     onQueueRelease: (Float, Float) -> Unit,
     queuePredictiveBackProgress: Animatable<Float, AnimationVector1D>,
-    queuePredictiveBackSwipeEdge: State<Int?>
+    queuePredictiveBackSwipeEdge: State<Int?>,
+    isContainedInCard: Boolean = false,
+    minMeasuredQueueHeightPx: Float = 0f
 ) {
     if (!shouldRenderLayer) return
 
@@ -123,15 +126,19 @@ internal fun UnifiedPlayerQueueLayer(
                     modifier = Modifier
                         .fillMaxSize()
                         .offset {
-                            val offsetVal = queueSheetOffset.value.roundToInt()
-                            IntOffset(0, if (offsetVal < 0) 0 else offsetVal)
+                            val offsetVal = if (!showQueueSheet && !isQueueCollapsing && queueHiddenOffsetPx > 0f) {
+                                queueHiddenOffsetPx.roundToInt()
+                            } else {
+                                queueSheetOffset.value.roundToInt().coerceAtLeast(0)
+                            }
+                            IntOffset(0, offsetVal)
                         }
                         .graphicsLayer {
                             alpha = if (showQueueSheet || isQueueCollapsing) 1f else 0f
                         }
                         .onGloballyPositioned { coordinates ->
                             val measuredHeight = coordinates.size.height.toFloat()
-                            if (queueSheetHeightPx != measuredHeight) {
+                            if (measuredHeight >= minMeasuredQueueHeightPx && abs(queueSheetHeightPx - measuredHeight) > 1f) {
                                 onQueueSheetHeightPxChange(measuredHeight)
                             }
                         },
@@ -167,7 +174,8 @@ internal fun UnifiedPlayerQueueLayer(
                     onQueueRelease = onQueueRelease,
                     predictiveBackProgress = queuePredictiveBackProgress,
                     predictiveBackSwipeEdge = queuePredictiveBackSwipeEdge,
-                    queueSheetOffset = queueSheetOffset
+                    queueSheetOffset = queueSheetOffset,
+                    isContainedInCard = isContainedInCard
                 )
             }
         }
@@ -304,7 +312,10 @@ internal fun UnifiedPlayerQueueAndSongInfoHost(
     onNavigateToArtist: (Song) -> Unit,
     onNavigateToGenre: (Song) -> Unit,
     queuePredictiveBackProgress: Animatable<Float, AnimationVector1D>,
-    queuePredictiveBackSwipeEdge: State<Int?>
+    queuePredictiveBackSwipeEdge: State<Int?>,
+    shouldRenderQueueLayer: Boolean = true,
+    isContainedInCard: Boolean = false,
+    minMeasuredQueueHeightPx: Float = 0f
 ) {
     if (!shouldRenderHost) return
 
@@ -399,7 +410,7 @@ internal fun UnifiedPlayerQueueAndSongInfoHost(
             }
 
             UnifiedPlayerQueueLayer(
-                shouldRenderLayer = true,
+                shouldRenderLayer = shouldRenderQueueLayer,
                 keepQueueSheetWarm = keepQueueSheetWarm,
                 albumColorScheme = albumColorScheme,
                 queueScrimAlpha = queueScrimAlpha,
@@ -437,7 +448,9 @@ internal fun UnifiedPlayerQueueAndSongInfoHost(
                 onQueueDrag = onQueueDrag,
                 onQueueRelease = onQueueRelease,
                 queuePredictiveBackProgress = queuePredictiveBackProgress,
-                queuePredictiveBackSwipeEdge = queuePredictiveBackSwipeEdge
+                queuePredictiveBackSwipeEdge = queuePredictiveBackSwipeEdge,
+                isContainedInCard = isContainedInCard,
+                minMeasuredQueueHeightPx = minMeasuredQueueHeightPx
             )
 
             UnifiedPlayerSongInfoLayer(
@@ -473,7 +486,7 @@ internal fun UnifiedPlayerSaveQueueLayer(
     }
 }
 
-@OptIn(UnstableApi::class)
+@OptIn(UnstableApi::class, androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 internal fun UnifiedPlayerCastLayer(
     showCastSheet: Boolean,
@@ -481,7 +494,8 @@ internal fun UnifiedPlayerCastLayer(
     albumColorScheme: ColorScheme,
     playerViewModel: PlayerViewModel,
     onDismiss: () -> Unit,
-    onExpansionChanged: (Float) -> Unit
+    onExpansionChanged: (Float) -> Unit,
+    isContainedInCard: Boolean = false
 ) {
     if (!showCastSheet || internalIsKeyboardVisible) return
 
@@ -490,13 +504,15 @@ internal fun UnifiedPlayerCastLayer(
     ) {
         MaterialTheme(
             colorScheme = LocalMaterialTheme.current,
+            motionScheme = androidx.compose.material3.MotionScheme.expressive(),
             typography = MaterialTheme.typography,
             shapes = MaterialTheme.shapes
         ) {
             CastBottomSheet(
                 playerViewModel = playerViewModel,
                 onDismiss = onDismiss,
-                onExpansionChanged = onExpansionChanged
+                onExpansionChanged = onExpansionChanged,
+                isContainedInCard = isContainedInCard
             )
         }
     }

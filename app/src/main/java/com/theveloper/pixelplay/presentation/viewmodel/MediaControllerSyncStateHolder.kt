@@ -398,6 +398,7 @@ class MediaControllerSyncStateHolder @Inject constructor(
 
     private fun syncDisplayedMediaItemIfChanged(player: Player) {
         if (isRemoteSessionControllingPlayback()) return
+        if (transitionSchedulerJob?.isActive == true) return
 
         val mediaItem = player.currentMediaItem ?: return
         val currentSongId = playbackStateHolder.stablePlayerState.value.currentSong?.id
@@ -440,12 +441,7 @@ class MediaControllerSyncStateHolder @Inject constructor(
         }
         syncPlaybackPositionFromPlayer(mediaItem.mediaId, currentPosition)
 
-        song?.let { currentSongValue ->
-            cb.scope.launch {
-                val uri = currentSongValue.albumArtUriString?.toUri()
-                val currentUri = playbackStateHolder.stablePlayerState.value.currentSong?.albumArtUriString
-                themeStateHolder.extractAndGenerateColorScheme(uri, currentUri)
-            }
+        song?.let {
             cb.loadLyricsForCurrentSong()
         }
     }
@@ -520,11 +516,6 @@ class MediaControllerSyncStateHolder @Inject constructor(
                     )
                 }
                 syncPlaybackPositionFromPlayer(mediaItem.mediaId, initialPosition)
-                cb.scope.launch {
-                    val uri = song.albumArtUriString?.toUri()
-                    val currentUri = playbackStateHolder.stablePlayerState.value.currentSong?.albumArtUriString
-                    themeStateHolder.extractAndGenerateColorScheme(uri, currentUri)
-                }
                 cb.loadLyricsForCurrentSong()
                 if (playerCtrl.isPlaying) {
                     cb.showSheet()
@@ -728,12 +719,10 @@ class MediaControllerSyncStateHolder @Inject constructor(
                             playerCtrl.currentPosition.coerceAtLeast(0L)
                         )
 
-                        song?.let { currentSongValue ->
-                            launch {
-                                val uri = currentSongValue.albumArtUriString?.toUri()
-                                val currentUri = playbackStateHolder.stablePlayerState.value.currentSong?.albumArtUriString
-                                themeStateHolder.extractAndGenerateColorScheme(uri, currentUri)
-                            }
+                        song?.let {
+                            // Defer lyrics loading slightly so rapid skip bursts cancel obsolete
+                            // DB/LRC parsing and Frame 1-10 of carousel/theme motion stay uncontested.
+                            delay(180L)
                             cb.loadLyricsForCurrentSong()
                         }
                     } ?: run {

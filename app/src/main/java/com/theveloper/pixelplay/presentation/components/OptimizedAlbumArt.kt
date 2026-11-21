@@ -25,8 +25,10 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import coil.annotation.ExperimentalCoilApi
+import coil.compose.AsyncImage
 import coil.compose.SubcomposeAsyncImage
 import coil.compose.SubcomposeAsyncImageContent
+import coil.imageLoader
 import coil.memory.MemoryCache
 import coil.request.CachePolicy
 import coil.request.ImageRequest
@@ -35,8 +37,16 @@ import coil.size.Size
 import com.theveloper.pixelplay.R
 import com.theveloper.pixelplay.utils.LocalArtworkUri
 
-internal const val MaxSafeAlbumArtDimensionPx = 2048
+internal const val MaxSafeAlbumArtDimensionPx = 1280
 internal val SafeOriginalAlbumArtSize = Size(MaxSafeAlbumArtDimensionPx, MaxSafeAlbumArtDimensionPx)
+
+private val FallbackPlaceholderTargetSizes = listOf(
+    Size(512, 512),
+    Size(300, 300),
+    Size(256, 256),
+    SmartImageListTargetSize,
+    SmartImageCompactListTargetSize
+)
 
 @OptIn(ExperimentalCoilApi::class, ExperimentalComposeUiApi::class)
 @Composable
@@ -45,7 +55,9 @@ fun OptimizedAlbumArt(
     title: String,
     modifier: Modifier = Modifier,
     targetSize: Size = SafeOriginalAlbumArtSize,
-    placeholderModel: Any? = null
+    placeholderModel: Any? = null,
+    crossfadeDurationMillis: Int = 350,
+    useSubcomposition: Boolean = true
 ) {
     val context = LocalContext.current
     val requestTargetSize = remember(targetSize) {
@@ -76,15 +88,15 @@ fun OptimizedAlbumArt(
     val memoryCacheKey = remember(uri, requestTargetSize) {
         albumArtMemoryCacheKey(uri, requestTargetSize)
     }
-    val placeholderMemoryCacheKey = remember(memoryCacheKey, uri) {
+    val placeholderMemoryCacheKey = remember(context, memoryCacheKey, uri) {
         when (uri) {
             is ImageRequest -> uri.placeholderMemoryCacheKey
                 ?: uri.memoryCacheKey
-                ?: memoryCacheKey?.let { MemoryCache.Key(it) }
-            else -> memoryCacheKey?.let { MemoryCache.Key(it) }
+                ?: resolveBestCachedPlaceholderKey(context.imageLoader.memoryCache, uri, memoryCacheKey)
+            else -> resolveBestCachedPlaceholderKey(context.imageLoader.memoryCache, uri, memoryCacheKey)
         }
     }
-    val requestModel = remember(context, uri, requestTargetSize) {
+    val requestModel = remember(context, uri, requestTargetSize, crossfadeDurationMillis, placeholderMemoryCacheKey) {
         when (uri) {
             is ImageRequest -> uri.newBuilder(context).apply {
                 size(requestTargetSize)
@@ -95,7 +107,13 @@ fun OptimizedAlbumArt(
             }.build()
             else -> ImageRequest.Builder(context)
                 .data(uri)
-                .crossfade(350) // Use Coil's native crossfade
+                .apply {
+                    if (crossfadeDurationMillis > 0) {
+                        crossfade(crossfadeDurationMillis)
+                    } else {
+                        crossfade(false)
+                    }
+                }
                 .error(R.drawable.ic_music_placeholder)
                 .size(requestTargetSize)
                 .memoryCachePolicy(CachePolicy.ENABLED)
@@ -111,6 +129,37 @@ fun OptimizedAlbumArt(
                 .build()
         }
     }
+
+    if (!useSubcomposition && placeholderModel == null) {
+        var showPlaceholder by remember(requestModel.data, placeholderMemoryCacheKey) {
+            val isAlreadyCached = placeholderMemoryCacheKey != null &&
+                context.imageLoader.memoryCache?.get(placeholderMemoryCacheKey) != null
+            mutableStateOf(!isAlreadyCached)
+        }
+        Box(modifier = modifier) {
+            if (showPlaceholder) {
+                PlaceholderContent(title = title)
+            }
+            AsyncImage(
+                model = requestModel,
+                contentDescription = "Album art of $title",
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop,
+                onSuccess = {
+                    if (showPlaceholder) {
+                        showPlaceholder = false
+                    }
+                },
+                onError = {
+                    if (!showPlaceholder) {
+                        showPlaceholder = true
+                    }
+                }
+            )
+        }
+        return
+    }
+
     var lastSuccessPainter by remember(requestModel.data) { mutableStateOf<Painter?>(null) }
 
     // Use SubcomposeAsyncImage with Coil's native crossfade instead of Crossfade wrapper
@@ -251,6 +300,27 @@ internal fun albumArtMemoryCacheKey(model: Any?, targetSize: Size): String? {
     } else {
         "${baseKey}_${targetSize.width}x${targetSize.height}"
     }
+}
+
+private fun resolveBestCachedPlaceholderKey(
+    memoryCache: MemoryCache?,
+    model: Any?,
+    primaryMemoryCacheKey: String?
+): MemoryCache.Key? {
+    val primaryKey = primaryMemoryCacheKey?.let { MemoryCache.Key(it) }
+    if (memoryCache == null) return primaryKey
+    if (primaryKey != null && memoryCache[primaryKey] != null) {
+        return primaryKey
+    }
+    for (fallbackSize in FallbackPlaceholderTargetSizes) {
+        val candidateKeyString = albumArtMemoryCacheKey(model, fallbackSize) ?: continue
+        if (candidateKeyString == primaryMemoryCacheKey) continue
+        val candidateKey = MemoryCache.Key(candidateKeyString)
+        if (memoryCache[candidateKey] != null) {
+            return candidateKey
+        }
+    }
+    return primaryKey
 }
 
 

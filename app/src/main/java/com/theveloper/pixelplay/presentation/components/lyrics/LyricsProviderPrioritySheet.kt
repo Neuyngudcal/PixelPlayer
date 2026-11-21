@@ -8,8 +8,11 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -37,9 +40,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -50,6 +53,7 @@ import androidx.compose.ui.unit.dp
 import com.theveloper.pixelplay.data.network.lyrics.LyricsProviderConfig
 import com.theveloper.pixelplay.data.network.lyrics.LyricsProviderPreferences
 import com.theveloper.pixelplay.data.network.lyrics.LyricsProviderType
+import com.theveloper.pixelplay.presentation.components.player.PlayerCardOverlaySheet
 import com.theveloper.pixelplay.ui.theme.GoogleSansRounded
 import kotlinx.coroutines.launch
 
@@ -64,26 +68,27 @@ import kotlinx.coroutines.launch
 fun LyricsProviderPrioritySheet(
     onDismissRequest: () -> Unit,
     onSearchOnlineChain: (() -> Unit)? = null,
-    onSearchSpecificProvider: ((LyricsProviderType) -> Unit)? = null
+    onSearchSpecificProvider: ((LyricsProviderType) -> Unit)? = null,
+    isContainedInCard: Boolean = false
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val chain by LyricsProviderPreferences.observeProviderConfigs(context).collectAsState(
-        initial = LyricsProviderPreferences.defaultConfigs()
+    val navBarBottom = if (isContainedInCard) {
+        0.dp
+    } else {
+        WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    }
+    val chain by LyricsProviderPreferences.observeProviderConfigs(context).collectAsStateWithLifecycle(
+        initialValue = LyricsProviderPreferences.defaultConfigs()
     )
 
-    ModalBottomSheet(
-        onDismissRequest = onDismissRequest,
-        sheetState = sheetState,
-        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
-        containerColor = MaterialTheme.colorScheme.surfaceContainerLow
-    ) {
+    val sheetBody: @Composable () -> Unit = {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 20.dp)
-                .padding(bottom = 24.dp)
+                .padding(horizontal = 16.dp)
+                .padding(bottom = if (isContainedInCard) 16.dp else 20.dp + navBarBottom)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -153,7 +158,9 @@ fun LyricsProviderPrioritySheet(
             Spacer(modifier = Modifier.height(14.dp))
 
             LazyColumn(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f, fill = false),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
                 contentPadding = PaddingValues(bottom = 12.dp)
             ) {
@@ -188,12 +195,12 @@ fun LyricsProviderPrioritySheet(
                                         callback(item.provider)
                                     }
                                 }
-                                .padding(horizontal = 14.dp, vertical = 10.dp),
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Box(
                                 modifier = Modifier
-                                    .size(30.dp)
+                                    .size(28.dp)
                                     .clip(CircleShape)
                                     .background(
                                         if (item.enabled) {
@@ -216,7 +223,7 @@ fun LyricsProviderPrioritySheet(
                                 )
                             }
 
-                            Spacer(modifier = Modifier.width(12.dp))
+                            Spacer(modifier = Modifier.width(10.dp))
 
                             Column(modifier = Modifier.weight(1f)) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -226,7 +233,8 @@ fun LyricsProviderPrioritySheet(
                                         fontFamily = GoogleSansRounded,
                                         fontWeight = FontWeight.SemiBold,
                                         maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f, fill = false)
                                     )
                                     if (isWordByWordCapable) {
                                         Spacer(modifier = Modifier.width(6.dp))
@@ -248,7 +256,9 @@ fun LyricsProviderPrioritySheet(
                                                 Text(
                                                     text = "Word-Sync",
                                                     style = MaterialTheme.typography.labelSmall,
-                                                    color = MaterialTheme.colorScheme.onTertiaryContainer
+                                                    color = MaterialTheme.colorScheme.onTertiaryContainer,
+                                                    maxLines = 1,
+                                                    softWrap = false
                                                 )
                                             }
                                         }
@@ -263,18 +273,20 @@ fun LyricsProviderPrioritySheet(
                                 )
                             }
 
+                            Spacer(modifier = Modifier.width(6.dp))
+
                             if (onSearchSpecificProvider != null) {
                                 FilledTonalIconButton(
                                     onClick = {
                                         onDismissRequest()
                                         onSearchSpecificProvider(item.provider)
                                     },
-                                    modifier = Modifier.size(34.dp)
+                                    modifier = Modifier.size(32.dp)
                                 ) {
                                     Icon(
                                         imageVector = Icons.Rounded.Search,
                                         contentDescription = "Search ${item.provider.displayName}",
-                                        modifier = Modifier.size(18.dp)
+                                        modifier = Modifier.size(17.dp)
                                     )
                                 }
                                 Spacer(modifier = Modifier.width(4.dp))
@@ -293,12 +305,12 @@ fun LyricsProviderPrioritySheet(
                                         }
                                     },
                                     enabled = index > 0,
-                                    modifier = Modifier.size(28.dp)
+                                    modifier = Modifier.size(26.dp)
                                 ) {
                                     Icon(
                                         imageVector = Icons.Rounded.ArrowUpward,
                                         contentDescription = "Move Up",
-                                        modifier = Modifier.size(18.dp)
+                                        modifier = Modifier.size(17.dp)
                                     )
                                 }
                                 IconButton(
@@ -313,12 +325,12 @@ fun LyricsProviderPrioritySheet(
                                         }
                                     },
                                     enabled = index < chain.lastIndex,
-                                    modifier = Modifier.size(28.dp)
+                                    modifier = Modifier.size(26.dp)
                                 ) {
                                     Icon(
                                         imageVector = Icons.Rounded.ArrowDownward,
                                         contentDescription = "Move Down",
-                                        modifier = Modifier.size(18.dp)
+                                        modifier = Modifier.size(17.dp)
                                     )
                                 }
                             }
@@ -339,6 +351,26 @@ fun LyricsProviderPrioritySheet(
                     }
                 }
             }
+        }
+    }
+
+    if (isContainedInCard) {
+        PlayerCardOverlaySheet(
+            onDismissRequest = onDismissRequest,
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+            zIndex = 45f
+        ) {
+            sheetBody()
+        }
+    } else {
+        ModalBottomSheet(
+            onDismissRequest = onDismissRequest,
+            sheetState = sheetState,
+            shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+            contentWindowInsets = { WindowInsets(top = 0, bottom = 0) }
+        ) {
+            sheetBody()
         }
     }
 }

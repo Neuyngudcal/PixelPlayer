@@ -3,6 +3,8 @@ package com.theveloper.pixelplay.presentation.viewmodel
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.theveloper.pixelplay.data.ai.offline.AiCoreModelInfo
+import com.theveloper.pixelplay.data.ai.offline.AndroidAiCoreEngine
 import com.theveloper.pixelplay.data.ai.offline.BenchmarkStepState
 import com.theveloper.pixelplay.data.ai.offline.CustomImportState
 import com.theveloper.pixelplay.data.ai.offline.CustomModelImporter
@@ -37,11 +39,23 @@ class OfflineModelHubViewModel @Inject constructor(
     private val customModelImporter: CustomModelImporter,
     private val benchmarkRunner: ModelBenchmarkRunner,
     private val llamaEngine: LlamaEngine,
+    private val androidAiCoreEngine: AndroidAiCoreEngine,
     private val preferencesRepo: AiPreferencesRepository
 ) : ViewModel() {
 
     private val _hardwareSnapshot = MutableStateFlow<DeviceHardwareSnapshot?>(null)
     val hardwareSnapshot: StateFlow<DeviceHardwareSnapshot?> = _hardwareSnapshot.asStateFlow()
+
+    val aiCoreModelInfo: StateFlow<AiCoreModelInfo> = androidAiCoreEngine.modelInfo
+
+    private val _isCheckingAiCore = MutableStateFlow(false)
+    val isCheckingAiCore: StateFlow<Boolean> = _isCheckingAiCore.asStateFlow()
+
+    private val _aiCoreActionError = MutableStateFlow<String?>(null)
+    val aiCoreActionError: StateFlow<String?> = _aiCoreActionError.asStateFlow()
+
+    val currentAiProvider: StateFlow<String> = preferencesRepo.aiProvider
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), AiProvider.ANDROID_AICORE.name)
 
     private val _customModels = MutableStateFlow<List<OfflineModelInfo>>(emptyList())
     val customModels: StateFlow<List<OfflineModelInfo>> = _customModels.asStateFlow()
@@ -100,6 +114,7 @@ class OfflineModelHubViewModel @Inject constructor(
     val isModelLoadedInRam: StateFlow<Boolean> = llamaEngine.isModelLoadedInRam
 
     private var benchmarkJob: Job? = null
+    private var aiCoreJob: Job? = null
 
     init {
         refreshAll()
@@ -112,6 +127,60 @@ class OfflineModelHubViewModel @Inject constructor(
             }
             downloadManager.refreshExistingDownloads()
             _customModels.value = customModelImporter.listCustomModels()
+        }
+        checkAiCoreSupport()
+    }
+
+    fun checkAiCoreSupport() {
+        aiCoreJob?.cancel()
+        aiCoreJob = viewModelScope.launch {
+            _isCheckingAiCore.value = true
+            _aiCoreActionError.value = null
+            try {
+                androidAiCoreEngine.checkDeviceSupportAndModelInfo()
+            } finally {
+                _isCheckingAiCore.value = false
+            }
+        }
+    }
+
+    fun warmupAndInspectAiCore() {
+        aiCoreJob?.cancel()
+        aiCoreJob = viewModelScope.launch {
+            _isCheckingAiCore.value = true
+            _aiCoreActionError.value = null
+            try {
+                androidAiCoreEngine.warmupAndInspectModel()
+                    .onFailure { err ->
+                        _aiCoreActionError.value = err.localizedMessage
+                            ?: "Không thể nạp model vào NPU Android AICore."
+                    }
+            } finally {
+                _isCheckingAiCore.value = false
+            }
+        }
+    }
+
+    fun downloadAiCoreModel() {
+        aiCoreJob?.cancel()
+        aiCoreJob = viewModelScope.launch {
+            _isCheckingAiCore.value = true
+            _aiCoreActionError.value = null
+            try {
+                androidAiCoreEngine.downloadSystemModel().collect { }
+            } finally {
+                _isCheckingAiCore.value = false
+            }
+        }
+    }
+
+    fun activateAndroidAiCore() {
+        viewModelScope.launch {
+            llamaEngine.unload()
+            val modelName = aiCoreModelInfo.value.baseModelName.ifBlank { "gemini-nano-aicore" }
+            preferencesRepo.setModel(AiProvider.ANDROID_AICORE, modelName)
+            preferencesRepo.setAiProvider(AiProvider.ANDROID_AICORE.name)
+            warmupAndInspectAiCore()
         }
     }
 

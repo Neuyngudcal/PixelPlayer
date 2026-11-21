@@ -35,6 +35,7 @@ class WatchTransferForegroundService : Service() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var transferObserverJob: Job? = null
     private var hasStartedForeground = false
+    @Volatile private var hasTimedOut = false
 
     override fun onCreate() {
         super.onCreate()
@@ -43,6 +44,10 @@ class WatchTransferForegroundService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (hasTimedOut) {
+            stopSelf(startId)
+            return START_NOT_STICKY
+        }
         val notification = buildNotification(transferStateStore.transfers.value.values.toList())
         if (!hasStartedForeground) {
             startInForeground(notification)
@@ -50,6 +55,23 @@ class WatchTransferForegroundService : Service() {
             notificationManager().notify(NOTIFICATION_ID, notification)
         }
         return START_NOT_STICKY
+    }
+
+    override fun onTimeout(startId: Int) {
+        handleServiceTimeout(startId, fgsType = 0)
+    }
+
+    override fun onTimeout(startId: Int, fgsType: Int) {
+        handleServiceTimeout(startId, fgsType)
+    }
+
+    private fun handleServiceTimeout(startId: Int, fgsType: Int) {
+        hasTimedOut = true
+        Timber.tag(TAG).w("WatchTransferForegroundService timed out (startId=%d, fgsType=%d)", startId, fgsType)
+        transferObserverJob?.cancel()
+        transferStateStore.markActiveTransfersTimedOut()
+        stopForegroundCompat()
+        stopSelf(startId)
     }
 
     override fun onDestroy() {

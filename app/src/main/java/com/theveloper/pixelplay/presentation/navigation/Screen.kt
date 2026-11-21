@@ -9,7 +9,6 @@ sealed class Screen(val route: String) {
     object Search : Screen("search")
     object Library : Screen("library")
     object Settings : Screen("settings")
-    object Accounts : Screen("settings_accounts")
     object SettingsCategory : Screen("settings_category/{categoryId}") {
         fun createRoute(categoryId: String) = "settings_category/$categoryId"
     }
@@ -52,9 +51,5 @@ sealed class Screen(val route: String) {
     object Equalizer : Screen("equalizer")
     object DeviceCapabilities : Screen("device_capabilities")
     object OfflineModelHub : Screen("offline_model_hub")
-    object NeteaseDashboard : Screen("netease_dashboard")
-    object QqMusicDashboard : Screen("qqmusic_dashboard")
-    object NavidromeDashboard : Screen("navidrome_dashboard")
-    object JellyfinDashboard : Screen("jellyfin_dashboard")
 
 }

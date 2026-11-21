@@ -3,6 +3,7 @@ package com.theveloper.pixelplay.data.service
 import android.content.Context
 import android.graphics.Bitmap
 import android.net.Uri
+import android.util.LruCache
 import androidx.annotation.OptIn
 import androidx.core.graphics.drawable.toBitmap
 import androidx.media3.common.util.BitmapLoader
@@ -11,11 +12,14 @@ import coil.imageLoader
 import coil.request.CachePolicy
 import coil.request.ImageRequest
 import coil.size.Precision
-import coil.size.Size
+import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
+import com.google.common.util.concurrent.MoreExecutors
 import com.google.common.util.concurrent.SettableFuture
 import com.theveloper.pixelplay.data.diagnostics.PerformanceMetrics
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
 @OptIn(UnstableApi::class)
@@ -25,20 +29,34 @@ class CoilBitmapLoader(private val context: Context, private val scope: Coroutin
         // Large enough for lock screen / media surfaces, but bounded so we never hand
         // unbounded original artwork to MediaSession/SystemUI IPC.
         private const val MAX_NOTIFICATION_ARTWORK_SIZE_PX = 1024
+        private const val RECENT_BITMAP_CACHE_ENTRIES = 3
     }
 
+    // Small dedicated cache for the active track + immediate neighbors so repeated Media3
+    // notification refreshes (e.g. onMediaItemTransition + onMediaMetadataChanged + button updates)
+    // do not re-decode the same 1024x1024 software bitmap from disk multiple times per transition.
+    // Evicted entries are left to GC (never manually recycled) so SystemUI IPC stays safe.
+    private val recentBitmapCache = LruCache<String, Bitmap>(RECENT_BITMAP_CACHE_ENTRIES)
+
     override fun loadBitmap(uri: Uri): ListenableFuture<Bitmap> {
-        return loadBitmapInternal(uri)
+        val cacheKey = uri.toString()
+        synchronized(recentBitmapCache) {
+            val cached = recentBitmapCache.get(cacheKey)
+            if (cached != null && !cached.isRecycled) {
+                return Futures.immediateFuture(cached)
+            }
+        }
+        return loadBitmapInternal(uri, cacheKey)
     }
 
     override fun decodeBitmap(data: ByteArray): ListenableFuture<Bitmap> {
-        return loadBitmapInternal(data)
+        return loadBitmapInternal(data, cacheKey = null)
     }
 
-    private fun loadBitmapInternal(data: Any): ListenableFuture<Bitmap> {
+    private fun loadBitmapInternal(data: Any, cacheKey: String?): ListenableFuture<Bitmap> {
         val future = SettableFuture.create<Bitmap>()
 
-        scope.launch {
+        val job = scope.launch(Dispatchers.IO) {
             val startNanos = System.nanoTime()
             try {
                 val request = ImageRequest.Builder(context)
@@ -48,20 +66,21 @@ class CoilBitmapLoader(private val context: Context, private val scope: Coroutin
                     .size(MAX_NOTIFICATION_ARTWORK_SIZE_PX, MAX_NOTIFICATION_ARTWORK_SIZE_PX)
                     .precision(Precision.INEXACT)
                     .allowHardware(false) // Bitmap must not be hardware for MediaSession
-                    // Disable memory cache so Coil does not hold a second reference to this
-                    // bitmap. Without this, Coil may recycle the cached copy while Media3
-                    // still uses it for MediaSession IPC ("Can't copy a recycled bitmap").
-                    // Disk cache is kept so repeated loads are still fast.
+                    // Disable Coil's shared memory cache so Coil does not hold a reference that
+                    // could be recycled on memory trim while Media3 still uses it for IPC.
                     .memoryCachePolicy(CachePolicy.DISABLED)
                     .build()
-                
+
                 val result = context.imageLoader.execute(request)
                 val drawable = result.drawable
-                
+
                 if (drawable != null) {
-                    // toBitmap() now returns a bitmap owned exclusively by us (not in any
-                    // Coil cache), so Media3 can use and recycle it freely.
                     val bitmap = drawable.toBitmap()
+                    if (cacheKey != null && !bitmap.isRecycled) {
+                        synchronized(recentBitmapCache) {
+                            recentBitmapCache.put(cacheKey, bitmap)
+                        }
+                    }
                     PerformanceMetrics.recordTiming(
                         PerformanceMetrics.Timings.ARTWORK_DECODE,
                         (System.nanoTime() - startNanos) / 1_000_000
@@ -71,10 +90,22 @@ class CoilBitmapLoader(private val context: Context, private val scope: Coroutin
                 } else {
                     future.setException(IllegalStateException("Coil returned null drawable for data: $data"))
                 }
+            } catch (e: CancellationException) {
+                future.cancel(false)
+                throw e
             } catch (e: Exception) {
                 future.setException(e)
             }
         }
+
+        future.addListener(
+            {
+                if (future.isCancelled) {
+                    job.cancel()
+                }
+            },
+            MoreExecutors.directExecutor()
+        )
         return future
     }
 

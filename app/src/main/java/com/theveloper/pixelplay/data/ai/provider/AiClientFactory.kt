@@ -1,5 +1,6 @@
 package com.theveloper.pixelplay.data.ai.provider
 
+import com.theveloper.pixelplay.data.ai.offline.AiCoreClient
 import com.theveloper.pixelplay.data.ai.offline.OfflineAiClient
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -9,6 +10,7 @@ import javax.inject.Singleton
  */
 @Singleton
 class AiClientFactory @Inject constructor(
+    private val aiCoreClient: dagger.Lazy<AiCoreClient>,
     private val offlineAiClient: dagger.Lazy<OfflineAiClient>
 ) {
     
@@ -24,6 +26,7 @@ class AiClientFactory @Inject constructor(
         }
         
         return when (provider) {
+            AiProvider.ANDROID_AICORE -> aiCoreClient.get()
             AiProvider.OFFLINE_GGUF -> offlineAiClient.get()
             AiProvider.GEMINI -> GeminiAiClient(apiKey)
             AiProvider.DEEPSEEK -> GenericOpenAiClient(

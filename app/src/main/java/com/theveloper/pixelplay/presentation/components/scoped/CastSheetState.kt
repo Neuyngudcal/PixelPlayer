@@ -1,8 +1,8 @@
 package com.theveloper.pixelplay.presentation.components.scoped
 
-import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -17,12 +17,14 @@ internal data class CastSheetState(
     val onCastExpansionChanged: (Float) -> Unit
 )
 
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 internal fun rememberCastSheetState(): CastSheetState {
     var showCastSheet by remember { mutableStateOf(false) }
+    val motionScheme = MaterialTheme.motionScheme
     val castSheetOpenFraction by animateFloatAsState(
         targetValue = if (showCastSheet) 1f else 0f,
-        animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing),
+        animationSpec = motionScheme.defaultSpatialSpec(),
         label = "castSheetOpenFraction"
     )
 
@@ -30,9 +32,7 @@ internal fun rememberCastSheetState(): CastSheetState {
         { showCastSheet = true }
     }
     val dismissCastSheet = remember {
-        {
-            showCastSheet = false
-        }
+        { showCastSheet = false }
     }
     val onCastExpansionChanged = remember {
         { _: Float -> Unit }

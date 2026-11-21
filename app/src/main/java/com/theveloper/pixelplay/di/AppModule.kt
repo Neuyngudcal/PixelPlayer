@@ -165,7 +165,8 @@ object AppModule {
             PixelPlayDatabase.MIGRATION_38_39,
             PixelPlayDatabase.MIGRATION_39_40,
             PixelPlayDatabase.MIGRATION_40_41,
-            PixelPlayDatabase.MIGRATION_41_42
+            PixelPlayDatabase.MIGRATION_41_42,
+            PixelPlayDatabase.MIGRATION_42_43
         )
             .addCallback(PixelPlayDatabase.createRuntimeArtifactsCallback())
             .setJournalMode(RoomDatabase.JournalMode.WRITE_AHEAD_LOGGING)
@@ -289,20 +290,18 @@ object AppModule {
 
         return ImageLoader.Builder(context)
             .okHttpClient(okHttpClient)
-            .dispatcher(Dispatchers.Default) // Use CPU-bound dispatcher for decoding
+            .fetcherDispatcher(Dispatchers.IO) // Keep disk/ContentResolver/retriever I/O off CPU threads
+            .decoderDispatcher(Dispatchers.Default) // Use CPU-bound dispatcher for decoding
+            .transformationDispatcher(Dispatchers.Default)
+            .bitmapFactoryMaxParallelism(2) // Prevent concurrent high-res decodes from starving UI/animations
             .allowHardware(true) // Re-enable hardware bitmaps for better performance
             .memoryCache {
                 MemoryCache.Builder(context)
-                    // Hard 40 MB cap instead of 20%-of-heap. Rationale:
-                    //  - On large-heap devices (Pixel 8 etc.) the percentage
-                    //    expanded to ~80–100 MB, far beyond what an album-art
-                    //    workload needs.
-                    //  - allowHardware(true) keeps most decoded pixels in GPU
-                    //    memory, so the MemoryCache mostly tracks Bitmap
-                    //    references — 40 MB still buffers ~100+ album arts.
-                    //  - Tighter cap = less GC pressure and less thermal
-                    //    headroom spent on memory pressure during long sessions.
-                    .maxSizeBytes(40 * 1024 * 1024)
+                    // 64 MB cap: Coil counts full width*height*4 allocation bytes against
+                    // maxSizeBytes even for HARDWARE bitmaps (whose pixels live in GPU memory).
+                    // 64 MB prevents premature LRU eviction when AlbumArtQuality is HIGH/ORIGINAL
+                    // while keeping memory pressure bounded during long sessions.
+                    .maxSizeBytes(64 * 1024 * 1024)
                     .build()
             }
             .diskCache {
@@ -431,29 +430,27 @@ object AppModule {
      * Provee una instancia singleton de OkHttpClient con logging e interceptor de User-Agent.
      * Retry logic with backoff is handled in coroutine-based callers.
      */
-    @Provides
-    @Singleton
-    fun provideOkHttpClient(): OkHttpClient {
-        val loggingInterceptor = HttpLoggingInterceptor().apply {
+    private fun buildLoggingInterceptor(): HttpLoggingInterceptor? {
+        if (!BuildConfig.DEBUG) return null
+        return HttpLoggingInterceptor().apply {
             // HEADERS (not BODY) so we never print response bodies that may contain
-            // cookies, tokens, or third-party API payloads. Headers are still useful
-            // for debugging request paths and status codes.
-            level = if (BuildConfig.DEBUG) {
-                HttpLoggingInterceptor.Level.HEADERS
-            } else {
-                HttpLoggingInterceptor.Level.NONE
-            }
-            // Redact every header that can carry a credential or session token.
+            // cookies, tokens, or third-party API payloads.
+            level = HttpLoggingInterceptor.Level.HEADERS
             redactHeader("Authorization")
             redactHeader("Proxy-Authorization")
             redactHeader("Cookie")
             redactHeader("Set-Cookie")
             redactHeader("x-goog-api-key")
+            redactHeader("X-API-Key")
             redactHeader("X-Emby-Token")
             redactHeader("X-Emby-Authorization")
             redactHeader("X-MediaBrowser-Token")
         }
-        
+    }
+
+    @Provides
+    @Singleton
+    fun provideOkHttpClient(): OkHttpClient {
         // Connection pool with optimized connections for better performance
         val connectionPool = okhttp3.ConnectionPool(
             maxIdleConnections = 5,
@@ -475,41 +472,26 @@ object AppModule {
                     .build()
                 chain.proceed(requestWithUserAgent)
             }
-            .addInterceptor(loggingInterceptor)
+            .apply { buildLoggingInterceptor()?.let(::addInterceptor) }
             .build()
     }
 
     /**
      * Provee una instancia de OkHttpClient con timeouts para búsquedas de lyrics.
-     * Includes DNS resolver, modern TLS, connection pool, and connection retry.
+     * Includes modern TLS, connection pool, and connection retry.
      */
     @Provides
     @Singleton
     @FastOkHttpClient
     fun provideFastOkHttpClient(): OkHttpClient {
-        val loggingInterceptor = HttpLoggingInterceptor()
-        loggingInterceptor.setLevel(HttpLoggingInterceptor.Level.HEADERS)
-        
         // Connection pool to reuse connections for better performance
         val connectionPool = okhttp3.ConnectionPool(
             maxIdleConnections = 5,
             keepAliveDuration = 30,
             timeUnit = java.util.concurrent.TimeUnit.SECONDS
         )
-        
-        // Use Cloudflare and Google DNS to avoid potential DNS issues
-        val dns = okhttp3.Dns { hostname ->
-            try {
-                // First try system DNS
-                okhttp3.Dns.SYSTEM.lookup(hostname)
-            } catch (e: Exception) {
-                // Fallback to manual resolution if system DNS fails
-                java.net.InetAddress.getAllByName(hostname).toList()
-            }
-        }
 
         return OkHttpClient.Builder()
-            .dns(dns)
             .connectionPool(connectionPool)
             // Use HTTP/1.1 to avoid HTTP/2 stream issues with some servers
             .protocols(listOf(okhttp3.Protocol.HTTP_1_1))
@@ -532,7 +514,7 @@ object AppModule {
                     .build()
                 chain.proceed(requestWithHeaders)
             }
-            .addInterceptor(loggingInterceptor)
+            .apply { buildLoggingInterceptor()?.let(::addInterceptor) }
             .build()
     }
 

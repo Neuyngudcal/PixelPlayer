@@ -18,7 +18,8 @@ import javax.inject.Singleton
 
 @Singleton
 class TelegramClientManager @Inject constructor(
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    private val databaseKeyProvider: TelegramDatabaseKeyProvider
 ) {
 
     companion object {
@@ -87,35 +88,68 @@ class TelegramClientManager @Inject constructor(
         _authorizationState.value = authState
         when (authState) {
             is TdApi.AuthorizationStateWaitTdlibParameters -> {
-                val databaseDirectory = File(context.filesDir, "tdlib").absolutePath
+                if (BuildConfig.TELEGRAM_API_ID <= 0 || BuildConfig.TELEGRAM_API_HASH.isBlank()) {
+                    Timber.e("Telegram API credentials missing; aborting TDLib initialization")
+                    reportTdError(TdApi.Error(401, "Telegram API credentials are not configured in this build"))
+                    return
+                }
+
+                val databaseDirectoryFile = File(context.filesDir, "tdlib")
+                val databaseDirectory = databaseDirectoryFile.absolutePath
                 val filesDirectory = File(context.filesDir, "tdlib_files").absolutePath
-                
-                // Based on error message and typical TDLib params structure for flat constructors:
-                // useTestDc, databaseDir, filesDir, encryptionKey, useFileDatabase, useChatInfoDatabase, useMessageDatabase, useSecretChats, apiId, apiHash, systemLanguage, deviceModel, systemVersion, applicationVersion, enableStorageOptimizer, ignoreFileNames
-                
-                // Note: The order varies by version. I will try the most common flat signature.
-                // If this fails, I might need to revert to using the object but finding why the object constructor failed.
-                // Actually, often in Java bindings, you have to set fields on the object passed to SetTdlibParameters.
-                // But if SetTdlibParameters ONLY has a multi-arg constructor, I must use it.
-                
-                // Let's assume the error message `constructor(p0: Boolean, p1: String!, ...)` matches the fields.
-                
-                client?.send(TdApi.SetTdlibParameters(
-                    false, // useTestDc
-                    databaseDirectory,
-                    filesDirectory,
-                    null, // databaseEncryptionKey
-                    true, // useFileDatabase
-                    true, // useChatInfoDatabase
-                    true, // useMessageDatabase
-                    false, // useSecretChats
-                    BuildConfig.TELEGRAM_API_ID,
-                    BuildConfig.TELEGRAM_API_HASH,
-                    "en", // systemLanguageCode
-                    "PixelPlayer Instance", // deviceModel
-                    android.os.Build.VERSION.RELEASE, // systemVersion
-                    BuildConfig.VERSION_NAME
-                ), defaultHandler)
+
+                val encryptionKey = databaseKeyProvider.getOrCreateDatabaseKey()
+                if (encryptionKey == null) {
+                    Timber.e("Failed to load or generate encrypted TDLib database key; refusing unencrypted DB")
+                    reportTdError(TdApi.Error(500, "Failed to initialize encrypted Telegram database storage"))
+                    return
+                }
+
+                val needsLegacyMigration =
+                    databaseKeyProvider.shouldMigrateLegacyUnencryptedDatabase(databaseDirectoryFile)
+                val initialParamKey = if (needsLegacyMigration) {
+                    byteArrayOf()
+                } else {
+                    encryptionKey.copyOf()
+                }
+
+                client?.send(
+                    TdApi.SetTdlibParameters(
+                        false, // useTestDc
+                        databaseDirectory,
+                        filesDirectory,
+                        initialParamKey, // databaseEncryptionKey
+                        true, // useFileDatabase
+                        true, // useChatInfoDatabase
+                        true, // useMessageDatabase
+                        false, // useSecretChats
+                        BuildConfig.TELEGRAM_API_ID,
+                        BuildConfig.TELEGRAM_API_HASH,
+                        "en", // systemLanguageCode
+                        "PixelPlayer Instance", // deviceModel
+                        android.os.Build.VERSION.RELEASE, // systemVersion
+                        BuildConfig.VERSION_NAME
+                    )
+                ) { result ->
+                    if (result is TdApi.Error) {
+                        encryptionKey.fill(0)
+                        reportTdError(result)
+                    } else if (needsLegacyMigration) {
+                        client?.send(TdApi.SetDatabaseEncryptionKey(encryptionKey.copyOf())) { migrateResult ->
+                            encryptionKey.fill(0)
+                            if (migrateResult is TdApi.Error) {
+                                reportTdError(migrateResult)
+                            } else {
+                                databaseKeyProvider.markDatabaseEncrypted()
+                            }
+                        } ?: run {
+                            encryptionKey.fill(0)
+                        }
+                    } else {
+                        encryptionKey.fill(0)
+                        databaseKeyProvider.markDatabaseEncrypted()
+                    }
+                }
             }
             is TdApi.AuthorizationStateWaitPhoneNumber -> {
                 // UI should prompt for phone number

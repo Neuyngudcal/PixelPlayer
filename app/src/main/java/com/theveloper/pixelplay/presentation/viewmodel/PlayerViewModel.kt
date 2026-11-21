@@ -97,8 +97,10 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
@@ -290,6 +292,7 @@ class PlayerViewModel @Inject constructor(
             started = SharingStarted.Eagerly,
             initialValue = AlbumArtPaletteStyle.default
         )
+    val effectiveContrastLevel: StateFlow<Double> = themeStateHolder.effectiveContrastLevel
     /**
      * High-frequency playback position should not force global UI recomposition.
      * Keep a dedicated position flow for real-time UI elements (seek bars, lyrics timing).
@@ -492,6 +495,14 @@ class PlayerViewModel @Inject constructor(
     val currentAlbumArtColorSchemePair: StateFlow<ColorSchemePair?> = themeStateHolder.currentAlbumArtColorSchemePair
     val activePlayerColorSchemePair: StateFlow<ColorSchemePair?> = themeStateHolder.activePlayerColorSchemePair
     val currentThemedAlbumArtUri: StateFlow<String?> = themeStateHolder.currentAlbumArtUri
+
+    fun getAlbumColorSchemeFlow(
+        uriString: String?,
+        eager: Boolean = true
+    ): StateFlow<ColorSchemePair?> {
+        if (uriString.isNullOrBlank()) return themeStateHolder.emptyAlbumColorSchemeFlow
+        return themeStateHolder.getAlbumColorSchemeFlow(uriString, eager = eager)
+    }
 
     val playerThemePreference: StateFlow<String> = themePreferencesRepository.playerThemePreferenceFlow
         .stateIn(
@@ -747,6 +758,8 @@ class PlayerViewModel @Inject constructor(
     val bluetoothName: StateFlow<String?> = connectivityStateHolder.bluetoothName
     val bluetoothAudioDeviceStates: StateFlow<List<BluetoothAudioDeviceState>> = connectivityStateHolder.bluetoothAudioDeviceStates
     val bluetoothAudioDevices: StateFlow<List<String>> = connectivityStateHolder.bluetoothAudioDevices
+    val connectingBluetoothAddress: StateFlow<String?> = connectivityStateHolder.connectingBluetoothAddress
+    val localDeviceVolume: StateFlow<Float> = connectivityStateHolder.localDeviceVolume
 
 
 
@@ -880,8 +893,14 @@ class PlayerViewModel @Inject constructor(
                 .map { it.currentSong?.id }
                 .distinctUntilChanged()
                 .flatMapLatest { songId ->
-                    if (songId.isNullOrBlank()) flowOf(null)
-                    else musicRepository.getSong(songId)
+                    if (songId.isNullOrBlank()) {
+                        flowOf(null)
+                    } else {
+                        flow<Song?> {
+                            kotlinx.coroutines.delay(180L)
+                            emitAll(musicRepository.getSong(songId))
+                        }
+                    }
                 }
                 .collect { repositorySong ->
                     val currentState = playbackStateHolder.stablePlayerState.value
@@ -928,6 +947,22 @@ class PlayerViewModel @Inject constructor(
             it.volume = clampedVolume
             _trackVolume.value = clampedVolume
         }
+    }
+
+    fun setLocalDeviceVolume(volume: Float) {
+        val clampedVolume = volume.coerceIn(0f, 1f)
+        connectivityStateHolder.setLocalDeviceVolume(clampedVolume)
+        // Ensure ExoPlayer internal gain is at 1.0f so it never attenuates system volume
+        mediaController?.let { controller ->
+            if (controller.volume < 1f) {
+                controller.volume = 1f
+                _trackVolume.value = 1f
+            }
+        }
+    }
+
+    fun connectToBluetoothDevice(address: String?): Boolean {
+        return connectivityStateHolder.connectToBluetoothDevice(address)
     }
 
     fun sendToast(message: String) {
@@ -1592,13 +1627,15 @@ class PlayerViewModel @Inject constructor(
             combine(
                 userPreferencesRepository.folderBackGestureNavigationFlow,
                 userPreferencesRepository.isAlbumsListViewFlow,
-            ) { gestureNav, albumsList ->
-                Pair(gestureNav, albumsList)
-            }.collect { (gestureNav, albumsList) ->
+                userPreferencesRepository.isSongsGridViewFlow,
+            ) { gestureNav, albumsList, songsGrid ->
+                Triple(gestureNav, albumsList, songsGrid)
+            }.collect { (gestureNav, albumsList, songsGrid) ->
                 _playerUiState.update {
                     it.copy(
                         folderBackGestureNavigationEnabled = gestureNav,
                         isAlbumsListView = albumsList,
+                        isSongsGridView = songsGrid,
                     )
                 }
             }
@@ -2503,6 +2540,12 @@ class PlayerViewModel @Inject constructor(
     fun setAlbumsListView(isList: Boolean) {
         viewModelScope.launch {
             userPreferencesRepository.setAlbumsListView(isList)
+        }
+    }
+
+    fun setSongsGridView(isGrid: Boolean) {
+        viewModelScope.launch {
+            userPreferencesRepository.setSongsGridView(isGrid)
         }
     }
 

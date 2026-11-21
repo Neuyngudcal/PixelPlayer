@@ -4,6 +4,7 @@ package com.theveloper.pixelplay.data.ai.provider
  * Enum representing available AI providers
  */
 enum class AiProvider(val displayName: String, val requiresApiKey: Boolean, val hasConfigurableUrl: Boolean = false) {
+    ANDROID_AICORE("Android AICore (Gemini Nano NPU)", requiresApiKey = false),
     GEMINI("Google Gemini", requiresApiKey = true),
     DEEPSEEK("DeepSeek", requiresApiKey = true),
     GROQ("Groq", requiresApiKey = true),

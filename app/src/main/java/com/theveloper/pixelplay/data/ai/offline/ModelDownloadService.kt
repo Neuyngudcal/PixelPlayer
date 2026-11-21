@@ -153,7 +153,7 @@ class OfflineModelDownloadManager @Inject constructor(
         activeJobs[model.id] = job
     }
 
-    fun pauseDownload(modelId: String) {
+    fun pauseDownload(modelId: String, stopServiceIfIdle: Boolean = true) {
         val job = activeJobs.remove(modelId)
         job?.cancel()
 
@@ -173,7 +173,20 @@ class OfflineModelDownloadManager @Inject constructor(
             ))
         }
         notificationManager.hideProgress()
-        stopServiceIfNoActiveDownloads()
+        if (stopServiceIfIdle) {
+            stopServiceIfNoActiveDownloads()
+        }
+    }
+
+    /**
+     * Pauses all active GGUF downloads while keeping partial `.part` files intact for resume.
+     */
+    fun pauseAllDownloadsForTimeout() {
+        val activeIds = activeJobs.keys.toList()
+        activeIds.forEach { modelId ->
+            pauseDownload(modelId, stopServiceIfIdle = false)
+        }
+        notificationManager.hideProgress()
     }
 
     fun cancelAndDeleteModel(model: OfflineModelInfo) {
@@ -408,10 +421,37 @@ class ModelDownloadService : Service() {
         }
 
         if (!downloadManager.hasActiveDownloads()) {
-            stopSelf()
+            stopForegroundCompat()
+            stopSelf(startId)
         }
 
-        return START_STICKY
+        return START_NOT_STICKY
+    }
+
+    override fun onTimeout(startId: Int) {
+        handleServiceTimeout(startId, fgsType = 0)
+    }
+
+    override fun onTimeout(startId: Int, fgsType: Int) {
+        handleServiceTimeout(startId, fgsType)
+    }
+
+    private fun handleServiceTimeout(startId: Int, fgsType: Int) {
+        Timber.w("ModelDownloadService timed out (startId=%d, fgsType=%d); pausing downloads", startId, fgsType)
+        downloadManager.pauseAllDownloadsForTimeout()
+        stopForegroundCompat()
+        stopSelf(startId)
+    }
+
+    private fun stopForegroundCompat() {
+        runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                stopForeground(STOP_FOREGROUND_REMOVE)
+            } else {
+                @Suppress("DEPRECATION")
+                stopForeground(true)
+            }
+        }
     }
 
     override fun onBind(intent: Intent?): IBinder? = null

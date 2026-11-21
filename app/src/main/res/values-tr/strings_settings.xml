@@ -244,14 +244,6 @@
     <string name="settings_palette_style_expressive_desc">Belirgin ton geçişleri ve kontrast.</string>
     <string name="settings_palette_style_fruit_salad">Meyve Salatası</string>
     <string name="settings_palette_style_fruit_salad_desc">Eğlenceli döndürülmüş vurgular.</string>
-    <string name="settings_palette_style_color_accuracy_title">Renk doğruluğu</string>
-    <string name="settings_palette_style_color_accuracy_subtitle">0 mevcut ayarı korur. Daha yüksek değerler, albüm kapağının baskın tonuna daha yakın kalır.</string>
-    <string name="settings_palette_style_accuracy_current">Mevcut</string>
-    <string name="settings_palette_style_accuracy_more_accurate">Daha doğru</string>
-    <string name="settings_palette_style_accuracy_summary_current">0 • Mevcut</string>
-    <string name="settings_palette_style_accuracy_summary_subtle">%1$d • Hafif</string>
-    <string name="settings_palette_style_accuracy_summary_balanced">%1$d • Dengeli</string>
-    <string name="settings_palette_style_accuracy_summary_precise">%1$d • Hassas</string>
 
     <!-- NavBarCornerRadiusScreen -->
     <string name="navbar_adjust_title">Köşe Yarıçapını Ayarla</string>

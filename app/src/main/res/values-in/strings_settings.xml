@@ -240,14 +240,6 @@
     <string name="settings_palette_style_expressive_desc">Pergeseran rona dan kontras yang berani.</string>
     <string name="settings_palette_style_fruit_salad">Fruit Salad</string>
     <string name="settings_palette_style_fruit_salad_desc">Aksen rotasi yang menyenangkan.</string>
-    <string name="settings_palette_style_color_accuracy_title">Akurasi warna</string>
-    <string name="settings_palette_style_color_accuracy_subtitle">0 mempertahankan penyetelan saat ini. Nilai yang lebih tinggi tetap lebih dekat dengan rona dominan seni album.</string>
-    <string name="settings_palette_style_accuracy_current">Saat ini</string>
-    <string name="settings_palette_style_accuracy_more_accurate">Lebih akurat</string>
-    <string name="settings_palette_style_accuracy_summary_current">0 • Saat ini</string>
-    <string name="settings_palette_style_accuracy_summary_subtle">%1$d • Halus</string>
-    <string name="settings_palette_style_accuracy_summary_balanced">%1$d • Seimbang</string>
-    <string name="settings_palette_style_accuracy_summary_precise">%1$d • Presisi</string>
 
     <!-- NavBarCornerRadiusScreen -->
     <string name="navbar_adjust_title">Sesuaikan Radius Sudut</string>

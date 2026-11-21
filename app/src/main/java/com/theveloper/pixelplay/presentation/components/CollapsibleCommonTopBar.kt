@@ -35,6 +35,7 @@ fun CollapsibleCommonTopBar(
     headerHeight: Dp,
     onBackClick: () -> Unit,
     modifier: Modifier = Modifier,
+    showBackButton: Boolean = true,
     subtitle: String? = null,
     collapsedTitleStartPadding: Dp = 68.dp,
     expandedTitleStartPadding: Dp = 20.dp,
@@ -62,12 +63,13 @@ fun CollapsibleCommonTopBar(
     // Logic from GenreDetailScreen:
     // solidAlpha goes from 0 to 1 as collapseFraction goes from 0 to 0.5 (approx).
     // Actually GenreDetailScreen uses: (collapseFraction * 2f).coerceIn(0f, 1f)
+    val insideFloatingPane = LocalInsideFloatingPane.current
     val solidAlpha = (collapseFraction * 2f).coerceIn(0f, 1f)
     
     val backgroundColor = containerColor ?: MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = solidAlpha)
     val statusBarFallbackColor = backgroundColor.compositeOver(MaterialTheme.colorScheme.surface)
 
-    if (syncStatusBarWithContainer) {
+    if (syncStatusBarWithContainer && !insideFloatingPane) {
         PixelPlayStatusBarStyle(color = statusBarFallbackColor)
     }
     // We can also fade the content color if we want, but usually onSurface is fine.
@@ -84,14 +86,14 @@ fun CollapsibleCommonTopBar(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .statusBarsPadding()
+                .then(if (!insideFloatingPane) Modifier.statusBarsPadding() else Modifier)
         ) {
             ExpressiveTopBarContent(
                 title = title,
                 collapseFraction = collapseFraction,
                 modifier = Modifier.fillMaxSize(),
                 subtitle = subtitle,
-                collapsedTitleStartPadding = collapsedTitleStartPadding,
+                collapsedTitleStartPadding = if (showBackButton) collapsedTitleStartPadding else expandedTitleStartPadding,
                 expandedTitleStartPadding = expandedTitleStartPadding,
                 collapsedTitleEndPadding = collapsedTitleEndPadding,
                 expandedTitleEndPadding = expandedTitleEndPadding,
@@ -112,21 +114,23 @@ fun CollapsibleCommonTopBar(
                 supportingContent = supportingContent
             )
 
-            FilledIconButton(
-                modifier = Modifier
-                    .align(Alignment.TopStart)
-                    .padding(start = 12.dp, top = 4.dp)
-                    .zIndex(1f),
-                onClick = onBackClick,
-                colors = IconButtonDefaults.filledIconButtonColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                    contentColor = MaterialTheme.colorScheme.onSurface 
-                )
-            ) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
-                    contentDescription = stringResource(R.string.common_back)
-                )
+            if (showBackButton) {
+                FilledIconButton(
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(start = 12.dp, top = 4.dp)
+                        .zIndex(1f),
+                    onClick = onBackClick,
+                    colors = IconButtonDefaults.filledIconButtonColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                        contentColor = MaterialTheme.colorScheme.onSurface
+                    )
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
+                        contentDescription = stringResource(R.string.common_back)
+                    )
+                }
             }
 
             // Actions (e.g. Equalizer toggle)

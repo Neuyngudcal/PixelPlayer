@@ -1,16 +1,28 @@
 package com.theveloper.pixelplay.data.service.wear
 
 import android.graphics.Bitmap
-import android.graphics.Color as AndroidColor
 import androidx.compose.material3.ColorScheme
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.toArgb
-import androidx.core.graphics.ColorUtils
+import com.google.android.material.color.utilities.Blend
+import com.google.android.material.color.utilities.Contrast
+import com.google.android.material.color.utilities.Hct
+import com.theveloper.pixelplay.data.preferences.AlbumArtPaletteStyle
 import com.theveloper.pixelplay.shared.WearThemePalette
-import kotlin.math.max
-import kotlin.math.min
+import com.theveloper.pixelplay.ui.theme.extractSeedColor
+import com.theveloper.pixelplay.ui.theme.generateColorSchemeFromSeed
+import kotlin.math.roundToInt
 
+private const val FAVORITE_DESIGN_COLOR_ARGB = 0xFFFF5C8A.toInt()
+private const val FALLBACK_LIGHT_CONTENT_ARGB = 0xFFF6F2FF.toInt()
+private const val FALLBACK_DARK_CONTENT_ARGB = 0xFF17141E.toInt()
+
+/**
+ * Maps a Google Material 3 dark [ColorScheme] into a compact [WearThemePalette] for OLED watch UIs.
+ *
+ * Uses Material Color Utilities HCT tonal stops for gradients and [Blend.harmonize] for semantic
+ * accents instead of HSL hue shifting or RGB black/white lerping.
+ */
 internal fun buildWearThemePalette(darkScheme: ColorScheme): WearThemePalette {
     val surfaceContainer = darkScheme.surfaceContainer.toArgb()
     val surfaceContainerLowest = darkScheme.surfaceContainerLowest.toArgb()
@@ -18,26 +30,33 @@ internal fun buildWearThemePalette(darkScheme: ColorScheme): WearThemePalette {
     val surfaceContainerHigh = darkScheme.surfaceContainerHigh.toArgb()
     val surfaceContainerHighest = darkScheme.surfaceContainerHighest.toArgb()
 
+    val primaryArgb = darkScheme.primary.toArgb()
     val playContainer = darkScheme.onPrimaryContainer.toArgb()
     val playContent = darkScheme.primaryContainer.toArgb()
-    val transportContainer = darkScheme.primary.toArgb()
+    val transportContainer = primaryArgb
     val transportContent = darkScheme.onPrimary.toArgb()
-    val chipContainer = ColorUtils.blendARGB(
-        darkScheme.secondaryContainer.toArgb(),
-        surfaceContainerLow,
-        0.28f,
-    )
+    val chipContainer = darkScheme.secondaryContainer.toArgb()
 
-    val gradientTop = ColorUtils.blendARGB(surfaceContainerHigh, playContainer, 0.34f)
-    val gradientMiddle = ColorUtils.blendARGB(
-        ColorUtils.blendARGB(surfaceContainer, transportContainer, 0.12f),
-        AndroidColor.BLACK,
-        0.34f,
+    // HCT perceptual tonal stops preserve artwork hue depth on OLED screens without RGB muddying
+    val primaryHct = Hct.fromInt(primaryArgb)
+    val surfaceHct = Hct.fromInt(surfaceContainer)
+    val accentChroma = primaryHct.chroma.coerceAtMost(36.0)
+    val gradientTop = Hct.from(primaryHct.hue, (accentChroma * 0.65).coerceAtMost(28.0), 20.0).toInt()
+    val gradientMiddle = Hct.from(surfaceHct.hue, (accentChroma * 0.35).coerceAtMost(16.0), 10.0).toInt()
+    val gradientBottom = Hct.from(surfaceHct.hue, (accentChroma * 0.20).coerceAtMost(10.0), 4.0).toInt()
+
+    val favoriteActive = harmonizeWearAccent(
+        designColorArgb = FAVORITE_DESIGN_COLOR_ARGB,
+        sourceColorArgb = primaryArgb,
+        backgroundArgb = surfaceContainer
     )
-    val gradientBottom = ColorUtils.blendARGB(
-        ColorUtils.blendARGB(surfaceContainerLowest, transportContainer, 0.08f),
-        AndroidColor.BLACK,
-        0.68f,
+    val shuffleActive = ensureWearReadable(
+        preferredColor = darkScheme.tertiary.toArgb(),
+        backgroundColor = surfaceContainer
+    )
+    val repeatActive = ensureWearReadable(
+        preferredColor = darkScheme.secondary.toArgb(),
+        backgroundColor = surfaceContainer
     )
 
     return WearThemePalette(
@@ -51,174 +70,89 @@ internal fun buildWearThemePalette(darkScheme: ColorScheme): WearThemePalette {
         surfaceContainerHighestArgb = surfaceContainerHighest,
         textPrimaryArgb = ensureWearReadable(
             preferredColor = darkScheme.onSurface.toArgb(),
-            backgroundColor = gradientMiddle,
+            backgroundColor = gradientMiddle
         ),
         textSecondaryArgb = ensureWearReadable(
             preferredColor = darkScheme.onSurfaceVariant.toArgb(),
-            backgroundColor = gradientBottom,
+            backgroundColor = gradientBottom
         ),
-        textErrorArgb = 0xFFFFB8C7.toInt(),
+        textErrorArgb = ensureWearReadable(
+            preferredColor = darkScheme.error.toArgb(),
+            backgroundColor = gradientBottom
+        ),
         controlContainerArgb = playContainer,
         controlContentArgb = ensureWearReadable(
             preferredColor = playContent,
-            backgroundColor = playContainer,
+            backgroundColor = playContainer
         ),
         controlDisabledContainerArgb = surfaceContainerHighest,
         controlDisabledContentArgb = ensureWearReadable(
             preferredColor = darkScheme.onSurfaceVariant.toArgb(),
-            backgroundColor = surfaceContainerHighest,
+            backgroundColor = surfaceContainerHighest
         ),
         transportContainerArgb = transportContainer,
         transportContentArgb = ensureWearReadable(
             preferredColor = transportContent,
-            backgroundColor = transportContainer,
+            backgroundColor = transportContainer
         ),
         chipContainerArgb = chipContainer,
         chipContentArgb = ensureWearReadable(
             preferredColor = darkScheme.onSecondaryContainer.toArgb(),
-            backgroundColor = chipContainer,
+            backgroundColor = chipContainer
         ),
-        favoriteActiveArgb = shiftWearHue(transportContainer, 34f),
-        shuffleActiveArgb = shiftWearHue(transportContainer, -72f),
-        repeatActiveArgb = shiftWearHue(transportContainer, -22f),
+        favoriteActiveArgb = favoriteActive,
+        shuffleActiveArgb = shuffleActive,
+        repeatActiveArgb = repeatActive
     )
 }
 
-internal fun buildWearThemePalette(bitmap: Bitmap): WearThemePalette {
-    return buildWearThemePaletteFromSeed(extractWearSeedColor(bitmap))
-}
-
-private fun buildWearThemePaletteFromSeed(seedColor: Int): WearThemePalette {
-    val hsl = FloatArray(3)
-    ColorUtils.colorToHSL(seedColor, hsl)
-    hsl[1] = (hsl[1] * 1.18f).coerceIn(0.30f, 0.82f)
-    hsl[2] = hsl[2].coerceIn(0.32f, 0.56f)
-    val tunedSeed = Color(ColorUtils.HSLToColor(hsl))
-
-    val top = lerp(tunedSeed, Color.Black, 0.30f)
-    val middle = lerp(tunedSeed, Color.Black, 0.57f)
-    val bottom = lerp(tunedSeed, Color.Black, 0.84f)
-    val surfaceBackground = lerp(middle, bottom, 0.58f)
-    val surfaceContainerLowest = lerp(surfaceBackground, Color.Black, 0.18f).copy(alpha = 0.96f)
-    val surfaceContainerLow = lerp(surfaceBackground, Color.White, 0.06f).copy(alpha = 0.95f)
-    val surfaceContainer = lerp(surfaceBackground, Color.White, 0.10f).copy(alpha = 0.95f)
-    val surfaceContainerHigh = lerp(surfaceBackground, Color.White, 0.14f).copy(alpha = 0.97f)
-    val surfaceContainerHighest = lerp(surfaceBackground, Color.White, 0.20f).copy(alpha = 0.98f)
-    val chipContainer = surfaceContainer
-    val controlContainer = lerp(surfaceBackground, Color.White, 0.26f).copy(alpha = 0.96f)
-    val transportContainer = lerp(surfaceBackground, Color.White, 0.20f).copy(alpha = 0.98f)
-    val controlDisabledContainer = surfaceContainerHighest
-
-    return WearThemePalette(
-        gradientTopArgb = top.toArgb(),
-        gradientMiddleArgb = middle.toArgb(),
-        gradientBottomArgb = bottom.toArgb(),
-        surfaceContainerLowestArgb = surfaceContainerLowest.toArgb(),
-        surfaceContainerLowArgb = surfaceContainerLow.toArgb(),
-        surfaceContainerArgb = surfaceContainer.toArgb(),
-        surfaceContainerHighArgb = surfaceContainerHigh.toArgb(),
-        surfaceContainerHighestArgb = surfaceContainerHighest.toArgb(),
-        textPrimaryArgb = Color(0xFFF7F2FF).toArgb(),
-        textSecondaryArgb = Color(0xFFE8DEF8).toArgb(),
-        textErrorArgb = 0xFFFFB8C7.toInt(),
-        controlContainerArgb = controlContainer.toArgb(),
-        controlContentArgb = bestContrastWearContent(controlContainer),
-        controlDisabledContainerArgb = controlDisabledContainer.toArgb(),
-        controlDisabledContentArgb = bestContrastWearContent(controlDisabledContainer),
-        transportContainerArgb = transportContainer.toArgb(),
-        transportContentArgb = bestContrastWearContent(transportContainer),
-        chipContainerArgb = chipContainer.toArgb(),
-        chipContentArgb = Color(0xFFF2EBFF).toArgb(),
-        favoriteActiveArgb = buildWearSeedAccent(seedColor, 34f),
-        shuffleActiveArgb = buildWearSeedAccent(seedColor, -72f),
-        repeatActiveArgb = buildWearSeedAccent(seedColor, -22f),
+/**
+ * Extracts a Google MCU seed color from [bitmap] (`QuantizerCelebi` + `Score.score`),
+ * synthesizes the corresponding Material 3 dark scheme, and maps it to [WearThemePalette].
+ */
+internal fun buildWearThemePalette(
+    bitmap: Bitmap,
+    paletteStyle: AlbumArtPaletteStyle = AlbumArtPaletteStyle.default,
+    contrastLevel: Double = 0.0
+): WearThemePalette {
+    val seed: Color = extractSeedColor(bitmap)
+    val schemePair = generateColorSchemeFromSeed(
+        seedColor = seed,
+        paletteStyle = paletteStyle,
+        contrastLevel = contrastLevel
     )
+    return buildWearThemePalette(schemePair.dark)
 }
 
-private fun shiftWearHue(color: Int, hueShift: Float): Int {
-    val hsl = FloatArray(3)
-    ColorUtils.colorToHSL(color, hsl)
-    hsl[0] = (hsl[0] + hueShift + 360f) % 360f
-    hsl[1] = (hsl[1] * 1.18f).coerceIn(0.42f, 0.92f)
-    hsl[2] = (hsl[2] + 0.08f).coerceIn(0.34f, 0.78f)
-    return ColorUtils.HSLToColor(hsl)
+internal fun harmonizeWearAccent(
+    designColorArgb: Int,
+    sourceColorArgb: Int,
+    backgroundArgb: Int
+): Int {
+    val harmonized = Blend.harmonize(designColorArgb, sourceColorArgb)
+    val hct = Hct.fromInt(harmonized)
+    val elevated = Hct.from(hct.hue, hct.chroma.coerceAtLeast(36.0), hct.tone.coerceIn(66.0, 82.0)).toInt()
+    return ensureWearReadable(preferredColor = elevated, backgroundColor = backgroundArgb)
 }
 
-private fun ensureWearReadable(preferredColor: Int, backgroundColor: Int): Int {
-    val opaqueBackground = if (AndroidColor.alpha(backgroundColor) >= 255) {
-        backgroundColor
-    } else {
-        ColorUtils.compositeColors(backgroundColor, AndroidColor.BLACK)
-    }
-    val preferredContrast = ColorUtils.calculateContrast(preferredColor, opaqueBackground)
-    if (preferredContrast >= 3.0) return preferredColor
+internal fun ensureWearReadable(preferredColor: Int, backgroundColor: Int): Int {
+    val opaqueBackground = compositeOverOpaqueBlack(backgroundColor)
+    val opaquePreferred = compositeOverOpaqueBlack(preferredColor)
+    val bgTone = Hct.fromInt(opaqueBackground).tone
+    val preferredContrast = Contrast.ratioOfTones(Hct.fromInt(opaquePreferred).tone, bgTone)
+    if (preferredContrast >= Contrast.RATIO_30) return preferredColor
 
-    val light = 0xFFF6F2FF.toInt()
-    val dark = 0xFF17141E.toInt()
-    val lightContrast = ColorUtils.calculateContrast(light, opaqueBackground)
-    val darkContrast = ColorUtils.calculateContrast(dark, opaqueBackground)
-    return if (lightContrast >= darkContrast) light else dark
+    val lightContrast = Contrast.ratioOfTones(Hct.fromInt(FALLBACK_LIGHT_CONTENT_ARGB).tone, bgTone)
+    val darkContrast = Contrast.ratioOfTones(Hct.fromInt(FALLBACK_DARK_CONTENT_ARGB).tone, bgTone)
+    return if (lightContrast >= darkContrast) FALLBACK_LIGHT_CONTENT_ARGB else FALLBACK_DARK_CONTENT_ARGB
 }
 
-private fun buildWearSeedAccent(seedColor: Int, hueShift: Float): Int {
-    val hsl = FloatArray(3)
-    ColorUtils.colorToHSL(seedColor, hsl)
-    hsl[0] = (hsl[0] + hueShift + 360f) % 360f
-    hsl[1] = (hsl[1] * 1.22f).coerceIn(0.46f, 0.92f)
-    hsl[2] = (hsl[2] + 0.08f).coerceIn(0.40f, 0.72f)
-    return ColorUtils.HSLToColor(hsl)
-}
-
-private fun bestContrastWearContent(background: Color): Int {
-    val light = Color(0xFFF6F2FF)
-    val dark = Color(0xFF17141E)
-    val opaqueBackgroundArgb = if (background.alpha >= 0.999f) {
-        background.toArgb()
-    } else {
-        ColorUtils.compositeColors(background.toArgb(), Color.Black.toArgb())
-    }
-    val lightContrast = ColorUtils.calculateContrast(light.toArgb(), opaqueBackgroundArgb)
-    val darkContrast = ColorUtils.calculateContrast(dark.toArgb(), opaqueBackgroundArgb)
-    return if (lightContrast >= darkContrast) light.toArgb() else dark.toArgb()
-}
-
-private fun extractWearSeedColor(bitmap: Bitmap): Int {
-    val width = bitmap.width
-    val height = bitmap.height
-    if (width <= 0 || height <= 0) return Color(0xFF6C3AD8).toArgb()
-
-    val step = max(1, min(width, height) / 24)
-    var redSum = 0L
-    var greenSum = 0L
-    var blueSum = 0L
-    var count = 0L
-
-    var y = 0
-    while (y < height) {
-        var x = 0
-        while (x < width) {
-            val pixel = bitmap.getPixel(x, y)
-            val alpha = AndroidColor.alpha(pixel)
-            if (alpha >= 28) {
-                val red = AndroidColor.red(pixel)
-                val green = AndroidColor.green(pixel)
-                val blue = AndroidColor.blue(pixel)
-                if (red + green + blue > 36) {
-                    redSum += red
-                    greenSum += green
-                    blueSum += blue
-                    count++
-                }
-            }
-            x += step
-        }
-        y += step
-    }
-
-    if (count == 0L) return Color(0xFF6C3AD8).toArgb()
-    return AndroidColor.rgb(
-        (redSum / count).toInt(),
-        (greenSum / count).toInt(),
-        (blueSum / count).toInt(),
-    )
+private fun compositeOverOpaqueBlack(argb: Int): Int {
+    val alpha = (argb ushr 24) and 0xFF
+    if (alpha >= 255) return argb
+    val fraction = alpha / 255.0
+    val red = (((argb ushr 16) and 0xFF) * fraction).roundToInt().coerceIn(0, 255)
+    val green = (((argb ushr 8) and 0xFF) * fraction).roundToInt().coerceIn(0, 255)
+    val blue = ((argb and 0xFF) * fraction).roundToInt().coerceIn(0, 255)
+    return (0xFF shl 24) or (red shl 16) or (green shl 8) or blue
 }

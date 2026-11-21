@@ -1,5 +1,7 @@
 package com.theveloper.pixelplay.presentation.screens
 
+import androidx.compose.material.icons.rounded.MusicNote
+import androidx.compose.material3.Surface
 import com.theveloper.pixelplay.presentation.navigation.navigateSafely
 import com.theveloper.pixelplay.presentation.navigation.navigateSafelyReplacing
 
@@ -114,6 +116,8 @@ import androidx.navigation.NavController
 import coil.size.Size
 import com.theveloper.pixelplay.R
 import com.theveloper.pixelplay.data.model.Song
+import com.theveloper.pixelplay.presentation.components.AdaptiveFloatingPane
+import com.theveloper.pixelplay.presentation.components.LocalInsideFloatingPane
 import com.theveloper.pixelplay.presentation.components.MiniPlayerHeight
 import com.theveloper.pixelplay.presentation.components.PlaylistBottomSheet
 import com.theveloper.pixelplay.presentation.components.QueuePlaylistSongItem
@@ -259,73 +263,84 @@ fun PlaylistDetailScreen(
     }
 
     val scrollBehavior = TopAppBarDefaults.enterAlwaysScrollBehavior(rememberTopAppBarState())
+    val windowInfo = com.theveloper.pixelplay.ui.theme.LocalPixelPlayWindowInfo.current
+    val spacing = com.theveloper.pixelplay.ui.theme.LocalSpacing.current
+    val useTwoPaneDetail = windowInfo.useTwoPaneDetail
 
-    Scaffold(
-        modifier = Modifier
-            .nestedScroll(scrollBehavior.nestedScrollConnection),
-        topBar = {
-            LargeFlexibleTopAppBar(
-                title = {
-                    Text(
-                        modifier = Modifier.padding(start = 8.dp),
-                        text = currentPlaylist?.name ?: fallbackPlaylistName,
-                        fontFamily = GoogleSansRounded,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    scrolledContainerColor = Color.Transparent,
-                    containerColor = Color.Transparent
-                ),
-                subtitle = {
-                    Text(
-                        modifier = Modifier.padding(start = 8.dp),
-                        text = stringResource(
-                            R.string.playlist_song_duration_line,
-                            formatSongCount(songsInPlaylist.size),
-                            formatTotalDuration(songsInPlaylist)
-                        ),
-                        style = MaterialTheme.typography.labelMedium.copy(fontFamily = GoogleSansRounded),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                },
-                navigationIcon = {
-                    FilledTonalIconButton(
-                        modifier = Modifier.padding(start = 10.dp),
-                        colors = IconButtonDefaults.filledIconButtonColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                            contentColor = MaterialTheme.colorScheme.onSurface
-                        ),
-                        onClick = onBackClick
-                    ) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, stringResource(R.string.common_back))
-                    }
-                },
-                actions = {
-                    IconButton(
-                        onClick = {
-                            playerViewModel.showSortingSheet() 
-                        }
-                    ) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Rounded.Sort,
-                            contentDescription = sortSongsLabel
+    AdaptiveFloatingPane(
+        enabled = windowInfo.useNavigationRail && (!useTwoPaneDetail || (uiState.isLoading && currentPlaylist == null) || uiState.playlistNotFound || currentPlaylist == null),
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLowest
+    ) {
+        Scaffold(
+            modifier = if (useTwoPaneDetail) Modifier else Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
+            containerColor = if (windowInfo.useNavigationRail) Color.Transparent else MaterialTheme.colorScheme.background,
+            topBar = {
+                if (!useTwoPaneDetail) {
+                    val insideFloatingPane = LocalInsideFloatingPane.current
+                    LargeFlexibleTopAppBar(
+                        windowInsets = if (insideFloatingPane) WindowInsets(0, 0, 0, 0) else TopAppBarDefaults.windowInsets,
+                        title = {
+                        Text(
+                            modifier = Modifier.padding(start = 8.dp),
+                            text = currentPlaylist?.name ?: fallbackPlaylistName,
+                            fontFamily = GoogleSansRounded,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
-                    }
-                    if (!isFolderPlaylist) {
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        scrolledContainerColor = Color.Transparent,
+                        containerColor = Color.Transparent
+                    ),
+                    subtitle = {
+                        Text(
+                            modifier = Modifier.padding(start = 8.dp),
+                            text = stringResource(
+                                R.string.playlist_song_duration_line,
+                                formatSongCount(songsInPlaylist.size),
+                                formatTotalDuration(songsInPlaylist)
+                            ),
+                            style = MaterialTheme.typography.labelMedium.copy(fontFamily = GoogleSansRounded),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    },
+                    navigationIcon = {
                         FilledTonalIconButton(
-                            modifier = Modifier.padding(end = 10.dp),
+                            modifier = Modifier.padding(start = 10.dp),
                             colors = IconButtonDefaults.filledIconButtonColors(
                                 containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
                                 contentColor = MaterialTheme.colorScheme.onSurface
                             ),
-                            onClick = { showPlaylistOptionsSheet = true }
-                        ) { Icon(Icons.Filled.MoreVert, moreOptionsLabel) }
-                    }
-                },
-                scrollBehavior = scrollBehavior
-            )
+                            onClick = onBackClick
+                        ) {
+                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, stringResource(R.string.common_back))
+                        }
+                    },
+                    actions = {
+                        IconButton(
+                            onClick = {
+                                playerViewModel.showSortingSheet()
+                            }
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Rounded.Sort,
+                                contentDescription = sortSongsLabel
+                            )
+                        }
+                        if (!isFolderPlaylist) {
+                            FilledTonalIconButton(
+                                modifier = Modifier.padding(end = 10.dp),
+                                colors = IconButtonDefaults.filledIconButtonColors(
+                                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                    contentColor = MaterialTheme.colorScheme.onSurface
+                                ),
+                                onClick = { showPlaylistOptionsSheet = true }
+                            ) { Icon(Icons.Filled.MoreVert, moreOptionsLabel) }
+                        }
+                    },
+                    scrollBehavior = scrollBehavior
+                )
+            }
         }
     ) { innerPadding ->
         if (uiState.isLoading && currentPlaylist == null) {
@@ -347,102 +362,100 @@ fun PlaylistDetailScreen(
                     .padding(top = innerPadding.calculateTopPadding()), Alignment.Center
             ) { CircularProgressIndicator() }
         } else {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(top = innerPadding.calculateTopPadding())
-            ) {
+            val playlistHeaderControls: @Composable () -> Unit = {
                 val actionButtonsHeight = 42.dp
                 val playbackControlBottomPadding = if (isFolderPlaylist) 8.dp else 6.dp
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(62.dp)
-                        .padding(horizontal = 20.dp)
-                        .padding(bottom = playbackControlBottomPadding),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Button(
-                        onClick = {
-                            if (localReorderableSongs.isNotEmpty()) {
-                                playerViewModel.playSongs(
-                                    localReorderableSongs,
-                                    localReorderableSongs.first(),
-                                    currentPlaylist.name
-                                )
-                                if (playerStableState.isShuffleEnabled) playerViewModel.toggleShuffle()
-                            }
-                        },
+                if (!useTwoPaneDetail) {
+                    Row(
                         modifier = Modifier
-                            .weight(1f)
-                            .height(76.dp),
-                        enabled = localReorderableSongs.isNotEmpty(),
-                        shape = AbsoluteSmoothCornerShape(
-                            cornerRadiusTL = 60.dp,
-                            smoothnessAsPercentTR = 60,
-                            cornerRadiusTR = 14.dp,
-                            smoothnessAsPercentTL = 60,
-                            cornerRadiusBL = 60.dp,
-                            smoothnessAsPercentBR = 60,
-                            cornerRadiusBR = 14.dp,
-                            smoothnessAsPercentBL = 60
-                        ),
-                        contentPadding = PaddingValues(horizontal = 10.dp),
+                            .fillMaxWidth()
+                            .height(62.dp)
+                            .padding(horizontal = 20.dp)
+                            .padding(bottom = playbackControlBottomPadding),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Icon(
-                            Icons.Rounded.PlayArrow,
-                            contentDescription = stringResource(R.string.common_play),
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(Modifier.size(ButtonDefaults.IconSpacing))
-                        TightWrapText(
+                        Button(
+                            onClick = {
+                                if (localReorderableSongs.isNotEmpty()) {
+                                    playerViewModel.playSongs(
+                                        localReorderableSongs,
+                                        localReorderableSongs.first(),
+                                        currentPlaylist.name
+                                    )
+                                    if (playerStableState.isShuffleEnabled) playerViewModel.toggleShuffle()
+                                }
+                            },
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(76.dp),
+                            enabled = localReorderableSongs.isNotEmpty(),
+                            shape = AbsoluteSmoothCornerShape(
+                                cornerRadiusTL = 60.dp,
+                                smoothnessAsPercentTR = 60,
+                                cornerRadiusTR = 14.dp,
+                                smoothnessAsPercentTL = 60,
+                                cornerRadiusBL = 60.dp,
+                                smoothnessAsPercentBR = 60,
+                                cornerRadiusBR = 14.dp,
+                                smoothnessAsPercentBL = 60
+                            ),
+                            contentPadding = PaddingValues(horizontal = 10.dp),
+                        ) {
+                            Icon(
+                                Icons.Rounded.PlayArrow,
+                                contentDescription = stringResource(R.string.common_play),
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                            TightWrapText(
                                 text = playItLabel,
                                 modifier = Modifier.padding(end = 4.dp),
                                 overflow = TextOverflow.Ellipsis,
                                 maxLines = 2,
-                                lineHeight = 20.sp
+                                lineHeight = MaterialTheme.typography.labelLarge.lineHeight
                             )
-                    }
-                    FilledTonalButton(
-                        onClick = {
-                            if (localReorderableSongs.isNotEmpty()) {
-                                playerViewModel.playSongsShuffled(
-                                    songsToPlay = localReorderableSongs,
-                                    queueName = currentPlaylist.name,
-                                    playlistId = currentPlaylist.id,
-                                    startAtZero = true,
-                                )
-                            }
-                        },
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(76.dp),
-                        enabled = localReorderableSongs.isNotEmpty(),
-                        shape = AbsoluteSmoothCornerShape(
-                            cornerRadiusTL = 14.dp,
-                            smoothnessAsPercentTR = 60,
-                            cornerRadiusTR = 60.dp,
-                            smoothnessAsPercentTL = 60,
-                            cornerRadiusBL = 14.dp,
-                            smoothnessAsPercentBR = 60,
-                            cornerRadiusBR = 60.dp,
-                            smoothnessAsPercentBL = 60
-                        ),
-                        contentPadding = PaddingValues(horizontal = 10.dp),
-                    ) {
-                        Icon(
-                            Icons.Rounded.Shuffle,
-                            contentDescription = shuffleLabel,
-                            modifier = Modifier.size(ButtonDefaults.IconSize)
-                        )
-                        Spacer(Modifier.size(ButtonDefaults.IconSpacing))
-                        TightWrapText(
+                        }
+                        FilledTonalButton(
+                            onClick = {
+                                if (localReorderableSongs.isNotEmpty()) {
+                                    playerViewModel.playSongsShuffled(
+                                        songsToPlay = localReorderableSongs,
+                                        queueName = currentPlaylist.name,
+                                        playlistId = currentPlaylist.id,
+                                        startAtZero = true,
+                                    )
+                                }
+                            },
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(76.dp),
+                            enabled = localReorderableSongs.isNotEmpty(),
+                            shape = AbsoluteSmoothCornerShape(
+                                cornerRadiusTL = 14.dp,
+                                smoothnessAsPercentTR = 60,
+                                cornerRadiusTR = 60.dp,
+                                smoothnessAsPercentTL = 60,
+                                cornerRadiusBL = 14.dp,
+                                smoothnessAsPercentBR = 60,
+                                cornerRadiusBR = 60.dp,
+                                smoothnessAsPercentBL = 60
+                            ),
+                            contentPadding = PaddingValues(horizontal = 10.dp),
+                        ) {
+                            Icon(
+                                Icons.Rounded.Shuffle,
+                                contentDescription = shuffleLabel,
+                                modifier = Modifier.size(ButtonDefaults.IconSize)
+                            )
+                            Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                            TightWrapText(
                                 text = shuffleLabel,
                                 modifier = Modifier.padding(end = 4.dp),
                                 overflow = TextOverflow.Ellipsis,
                                 maxLines = 2,
-                                lineHeight = 20.sp
+                                lineHeight = MaterialTheme.typography.labelLarge.lineHeight
                             )
+                        }
                     }
                 }
 
@@ -450,7 +463,12 @@ fun PlaylistDetailScreen(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(start = 20.dp, end = 20.dp, bottom = 8.dp, top = 2.dp),
+                            .padding(
+                                start = if (useTwoPaneDetail) 0.dp else 20.dp,
+                                end = if (useTwoPaneDetail) 0.dp else 20.dp,
+                                bottom = 8.dp,
+                                top = if (useTwoPaneDetail) spacing.md else 2.dp
+                            ),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -657,17 +675,18 @@ fun PlaylistDetailScreen(
                         }
                     }
                 }
+            }
 
-                if (localReorderableSongs.isEmpty()) {
-                    Box(Modifier
-                        .fillMaxSize()
-                        .weight(1f), Alignment.Center) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Icon(Icons.Filled.MusicOff, null, Modifier.size(48.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Spacer(Modifier.height(8.dp))
-                            Text(playlistEmptyTitle, style = MaterialTheme.typography.titleMedium)
-                            val emptyMessage = if (isFolderPlaylist) {
-                                playlistEmptyFolder
+            val playlistSongsPane: @Composable (Modifier) -> Unit = { paneModifier ->
+                Box(modifier = paneModifier) {
+                    if (localReorderableSongs.isEmpty()) {
+                        Box(Modifier.fillMaxSize(), Alignment.Center) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Icon(Icons.Filled.MusicOff, null, Modifier.size(48.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Spacer(Modifier.height(8.dp))
+                                Text(playlistEmptyTitle, style = MaterialTheme.typography.titleMedium)
+                                val emptyMessage = if (isFolderPlaylist) {
+                                    playlistEmptyFolder
                             } else {
                                 playlistEmptyAddHint
                             }
@@ -676,10 +695,7 @@ fun PlaylistDetailScreen(
                     }
                 } else {
                     Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .weight(1f)
-                            //.padding(horizontal = 10.dp)
+                        modifier = Modifier.fillMaxSize()
                     ) {
                         LazyColumn(
                             state = listState,
@@ -795,13 +811,108 @@ fun PlaylistDetailScreen(
                                 .padding(
                                     bottom = if (playerStableState.currentSong != null) MiniPlayerHeight + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 20.dp else WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 16.dp,
                                     end = 14.dp,
-                                    top = 18.dp // Increased to 16.dp as requested
+                                    top = 18.dp
                                 )
                         )
                     }
                 }
+                }
+            }
+
+            if (useTwoPaneDetail) {
+                com.theveloper.pixelplay.presentation.components.AdaptiveMediaDetailSplitLayout(
+                    title = currentPlaylist.name,
+                    subtitle = stringResource(
+                        R.string.playlist_song_duration_line,
+                        formatSongCount(songsInPlaylist.size),
+                        formatTotalDuration(songsInPlaylist)
+                    ),
+                    onBackClick = onBackClick,
+                    onPlayClick = {
+                        if (localReorderableSongs.isNotEmpty()) {
+                            playerViewModel.playSongs(
+                                localReorderableSongs,
+                                localReorderableSongs.first(),
+                                currentPlaylist.name
+                            )
+                            if (playerStableState.isShuffleEnabled) playerViewModel.toggleShuffle()
+                        }
+                    },
+                    onShuffleClick = {
+                        if (localReorderableSongs.isNotEmpty()) {
+                            playerViewModel.playSongsShuffled(
+                                songsToPlay = localReorderableSongs,
+                                queueName = currentPlaylist.name,
+                                playlistId = currentPlaylist.id,
+                                startAtZero = true,
+                            )
+                        }
+                    },
+                    hasPlayableItems = localReorderableSongs.isNotEmpty(),
+                    topActions = {
+                        IconButton(onClick = { playerViewModel.showSortingSheet() }) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Rounded.Sort,
+                                contentDescription = sortSongsLabel
+                            )
+                        }
+                        if (!isFolderPlaylist) {
+                            FilledTonalIconButton(
+                                colors = IconButtonDefaults.filledIconButtonColors(
+                                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                    contentColor = MaterialTheme.colorScheme.onSurface
+                                ),
+                                onClick = { showPlaylistOptionsSheet = true }
+                            ) { Icon(Icons.Filled.MoreVert, moreOptionsLabel) }
+                        }
+                    },
+                    artwork = { _ ->
+                        val coverModel = currentPlaylist.coverImageUri?.takeIf { it.isNotBlank() }
+                            ?: localReorderableSongs.firstOrNull()?.albumArtUriString
+                        if (!coverModel.isNullOrBlank()) {
+                            SmartImage(
+                                model = coverModel,
+                                contentDescription = currentPlaylist.name,
+                                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .clip(RoundedCornerShape(com.theveloper.pixelplay.ui.theme.PixelPlayGroupShapes.GroupOuterRadius))
+                            )
+                        } else {
+                            Surface(
+                                modifier = Modifier.fillMaxSize(),
+                                shape = RoundedCornerShape(com.theveloper.pixelplay.ui.theme.PixelPlayGroupShapes.GroupOuterRadius),
+                                color = MaterialTheme.colorScheme.primaryContainer
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.MusicNote,
+                                        contentDescription = currentPlaylist.name,
+                                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                        modifier = Modifier.size(64.dp)
+                                    )
+                                }
+                            }
+                        }
+                    },
+                    extraHeroContent = {
+                        playlistHeaderControls()
+                    }
+                ) {
+                    playlistSongsPane(Modifier.fillMaxSize())
+                }
+            } else {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(top = innerPadding.calculateTopPadding())
+                ) {
+                    playlistHeaderControls()
+                    playlistSongsPane(Modifier.fillMaxSize().weight(1f))
+                }
             }
         }
+    }
     }
 
     if (showAddSongsSheet && currentPlaylist != null && !isFolderPlaylist) {

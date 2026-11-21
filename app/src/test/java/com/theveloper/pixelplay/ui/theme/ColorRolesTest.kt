@@ -3,167 +3,158 @@ package com.theveloper.pixelplay.ui.theme
 import androidx.compose.material3.ColorScheme
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
-import androidx.core.graphics.ColorUtils
+import com.google.android.material.color.utilities.Contrast
 import com.google.android.material.color.utilities.DynamicScheme
 import com.google.android.material.color.utilities.Hct
+import com.google.android.material.color.utilities.QuantizerCelebi
+import com.google.android.material.color.utilities.SchemeContent
 import com.google.android.material.color.utilities.SchemeExpressive
+import com.google.android.material.color.utilities.SchemeFidelity
 import com.google.android.material.color.utilities.SchemeFruitSalad
+import com.google.android.material.color.utilities.SchemeMonochrome
+import com.google.android.material.color.utilities.SchemeNeutral
 import com.google.android.material.color.utilities.SchemeTonalSpot
 import com.google.android.material.color.utilities.SchemeVibrant
+import com.google.android.material.color.utilities.Score
 import com.google.common.truth.Truth.assertThat
-import com.theveloper.pixelplay.data.preferences.AlbumArtColorAccuracy
 import com.theveloper.pixelplay.data.preferences.AlbumArtPaletteStyle
+import com.theveloper.pixelplay.data.preferences.ThemeContrastLevel
 import org.junit.Test
 
 class ColorRolesTest {
 
     @Test
-    fun generateColorSchemeFromSeed_autoNeutralOutputIsPureGrayscale() {
-        val seed = Color(0xFF7F7F7F)
-
-        AlbumArtPaletteStyle.entries.forEach { style ->
-            val actual = generateColorSchemeFromSeed(seed, style)
-            val nonGrayscaleLight = actual.light.toArgbList().filterNot(::isGrayscaleArgb)
-            val nonGrayscaleDark = actual.dark.toArgbList().filterNot(::isGrayscaleArgb)
-
-            assertThat(nonGrayscaleLight).isEmpty()
-            assertThat(nonGrayscaleDark).isEmpty()
-        }
-    }
-
-    @Test
-    fun generateColorSchemeFromSeed_keepsStyleSpecificSchemeForMutedGreenSeeds() {
-        val seed = Color(0xFF556B2F)
-        val sourceHct = Hct.fromInt(seed.toArgb())
-
-        AlbumArtPaletteStyle.entries.forEach { style ->
-            val actual = generateColorSchemeFromSeed(seed, style)
-
-            assertThat(actual.light.toArgbList())
-                .containsExactlyElementsIn(
-                    expectedScheme(style, sourceHct, isDark = false).toArgbList()
-                )
-                .inOrder()
-            assertThat(actual.dark.toArgbList())
-                .containsExactlyElementsIn(
-                    expectedScheme(style, sourceHct, isDark = true).toArgbList()
-                )
-                .inOrder()
-        }
-    }
-
-    @Test
-    fun selectSeedColorArgbFromPixels_keepsDistinctGreenAlbumsFromCollapsingIntoSharedAccent() {
-        val sharedAccent = 0xFF39FF88.toInt()
-
-        val warmOliveBase = 0xFF708238.toInt()
-        val warmOliveSupport = 0xFF8A9B4F.toInt()
-        val coolJadeBase = 0xFF2C7A5F.toInt()
-        val coolJadeSupport = 0xFF4C9A7C.toInt()
-
-        val warmSeed = selectSeedColorArgbFromPixels(
-            pixels = pixelsOf(
-                550 to warmOliveBase,
-                300 to warmOliveSupport,
-                150 to sharedAccent
-            )
-        )
-        val coolSeed = selectSeedColorArgbFromPixels(
-            pixels = pixelsOf(
-                550 to coolJadeBase,
-                300 to coolJadeSupport,
-                150 to sharedAccent
-            )
-        )
-
-        assertThat(hueDistance(warmSeed, warmOliveBase))
-            .isLessThan(hueDistance(warmSeed, sharedAccent))
-        assertThat(hueDistance(coolSeed, coolJadeBase))
-            .isLessThan(hueDistance(coolSeed, sharedAccent))
-        assertThat(hueDistance(warmSeed, coolSeed)).isGreaterThan(12.0)
-    }
-
-    @Test
-    fun selectSeedColorArgbFromPixels_keepsMostlyNeutralArtworkNearNeutral() {
-        val result = selectSeedColorArgbFromPixels(
-            pixels = pixelsOf(
-                940 to 0xFF7A7A7A.toInt(),
-                40 to 0xFF848484.toInt(),
-                20 to 0xFF70758A.toInt()
-            )
-        )
-
-        assertThat(Hct.fromInt(result).chroma).isLessThan(12.0)
-    }
-
-    @Test
-    fun selectSeedColorArgbFromPixels_accuracyZeroMatchesDefaultConfig() {
+    fun selectSeedColorArgbFromPixels_matchesOfficialGoogleQuantizerAndScorePipeline() {
         val pixels = pixelsOf(
             520 to 0xFFD8893A.toInt(),
             260 to 0xFFE9B764.toInt(),
             220 to 0xFF69B84A.toInt()
         )
 
-        val defaultSeed = selectSeedColorArgbFromPixels(pixels)
-        val accuracyZeroSeed = selectSeedColorArgbFromPixels(
-            pixels = pixels,
-            config = ColorExtractionConfig(accuracyLevel = AlbumArtColorAccuracy.DEFAULT)
-        )
+        val expected = Score.score(
+            QuantizerCelebi.quantize(pixels, 128),
+            4,
+            NEUTRAL_SEED_ARGB,
+            true
+        ).first()
 
-        assertThat(accuracyZeroSeed).isEqualTo(defaultSeed)
+        assertThat(selectSeedColorArgbFromPixels(pixels)).isEqualTo(expected)
     }
 
     @Test
-    fun selectSeedColorArgbFromPixels_higherAccuracyPullsWarmYellowAwayFromGreenAccent() {
-        val dominantYellow = 0xFFD89A35.toInt()
-        val supportingYellow = 0xFFE7BE58.toInt()
-        val greenAccent = 0xFF67B845.toInt()
+    fun selectSeedColorArgbFromPixels_returnsNeutralSeedForPureGrayscaleArtwork() {
         val pixels = pixelsOf(
-            520 to dominantYellow,
-            260 to supportingYellow,
-            220 to greenAccent
+            600 to 0xFF1A1A1A.toInt(),
+            300 to 0xFF7F7F7F.toInt(),
+            100 to 0xFFE8E8E8.toInt()
         )
 
-        val accurateSeed = selectSeedColorArgbFromPixels(
-            pixels = pixels,
-            config = ColorExtractionConfig(accuracyLevel = AlbumArtColorAccuracy.MAX)
-        )
+        val seed = selectSeedColorArgbFromPixels(pixels)
 
-        assertThat(hueDistance(accurateSeed, dominantYellow))
-            .isLessThan(hueDistance(accurateSeed, greenAccent))
+        assertThat(seed).isEqualTo(NEUTRAL_SEED_ARGB)
+        assertThat(Hct.fromInt(seed).chroma).isLessThan(ACHROMATIC_CHROMA_CUTOFF)
     }
 
     @Test
-    fun selectSeedColorArgbFromPixels_higherAccuracyPullsRoyalBlueAwayFromTealAccent() {
-        val dominantBlue = 0xFF2D5FDB.toInt()
-        val supportingBlue = 0xFF4A7AF2.toInt()
-        val tealAccent = 0xFF16B7B1.toInt()
-        val pixels = pixelsOf(
-            520 to dominantBlue,
-            260 to supportingBlue,
-            220 to tealAccent
-        )
+    fun generateColorSchemeFromSeed_achromaticSeedUsesSchemeMonochromeAndPreservesSemanticError() {
+        val neutralSeed = Color(NEUTRAL_SEED_ARGB)
+        val sourceHct = Hct.fromInt(neutralSeed.toArgb())
+        val expectedLight = SchemeMonochrome(sourceHct, false, 0.0)
+        val expectedDark = SchemeMonochrome(sourceHct, true, 0.0)
 
-        val accurateSeed = selectSeedColorArgbFromPixels(
-            pixels = pixels,
-            config = ColorExtractionConfig(accuracyLevel = AlbumArtColorAccuracy.MAX)
-        )
+        AlbumArtPaletteStyle.entries.forEach { style ->
+            val actual = generateColorSchemeFromSeed(neutralSeed, style, contrastLevel = 0.0)
 
-        assertThat(hueDistance(accurateSeed, dominantBlue))
-            .isLessThan(hueDistance(accurateSeed, tealAccent))
+            assertThat(actual.light.toArgbList())
+                .containsExactlyElementsIn(expectedLight.toArgbList())
+                .inOrder()
+            assertThat(actual.dark.toArgbList())
+                .containsExactlyElementsIn(expectedDark.toArgbList())
+                .inOrder()
+
+            // Semantic error color must stay chromatic red (not stripped to grayscale)
+            assertThat(Hct.fromInt(actual.light.error.toArgb()).chroma).isGreaterThan(20.0)
+            assertThat(Hct.fromInt(actual.dark.error.toArgb()).chroma).isGreaterThan(20.0)
+            // Primary/neutral roles stay pure monochrome
+            assertThat(Hct.fromInt(actual.light.primary.toArgb()).chroma).isLessThan(1.0)
+            assertThat(Hct.fromInt(actual.dark.surface.toArgb()).chroma).isLessThan(1.0)
+        }
+    }
+
+    @Test
+    fun generateColorSchemeFromSeed_matchesGoogleDynamicSchemeForAllEightVariantsAndContrasts() {
+        val seed = Color(0xFF3A7D44)
+        val sourceHct = Hct.fromInt(seed.toArgb())
+        val contrasts = listOf(0.0, 0.5, 1.0)
+
+        AlbumArtPaletteStyle.entries.forEach { style ->
+            contrasts.forEach { contrast ->
+                val actual = generateColorSchemeFromSeed(seed, style, contrastLevel = contrast)
+
+                assertThat(actual.light.toArgbList())
+                    .containsExactlyElementsIn(
+                        expectedScheme(style, sourceHct, isDark = false, contrastLevel = contrast).toArgbList()
+                    )
+                    .inOrder()
+                assertThat(actual.dark.toArgbList())
+                    .containsExactlyElementsIn(
+                        expectedScheme(style, sourceHct, isDark = true, contrastLevel = contrast).toArgbList()
+                    )
+                    .inOrder()
+            }
+        }
+    }
+
+    @Test
+    fun generateColorSchemeFromSeed_higherContrastIncreasesPrimaryContrastRatio() {
+        val seed = Color(0xFF4F6AF5)
+
+        val standard = generateColorSchemeFromSeed(seed, AlbumArtPaletteStyle.CONTENT, contrastLevel = 0.0)
+        val medium = generateColorSchemeFromSeed(seed, AlbumArtPaletteStyle.CONTENT, contrastLevel = 0.5)
+        val high = generateColorSchemeFromSeed(seed, AlbumArtPaletteStyle.CONTENT, contrastLevel = 1.0)
+
+        val standardRatio = toneContrast(standard.dark.primary, standard.dark.onPrimary)
+        val mediumRatio = toneContrast(medium.dark.primary, medium.dark.onPrimary)
+        val highRatio = toneContrast(high.dark.primary, high.dark.onPrimary)
+
+        assertThat(mediumRatio).isAtLeast(standardRatio)
+        assertThat(highRatio).isGreaterThan(standardRatio)
+    }
+
+    @Test
+    fun defaultBrandColorSchemePair_hasDistinctContainerAndBackgroundWithFull48Roles() {
+        assertThat(DarkColorScheme.primaryContainer).isNotEqualTo(DarkColorScheme.background)
+        assertThat(LightColorScheme.primaryContainer).isNotEqualTo(LightColorScheme.background)
+        assertThat(toneContrast(DarkColorScheme.onPrimary, DarkColorScheme.primary)).isAtLeast(4.5)
+        assertThat(toneContrast(LightColorScheme.onPrimary, LightColorScheme.primary)).isAtLeast(4.5)
+        assertThat(AlbumArtPaletteStyle.default).isEqualTo(AlbumArtPaletteStyle.CONTENT)
+        assertThat(ThemeContrastLevel.SYSTEM.resolve(0.5)).isEqualTo(0.5)
+        assertThat(ThemeContrastLevel.HIGH.resolve(0.0)).isEqualTo(1.0)
     }
 
     private fun expectedScheme(
         style: AlbumArtPaletteStyle,
         sourceHct: Hct,
-        isDark: Boolean
+        isDark: Boolean,
+        contrastLevel: Double
     ): DynamicScheme {
         return when (style) {
-            AlbumArtPaletteStyle.TONAL_SPOT -> SchemeTonalSpot(sourceHct, isDark, 0.0)
-            AlbumArtPaletteStyle.VIBRANT -> SchemeVibrant(sourceHct, isDark, 0.0)
-            AlbumArtPaletteStyle.EXPRESSIVE -> SchemeExpressive(sourceHct, isDark, 0.0)
-            AlbumArtPaletteStyle.FRUIT_SALAD -> SchemeFruitSalad(sourceHct, isDark, 0.0)
+            AlbumArtPaletteStyle.CONTENT -> SchemeContent(sourceHct, isDark, contrastLevel)
+            AlbumArtPaletteStyle.FIDELITY -> SchemeFidelity(sourceHct, isDark, contrastLevel)
+            AlbumArtPaletteStyle.TONAL_SPOT -> SchemeTonalSpot(sourceHct, isDark, contrastLevel)
+            AlbumArtPaletteStyle.VIBRANT -> SchemeVibrant(sourceHct, isDark, contrastLevel)
+            AlbumArtPaletteStyle.EXPRESSIVE -> SchemeExpressive(sourceHct, isDark, contrastLevel)
+            AlbumArtPaletteStyle.FRUIT_SALAD -> SchemeFruitSalad(sourceHct, isDark, contrastLevel)
+            AlbumArtPaletteStyle.MONOCHROME -> SchemeMonochrome(sourceHct, isDark, contrastLevel)
+            AlbumArtPaletteStyle.NEUTRAL -> SchemeNeutral(sourceHct, isDark, contrastLevel)
         }
+    }
+
+    private fun toneContrast(first: Color, second: Color): Double {
+        return Contrast.ratioOfTones(
+            Hct.fromInt(first.toArgb()).tone,
+            Hct.fromInt(second.toArgb()).tone
+        )
     }
 
     private fun ColorScheme.toArgbList(): List<Int> {
@@ -272,24 +263,11 @@ class ColorRolesTest {
         )
     }
 
-    private fun isGrayscaleArgb(argb: Int): Boolean {
-        val hsl = FloatArray(3)
-        ColorUtils.colorToHSL(argb, hsl)
-        return hsl[1] == 0f
-    }
-
     private fun pixelsOf(vararg entries: Pair<Int, Int>): IntArray {
         return buildList {
             entries.forEach { (count, color) ->
                 repeat(count) { add(color) }
             }
         }.toIntArray()
-    }
-
-    private fun hueDistance(firstArgb: Int, secondArgb: Int): Double {
-        return com.google.android.material.color.utilities.MathUtils.differenceDegrees(
-            Hct.fromInt(firstArgb).hue,
-            Hct.fromInt(secondArgb).hue
-        )
     }
 }

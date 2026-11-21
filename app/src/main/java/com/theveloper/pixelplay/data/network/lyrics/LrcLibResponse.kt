@@ -1,11 +1,13 @@
 package com.theveloper.pixelplay.data.network.lyrics
 
+import androidx.compose.runtime.Immutable
 import com.google.gson.annotations.SerializedName
 
 /**
  * Representa la respuesta de la API de LRCLIB.
  * Contiene la letra de la canción, tanto en formato simple como sincronizado.
  */
+@Immutable
 data class LrcLibResponse(
     @SerializedName("id") val id: Int,
     @SerializedName("name") val name: String,

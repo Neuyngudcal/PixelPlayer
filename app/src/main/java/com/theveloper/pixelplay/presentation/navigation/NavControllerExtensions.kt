@@ -49,13 +49,15 @@ fun NavController.navigateSafelyReplacing(
 }
 
 fun NavController.navigateToTopLevelSafely(route: String): Boolean {
+    if (!isReadyForNavigation()) return false
     val startDestinationId = runCatching { graph.startDestinationId }.getOrNull() ?: return false
-    navigate(route) {
-        popUpTo(startDestinationId) {
-            saveState = true
+    return runCatching {
+        navigate(route) {
+            popUpTo(startDestinationId) {
+                saveState = true
+            }
+            launchSingleTop = true
+            restoreState = true
         }
-        launchSingleTop = true
-        restoreState = true
-    }
-    return true
+    }.isSuccess
 }

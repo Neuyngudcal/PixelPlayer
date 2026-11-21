@@ -93,6 +93,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.navigation.NavController
 import com.theveloper.pixelplay.R
 import com.theveloper.pixelplay.presentation.components.CollapsibleCommonTopBar
+import com.theveloper.pixelplay.presentation.components.LocalInsideFloatingPane
 import com.theveloper.pixelplay.presentation.components.MiniPlayerHeight
 import com.theveloper.pixelplay.presentation.viewmodel.AudioCapabilities
 import com.theveloper.pixelplay.presentation.viewmodel.AudioOutputCategory
@@ -116,7 +117,8 @@ import kotlin.math.roundToInt
 fun DeviceCapabilitiesScreen(
     navController: NavController,
     viewModel: DeviceCapabilitiesViewModel = hiltViewModel(),
-    playerViewModel: PlayerViewModel
+    playerViewModel: PlayerViewModel,
+    embeddedInPane: Boolean = false
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
 
@@ -124,7 +126,12 @@ fun DeviceCapabilitiesScreen(
     val coroutineScope = rememberCoroutineScope()
     val lazyListState = rememberLazyListState()
 
-    val statusBarHeight = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+    val insideFloatingPane = LocalInsideFloatingPane.current
+    val statusBarHeight = if (embeddedInPane || insideFloatingPane) {
+        0.dp
+    } else {
+        WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+    }
     val minTopBarHeight = 64.dp + statusBarHeight
     val maxTopBarHeight = 188.dp
     val minTopBarHeightPx = with(density) { minTopBarHeight.toPx() }
@@ -174,17 +181,22 @@ fun DeviceCapabilitiesScreen(
     }
 
     Box(
-        modifier = Modifier
-            .nestedScroll(nestedScrollConnection)
-            .fillMaxSize()
+        modifier = if (embeddedInPane) {
+            Modifier.fillMaxSize()
+        } else {
+            Modifier
+                .nestedScroll(nestedScrollConnection)
+                .fillMaxSize()
+        }
     ) {
         val currentTopBarHeightDp = with(density) { topBarHeight.value.toDp() }
+        val effectiveTopPadding = if (embeddedInPane) 8.dp else currentTopBarHeightDp
 
         if (state.isLoading) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(top = currentTopBarHeightDp),
+                    .padding(top = effectiveTopPadding),
                 contentAlignment = Alignment.Center
             ) {
                 CircularProgressIndicator()
@@ -193,7 +205,7 @@ fun DeviceCapabilitiesScreen(
             DeviceCapabilitiesContent(
                 state = state,
                 lazyListState = lazyListState,
-                topPadding = currentTopBarHeightDp,
+                topPadding = effectiveTopPadding,
                 onGenerateReport = viewModel::generatePerformanceReport,
                 onAdvancedDiagnosticsChange = viewModel::setAdvancedPerformanceDiagnosticsEnabled,
                 onMarkLagNow = viewModel::markLagNow,
@@ -201,15 +213,17 @@ fun DeviceCapabilitiesScreen(
             )
         }
 
-        CollapsibleCommonTopBar(
-            title = stringResource(R.string.settings_category_device_capabilities_title),
-            collapseFraction = collapseFraction,
-            headerHeight = currentTopBarHeightDp,
-            onBackClick = { navController.popBackStack() },
-            expandedTitleStartPadding = 20.dp,
-            collapsedTitleStartPadding = 68.dp,
-            maxLines = 2
-        )
+        if (!embeddedInPane) {
+            CollapsibleCommonTopBar(
+                title = stringResource(R.string.settings_category_device_capabilities_title),
+                collapseFraction = collapseFraction,
+                headerHeight = currentTopBarHeightDp,
+                onBackClick = { navController.popBackStack() },
+                expandedTitleStartPadding = 20.dp,
+                collapsedTitleStartPadding = 68.dp,
+                maxLines = 2
+            )
+        }
     }
 }
 

@@ -73,6 +73,54 @@ class HiResSampleRateCapAudioProcessorTest {
         assertThat(output[1]).isWithin(1e-6f).of(0.3f)
     }
 
+    @Test
+    fun queueEndOfStream_flushesTrailingPartialFrames16Bit() {
+        val processor = HiResSampleRateCapAudioProcessor()
+        processor.configure(AudioFormat(768_000, 1, C.ENCODING_PCM_16BIT))
+
+        // Factor = 4 (768kHz -> 192kHz). Feed 4 complete frames + 2 trailing frames.
+        processor.queueInput(shortBufferOf(1_000, 1_000, 1_000, 1_000, 3_000, 5_000))
+        val firstPass = readShorts(processor.getOutput())
+        assertThat(firstPass).containsExactly(1_000)
+
+        processor.queueEndOfStream()
+        val flushed = readShorts(processor.getOutput())
+        assertThat(flushed).hasSize(1)
+        assertThat(processor.isEnded()).isTrue()
+    }
+
+    @Test
+    fun queueEndOfStream_flushesTrailingPartialFramesFloat() {
+        val processor = HiResSampleRateCapAudioProcessor()
+        processor.configure(AudioFormat(384_000, 2, C.ENCODING_PCM_FLOAT))
+
+        processor.queueInput(floatBufferOf(0.4f, -0.2f))
+        assertThat(processor.getOutput().remaining()).isEqualTo(0)
+
+        processor.queueEndOfStream()
+        val flushed = readFloats(processor.getOutput())
+        assertThat(flushed).hasSize(2)
+        assertThat(flushed[0]).isWithin(1e-6f).of(0.4f)
+        assertThat(flushed[1]).isWithin(1e-6f).of(-0.2f)
+        assertThat(processor.isEnded()).isTrue()
+    }
+
+    @Test
+    fun windowedSincKernel_attenuatesHighFrequencyStopbandAliasing() {
+        val processor = HiResSampleRateCapAudioProcessor()
+        val outputFormat = processor.configure(AudioFormat(768_000, 1, C.ENCODING_PCM_FLOAT))
+        assertThat(outputFormat.sampleRate).isEqualTo(192_000)
+
+        // Nyquist-rate alternating tone (+1, -1, +1, -1, ...) should be strongly attenuated
+        val nyquistSignal = FloatArray(64) { idx -> if (idx % 2 == 0) 1.0f else -1.0f }
+        processor.queueInput(floatBufferOf(*nyquistSignal))
+        val output = readFloats(processor.getOutput())
+        assertThat(output).hasSize(16)
+        output.forEach { sample ->
+            assertThat(kotlin.math.abs(sample)).isLessThan(0.15f)
+        }
+    }
+
     private fun shortBufferOf(vararg samples: Int): ByteBuffer {
         val buffer = ByteBuffer.allocateDirect(samples.size * Short.SIZE_BYTES)
             .order(ByteOrder.nativeOrder())

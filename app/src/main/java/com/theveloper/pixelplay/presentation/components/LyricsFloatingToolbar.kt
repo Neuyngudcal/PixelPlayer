@@ -69,8 +69,6 @@ fun LyricsFloatingToolbar(
     // Draw-phase lambda: 0f = fully visible, 1f = dismissed. Read inside graphicsLayer to avoid recomposition per frame.
     backProgressProvider: () -> Float = { 0f }
 ) {
-    if (showSyncedLyrics == null) return
-
     Row(
         modifier = modifier
             .fillMaxWidth(),
@@ -114,41 +112,45 @@ fun LyricsFloatingToolbar(
 
         Spacer(modifier = Modifier.width(8.dp))
 
-        Row(
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            ToggleSegmentButton(
-                modifier = Modifier.weight(1f).height(50.dp),
-                active = showSyncedLyrics,
-                enabled = hasSyncedLyrics,
-                activeColor = accentColor,
-                inactiveColor = backgroundColor,
-                activeContentColor = onAccentColor,
-                inactiveContentColor = onBackgroundColor,
-                activeCornerRadius = 50.dp,
-                onClick = { onShowSyncedLyricsChange(true) },
-                text = stringResource(R.string.lyrics_mode_synced),
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis
-            )
+        if (showSyncedLyrics != null) {
+            Row(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                ToggleSegmentButton(
+                    modifier = Modifier.weight(1f).height(50.dp),
+                    active = showSyncedLyrics,
+                    enabled = hasSyncedLyrics,
+                    activeColor = accentColor,
+                    inactiveColor = backgroundColor,
+                    activeContentColor = onAccentColor,
+                    inactiveContentColor = onBackgroundColor,
+                    activeCornerRadius = 50.dp,
+                    onClick = { onShowSyncedLyricsChange(true) },
+                    text = stringResource(R.string.lyrics_mode_synced),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
 
-            ToggleSegmentButton(
-                modifier = Modifier.weight(1f).height(50.dp),
-                active = !showSyncedLyrics,
-                enabled = true,
-                activeColor = accentColor,
-                inactiveColor = backgroundColor,
-                activeContentColor = onAccentColor,
-                inactiveContentColor = onBackgroundColor,
-                activeCornerRadius = 50.dp,
-                onClick = { onShowSyncedLyricsChange(false) },
-                text = stringResource(R.string.lyrics_mode_static),
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis
-            )
+                ToggleSegmentButton(
+                    modifier = Modifier.weight(1f).height(50.dp),
+                    active = !showSyncedLyrics,
+                    enabled = true,
+                    activeColor = accentColor,
+                    inactiveColor = backgroundColor,
+                    activeContentColor = onAccentColor,
+                    inactiveContentColor = onBackgroundColor,
+                    activeCornerRadius = 50.dp,
+                    onClick = { onShowSyncedLyricsChange(false) },
+                    text = stringResource(R.string.lyrics_mode_static),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        } else {
+            Spacer(modifier = Modifier.weight(1f))
         }
         
         Spacer(modifier = Modifier.width(8.dp))

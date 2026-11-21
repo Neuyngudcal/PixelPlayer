@@ -49,6 +49,7 @@ object AppThemeMode {
 
 const val MIN_NAV_BAR_CORNER_RADIUS = 0
 const val MAX_NAV_BAR_CORNER_RADIUS = 60
+const val DEFAULT_NAV_BAR_CORNER_RADIUS = 32
 
 internal fun sanitizeNavBarCornerRadius(radius: Int): Int =
     radius.coerceIn(MIN_NAV_BAR_CORNER_RADIUS, MAX_NAV_BAR_CORNER_RADIUS)
@@ -83,9 +84,7 @@ class UserPreferencesRepository @Inject constructor(
     private val json: Json
 ) {
 
-    private val backupExcludedKeyNames = setOf(
-        PreferencesKeys.INITIAL_SETUP_DONE.name
-    )
+    private val backupExcludedKeyNames = STATIC_BACKUP_EXCLUDED_KEYS
 
     // ─── Preference keys ────────────────────────────────────────────────────
 
@@ -228,6 +227,7 @@ class UserPreferencesRepository @Inject constructor(
         // View preferences
         val IS_GENRE_GRID_VIEW = booleanPreferencesKey("is_genre_grid_view")
         val IS_ALBUMS_LIST_VIEW = booleanPreferencesKey("is_albums_list_view")
+        val IS_SONGS_GRID_VIEW = booleanPreferencesKey("is_songs_grid_view")
 
         // Collage
         val COLLAGE_PATTERN = stringPreferencesKey("collage_pattern")
@@ -698,6 +698,17 @@ suspend fun markDirectoryRulesVersionApplied(version: Int) {
         }
     }
 
+    val isSongsGridViewFlow: Flow<Boolean> =
+        pref { preferences ->
+            preferences[PreferencesKeys.IS_SONGS_GRID_VIEW] ?: false
+        }
+
+    suspend fun setSongsGridView(isGrid: Boolean) {
+        dataStore.edit { preferences ->
+            preferences[PreferencesKeys.IS_SONGS_GRID_VIEW] = isGrid
+        }
+    }
+
     val lastDailyMixUpdateFlow: Flow<Long> =
         pref { preferences ->
             preferences[PreferencesKeys.LAST_DAILY_MIX_UPDATE] ?: 0L
@@ -986,7 +997,7 @@ suspend fun markDirectoryRulesVersionApplied(version: Int) {
     // ─── Navigation bar ───────────────────────────────────────────────────────
 
     val navBarCornerRadiusFlow: Flow<Int> =
-        pref { sanitizeNavBarCornerRadius(it[PreferencesKeys.NAV_BAR_CORNER_RADIUS] ?: 32) }
+        pref { sanitizeNavBarCornerRadius(it[PreferencesKeys.NAV_BAR_CORNER_RADIUS] ?: DEFAULT_NAV_BAR_CORNER_RADIUS) }
 
     suspend fun setNavBarCornerRadius(radius: Int) {
         dataStore.edit { it[PreferencesKeys.NAV_BAR_CORNER_RADIUS] = sanitizeNavBarCornerRadius(radius) }
@@ -1324,7 +1335,7 @@ suspend fun markDirectoryRulesVersionApplied(version: Int) {
         if (keyNames.isEmpty()) return
         dataStore.edit { preferences ->
             preferences.asMap().keys
-                .filter { key -> key.name in keyNames && key.name !in backupExcludedKeyNames }
+                .filter { key -> key.name in keyNames && !isExcludedFromBackup(key.name) }
                 .forEach { key ->
                     @Suppress("UNCHECKED_CAST")
                     preferences.remove(key as Preferences.Key<Any>)
@@ -1333,10 +1344,9 @@ suspend fun markDirectoryRulesVersionApplied(version: Int) {
     }
 
     suspend fun clearPreferencesExceptKeys(excludedKeyNames: Set<String>) {
-        val protected = excludedKeyNames + backupExcludedKeyNames
         dataStore.edit { preferences ->
             preferences.asMap().keys
-                .filterNot { key -> key.name in protected }
+                .filterNot { key -> key.name in excludedKeyNames || isExcludedFromBackup(key.name) }
                 .forEach { key ->
                     @Suppress("UNCHECKED_CAST")
                     preferences.remove(key as Preferences.Key<Any>)
@@ -1347,7 +1357,7 @@ suspend fun markDirectoryRulesVersionApplied(version: Int) {
     suspend fun exportPreferencesForBackup(): List<PreferenceBackupEntry> {
         val snapshot = dataStore.data.first().asMap()
         return snapshot.mapNotNull { (key, value) ->
-            if (key.name in backupExcludedKeyNames) return@mapNotNull null
+            if (isExcludedFromBackup(key.name)) return@mapNotNull null
             when (value) {
                 is String  -> PreferenceBackupEntry(key = key.name, type = "string",     stringValue = value)
                 is Int     -> PreferenceBackupEntry(key = key.name, type = "int",        intValue = value)
@@ -1371,14 +1381,14 @@ suspend fun markDirectoryRulesVersionApplied(version: Int) {
         dataStore.edit { preferences ->
             if (clearExisting) {
                 preferences.asMap().keys
-                    .filterNot { key -> key.name in backupExcludedKeyNames }
+                    .filterNot { key -> isExcludedFromBackup(key.name) }
                     .forEach { key ->
                         @Suppress("UNCHECKED_CAST")
                         preferences.remove(key as Preferences.Key<Any>)
                     }
             }
             entries.forEach { entry ->
-                if (entry.key in backupExcludedKeyNames) return@forEach
+                if (isExcludedFromBackup(entry.key)) return@forEach
                 when (entry.type) {
                     "string"     -> entry.stringValue?.let { preferences[stringPreferencesKey(entry.key)] = it }
                     "int"        -> (entry.intValue ?: entry.doubleValue?.toInt() ?: entry.longValue?.toInt())
@@ -1399,6 +1409,36 @@ suspend fun markDirectoryRulesVersionApplied(version: Int) {
     // ─── Companion ────────────────────────────────────────────────────────────
 
     companion object {
+        private val STATIC_BACKUP_EXCLUDED_KEYS = buildSet {
+            add("initial_setup_done")
+            add("backup_history_json")
+            add("active_offline_model_path")
+            add("active_offline_model_name")
+            add("active_offline_model_id")
+            com.theveloper.pixelplay.data.ai.provider.AiProvider.entries.forEach { provider ->
+                add("${provider.name.lowercase()}_api_key")
+            }
+        }
+
+        private val SENSITIVE_BACKUP_SUFFIXES = listOf(
+            "_api_key",
+            "_secret",
+            "_token",
+            "_password",
+            "_cookie"
+        )
+
+        /**
+         * Returns `true` for keys that must never be exported, overwritten, or cleared by `.pxpl`
+         * backup/restore operations (credentials, API keys, local device paths, and internal state).
+         */
+        fun isExcludedFromBackup(keyName: String): Boolean {
+            val normalized = keyName.trim().lowercase()
+            if (normalized in STATIC_BACKUP_EXCLUDED_KEYS) return true
+            if (normalized.startsWith("active_offline_model_")) return true
+            return SENSITIVE_BACKUP_SUFFIXES.any { suffix -> normalized.endsWith(suffix) }
+        }
+
         /** Default character delimiters for splitting multi-artist tags. */
         val DEFAULT_ARTIST_DELIMITERS = listOf(";")
 

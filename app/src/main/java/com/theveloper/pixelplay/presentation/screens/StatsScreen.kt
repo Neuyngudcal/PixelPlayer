@@ -110,6 +110,7 @@ import com.theveloper.pixelplay.R
 import com.theveloper.pixelplay.data.stats.PlaybackStatsRepository
 import com.theveloper.pixelplay.data.stats.StatsTimeRange
 import com.theveloper.pixelplay.presentation.components.CollapsibleCommonTopBar
+import com.theveloper.pixelplay.presentation.components.LocalInsideFloatingPane
 import com.theveloper.pixelplay.presentation.components.ExpressiveTopBarContent
 import com.theveloper.pixelplay.presentation.components.MiniPlayerHeight
 import com.theveloper.pixelplay.presentation.components.SmartImage
@@ -148,7 +149,12 @@ fun StatsScreen(
     val density = LocalDensity.current
     val coroutineScope = rememberCoroutineScope()
 
-    val statusBarHeight = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+    val insideFloatingPane = LocalInsideFloatingPane.current
+    val statusBarHeight = if (insideFloatingPane) {
+        0.dp
+    } else {
+        WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+    }
     val minTopBarHeight = 62.dp + statusBarHeight
     val maxTopBarHeight = 176.dp
 
@@ -262,7 +268,13 @@ fun StatsScreen(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(MaterialTheme.colorScheme.surface)
+                .background(
+                    if (insideFloatingPane) {
+                        MaterialTheme.colorScheme.surfaceContainerLowest
+                    } else {
+                        MaterialTheme.colorScheme.surface
+                    }
+                )
                 .nestedScroll(nestedScrollConnection)
         ) {
             if (uiState.isLoading && summary == null) {
@@ -270,70 +282,148 @@ fun StatsScreen(
                     ContainedLoadingIndicator()
                 }
             } else {
-                val showDailyRhythm = summary?.range == StatsTimeRange.DAY || summary?.range == StatsTimeRange.WEEK
+                val windowInfo = com.theveloper.pixelplay.ui.theme.LocalPixelPlayWindowInfo.current
+                val spacing = com.theveloper.pixelplay.ui.theme.LocalSpacing.current
+                val horizontalMargin = spacing.screenHorizontal
 
-                LazyColumn(
-                    state = lazyListState,
-                    modifier = Modifier
-                        .fillMaxSize(),
-                    contentPadding = PaddingValues(
-                        top = currentTopBarHeightDp + tabsHeight + tabIndicatorExtraSpacing + tabContentSpacing + 0.dp,
-                        bottom = MiniPlayerHeight + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 16.dp
-                    ),
-                    verticalArrangement = Arrangement.spacedBy(24.dp)
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.TopCenter
                 ) {
-                    item(key = "hero_section") {
-                        StatsHeroSection(
-                            summary = summary,
-                            modifier = Modifier.padding(horizontal = 20.dp)
-                        )
-                    }
-                    item {
-                        ListeningTimelineSection(
-                            summary = summary,
-                            selectedMetric = selectedTimelineMetric,
-                            onMetricSelected = { selectedTimelineMetric = it },
-                            modifier = Modifier.padding(horizontal = 20.dp)
-                        )
-                    }
-                    item {
-                        CategoryMetricsSection(
-                            summary = summary,
-                            selectedDimension = selectedCategoryDimension,
-                            onDimensionSelected = { selectedCategoryDimension = it },
-                            modifier = Modifier.padding(horizontal = 20.dp)
-                        )
-                    }
-
-                    item {
-                        ListeningHabitsCard(
-                            summary = summary,
-                            modifier = Modifier.padding(horizontal = 20.dp)
-                        )
-                    }
-                    item {
-                        TopArtistsCard(
-                            summary = summary,
-                            modifier = Modifier.padding(horizontal = 20.dp)
-                        )
-                    }
-                    item {
-                        TopAlbumsCard(
-                            summary = summary,
-                            modifier = Modifier.padding(horizontal = 20.dp)
-                        )
-                    }
-                    item {
-                        TrackConcentrationCard(
-                            summary = summary,
-                            modifier = Modifier.padding(horizontal = 20.dp)
-                        )
-                    }
-                    item {
-                        SongStatsCard(
-                            summary = summary,
-                            modifier = Modifier.padding(horizontal = 20.dp)
-                        )
+                    LazyColumn(
+                        state = lazyListState,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .then(if (windowInfo.useTwoColumnStats) Modifier.widthIn(max = 1280.dp) else Modifier),
+                        contentPadding = PaddingValues(
+                            top = currentTopBarHeightDp + tabsHeight + tabIndicatorExtraSpacing + tabContentSpacing,
+                            bottom = MiniPlayerHeight + if (insideFloatingPane) {
+                                0.dp
+                            } else {
+                                WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+                            } + spacing.lg
+                        ),
+                        verticalArrangement = Arrangement.spacedBy(spacing.xxl)
+                    ) {
+                        item(key = "hero_section") {
+                            StatsHeroSection(
+                                summary = summary,
+                                modifier = Modifier.padding(horizontal = horizontalMargin)
+                            )
+                        }
+                        if (windowInfo.useTwoColumnStats) {
+                            item(key = "stats_bento_row_1") {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = horizontalMargin),
+                                    horizontalArrangement = Arrangement.spacedBy(spacing.xl),
+                                    verticalAlignment = Alignment.Top
+                                ) {
+                                    ListeningTimelineSection(
+                                        summary = summary,
+                                        selectedMetric = selectedTimelineMetric,
+                                        onMetricSelected = { selectedTimelineMetric = it },
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    CategoryMetricsSection(
+                                        summary = summary,
+                                        selectedDimension = selectedCategoryDimension,
+                                        onDimensionSelected = { selectedCategoryDimension = it },
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
+                            }
+                            item(key = "stats_bento_row_2") {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = horizontalMargin),
+                                    horizontalArrangement = Arrangement.spacedBy(spacing.xl),
+                                    verticalAlignment = Alignment.Top
+                                ) {
+                                    ListeningHabitsCard(
+                                        summary = summary,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    TrackConcentrationCard(
+                                        summary = summary,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
+                            }
+                            item(key = "stats_bento_row_3") {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = horizontalMargin),
+                                    horizontalArrangement = Arrangement.spacedBy(spacing.xl),
+                                    verticalAlignment = Alignment.Top
+                                ) {
+                                    TopArtistsCard(
+                                        summary = summary,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    TopAlbumsCard(
+                                        summary = summary,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
+                            }
+                            item(key = "stats_songs_card") {
+                                SongStatsCard(
+                                    summary = summary,
+                                    modifier = Modifier.padding(horizontal = horizontalMargin)
+                                )
+                            }
+                        } else {
+                            item {
+                                ListeningTimelineSection(
+                                    summary = summary,
+                                    selectedMetric = selectedTimelineMetric,
+                                    onMetricSelected = { selectedTimelineMetric = it },
+                                    modifier = Modifier.padding(horizontal = horizontalMargin)
+                                )
+                            }
+                            item {
+                                CategoryMetricsSection(
+                                    summary = summary,
+                                    selectedDimension = selectedCategoryDimension,
+                                    onDimensionSelected = { selectedCategoryDimension = it },
+                                    modifier = Modifier.padding(horizontal = horizontalMargin)
+                                )
+                            }
+                            item {
+                                ListeningHabitsCard(
+                                    summary = summary,
+                                    modifier = Modifier.padding(horizontal = horizontalMargin)
+                                )
+                            }
+                            item {
+                                TopArtistsCard(
+                                    summary = summary,
+                                    modifier = Modifier.padding(horizontal = horizontalMargin)
+                                )
+                            }
+                            item {
+                                TopAlbumsCard(
+                                    summary = summary,
+                                    modifier = Modifier.padding(horizontal = horizontalMargin)
+                                )
+                            }
+                            item {
+                                TrackConcentrationCard(
+                                    summary = summary,
+                                    modifier = Modifier.padding(horizontal = horizontalMargin)
+                                )
+                            }
+                            item {
+                                SongStatsCard(
+                                    summary = summary,
+                                    modifier = Modifier.padding(horizontal = horizontalMargin)
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -453,7 +543,7 @@ private fun HeroCard(
         )
         Text(
             text = value,
-            style = ExpTitleTypography.displayMedium.copy(fontSize = 32.sp),
+            style = MaterialTheme.typography.headlineLargeEmphasized,
             fontWeight = FontWeight.Bold,
             color = contentColor
         )
@@ -2615,10 +2705,7 @@ private fun TrackDistributionDonut(
                     R.string.stats_percent,
                     (topThreeShare * 100f).roundToInt()
                 ),
-                style = rememberStatsMetricValueStyle(compact = false).copy(
-                    fontSize = 24.sp,
-                    lineHeight = 26.sp
-                ),
+                style = MaterialTheme.typography.headlineSmallEmphasized,
                 color = MaterialTheme.colorScheme.onSurface
             )
             Text(

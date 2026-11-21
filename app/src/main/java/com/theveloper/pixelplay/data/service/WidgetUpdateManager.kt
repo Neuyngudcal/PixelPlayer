@@ -41,6 +41,7 @@ internal class WidgetUpdateManager(
     private val wearStatePublisher: WearStatePublisher,
     private val buildPlayerInfo: suspend () -> PlayerInfo,
     private val resolveCurrentMediaIdForWear: suspend () -> String?,
+    private val widgetUpdater: (suspend (PlayerInfo) -> Unit)? = null,
 ) {
     private companion object {
         private const val TAG = "MusicService_PixelPlay"
@@ -84,6 +85,15 @@ internal class WidgetUpdateManager(
     }
 
     /**
+     * Cancels any queued debounced/follow-up updates and immediately publishes the latest
+     * state to widgets and Wear OS. Intended for synchronous-style flush prior to `stopSelf()`.
+     */
+    suspend fun flushImmediateUpdate() {
+        cancel()
+        processUpdateInternal()
+    }
+
+    /**
      * Drops the cached [PlayerInfo] so its embedded artwork ByteArray becomes
      * GC-eligible under memory pressure. The next update rebuilds it from scratch.
      */
@@ -104,7 +114,11 @@ internal class WidgetUpdateManager(
         }
 
         if (shouldUpdateWidgets) {
-            updateGlanceWidgets(playerInfo)
+            if (widgetUpdater != null) {
+                widgetUpdater.invoke(playerInfo)
+            } else {
+                updateGlanceWidgets(playerInfo)
+            }
         }
 
         if (shouldPublishWear) {

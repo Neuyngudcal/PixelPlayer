@@ -24,6 +24,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavHostController
@@ -38,6 +39,8 @@ import kotlinx.coroutines.launch
 internal val NavBarContentHeight = 90.dp // Altura del contenido de la barra de navegación
 internal val NavBarCompactContentHeight = 64.dp
 internal val NavBarContentHeightFullWidth = NavBarContentHeight // Altura del contenido de la barra de navegación en modo completo
+internal val NavBarDefaultMinHorizontalPadding = 14.dp
+internal val NavBarDefaultMinBottomPadding = 12.dp
 private val MainScreenBottomGradientExtraHeight = MiniPlayerHeight + MiniPlayerBottomSpacer + 8.dp
 // Some OEM freeform/floating-window modes can report a bottom inset close to the whole window height.
 internal val MaxNavigationBarBottomInset = 96.dp
@@ -45,6 +48,28 @@ internal val MaxNavigationBarBottomInset = 96.dp
 internal fun sanitizeNavigationBarBottomInset(systemNavBarInset: Dp): Dp {
     if (!systemNavBarInset.value.isFinite()) return 0.dp
     return systemNavBarInset.coerceIn(0.dp, MaxNavigationBarBottomInset)
+}
+
+internal fun resolveNavBarHorizontalPadding(
+    navBarStyle: String,
+    systemNavBarInset: Dp
+): Dp {
+    if (navBarStyle != NavBarStyle.DEFAULT) return 0.dp
+    val safeInset = sanitizeNavigationBarBottomInset(systemNavBarInset)
+    return if (safeInset > 30.dp || safeInset < NavBarDefaultMinHorizontalPadding) {
+        NavBarDefaultMinHorizontalPadding
+    } else {
+        safeInset
+    }
+}
+
+internal fun resolveNavBarBottomPadding(
+    navBarStyle: String,
+    systemNavBarInset: Dp
+): Dp {
+    if (navBarStyle == NavBarStyle.FULL_WIDTH) return 0.dp
+    val safeInset = sanitizeNavigationBarBottomInset(systemNavBarInset)
+    return maxOf(safeInset, NavBarDefaultMinBottomPadding)
 }
 
 internal fun calculatePlayerSheetCollapsedTargetY(
@@ -66,8 +91,14 @@ internal fun calculatePlayerSheetCollapsedTargetY(
 internal fun resolveNavBarContentHeight(compactMode: Boolean): Dp =
     if (compactMode) NavBarCompactContentHeight else NavBarContentHeight
 
-internal fun resolveMainScreenBottomGradientHeight(compactMode: Boolean): Dp =
+internal fun resolveMainScreenBottomGradientHeight(
+    compactMode: Boolean,
+    useNavigationRail: Boolean = false
+): Dp = if (useNavigationRail) {
+    MainScreenBottomGradientExtraHeight
+} else {
     resolveNavBarContentHeight(compactMode) + MainScreenBottomGradientExtraHeight
+}
 
 internal fun resolveNavBarSurfaceHeight(
     navBarStyle: String,
@@ -75,8 +106,9 @@ internal fun resolveNavBarSurfaceHeight(
     compactMode: Boolean
 ): Dp {
     val contentHeight = resolveNavBarContentHeight(compactMode)
+    val safeInset = sanitizeNavigationBarBottomInset(systemNavBarInset)
     return if (navBarStyle == NavBarStyle.FULL_WIDTH) {
-        contentHeight + systemNavBarInset
+        contentHeight + safeInset
     } else {
         contentHeight
     }
@@ -84,8 +116,16 @@ internal fun resolveNavBarSurfaceHeight(
 
 internal fun resolveNavBarOccupiedHeight(
     systemNavBarInset: Dp,
-    compactMode: Boolean
-): Dp = resolveNavBarContentHeight(compactMode) + systemNavBarInset
+    compactMode: Boolean,
+    navBarStyle: String = NavBarStyle.DEFAULT
+): Dp {
+    val contentHeight = resolveNavBarContentHeight(compactMode)
+    return if (navBarStyle == NavBarStyle.FULL_WIDTH) {
+        contentHeight + sanitizeNavigationBarBottomInset(systemNavBarInset)
+    } else {
+        contentHeight + resolveNavBarBottomPadding(navBarStyle, systemNavBarInset)
+    }
+}
 
 @Composable
 private fun PlayerInternalNavigationItemsRow(
@@ -96,6 +136,7 @@ private fun PlayerInternalNavigationItemsRow(
     navBarStyle: String,
     compactMode: Boolean,
     bottomBarPadding: Dp,
+    navigationEnabled: Boolean = true,
     onSearchIconDoubleTap: () -> Unit
 ) {
     val navBarInsetPadding = sanitizeNavigationBarBottomInset(
@@ -107,7 +148,8 @@ private fun PlayerInternalNavigationItemsRow(
     val innerRowPadding = (navBarInsetPadding - bottomBarPadding).coerceAtLeast(0.dp)
     val latestCurrentRoute by rememberUpdatedState(currentRoute)
     val latestOnSearchIconDoubleTap by rememberUpdatedState(onSearchIconDoubleTap)
-    val latestNavigationEnabled by rememberUpdatedState(currentRoute != null)
+    val isInteractive = currentRoute != null && navigationEnabled
+    val latestNavigationEnabled by rememberUpdatedState(isInteractive)
 
     val rowModifier = if (navBarStyle == NavBarStyle.FULL_WIDTH) {
         modifier
@@ -127,28 +169,26 @@ private fun PlayerInternalNavigationItemsRow(
         var lastSearchTapTimestamp by remember { mutableStateOf(0L) }
         navItems.forEach { item ->
             val isSelected = currentRoute != null && currentRoute == item.screen.route
-            val selectedColor = MaterialTheme.colorScheme.primary
+            val selectedIconColor = MaterialTheme.colorScheme.onSecondaryContainer
+            val selectedTextColor = MaterialTheme.colorScheme.onSurface
             val unselectedColor = MaterialTheme.colorScheme.onSurfaceVariant
             val indicatorColorFromTheme = MaterialTheme.colorScheme.secondaryContainer
 
-            val iconPainterResId = if (isSelected && item.selectedIconResId != null && item.selectedIconResId != 0) {
-                item.selectedIconResId
-            } else {
-                item.iconResId
-            }
+            val unselectedIconResId = item.iconResId
+            val selectedIconResId = item.selectedIconResId?.takeIf { it != 0 } ?: item.iconResId
             val localizedLabel = stringResource(id = item.labelResId)
-            val iconLambda: @Composable () -> Unit = remember(iconPainterResId, localizedLabel) {
+            val iconLambda: @Composable () -> Unit = remember(unselectedIconResId, localizedLabel) {
                 {
                     Icon(
-                        painter = painterResource(id = iconPainterResId),
+                        painter = painterResource(id = unselectedIconResId),
                         contentDescription = localizedLabel
                     )
                 }
             }
-            val selectedIconLambda: @Composable () -> Unit = remember(iconPainterResId, localizedLabel) {
+            val selectedIconLambda: @Composable () -> Unit = remember(selectedIconResId, localizedLabel) {
                 {
                     Icon(
-                        painter = painterResource(id = iconPainterResId),
+                        painter = painterResource(id = selectedIconResId),
                         contentDescription = localizedLabel
                     )
                 }
@@ -157,7 +197,14 @@ private fun PlayerInternalNavigationItemsRow(
                 null
             } else {
                 remember(localizedLabel) {
-                    { Text(localizedLabel) }
+                    {
+                        Text(
+                            text = localizedLabel,
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                 }
             }
             val onClickLambda: () -> Unit = remember(item.screen.route, navController, scope) {
@@ -206,16 +253,15 @@ private fun PlayerInternalNavigationItemsRow(
                 modifier = Modifier.weight(1f),
                 selected = isSelected,
                 onClick = onClickLambda,
-                enabled = currentRoute != null,
-                compactMode = compactMode,
+                enabled = isInteractive,
                 icon = iconLambda,
                 selectedIcon = selectedIconLambda,
                 label = labelLambda,
                 contentDescription = localizedLabel,
                 alwaysShowLabel = true,
-                selectedIconColor = selectedColor,
+                selectedIconColor = selectedIconColor,
                 unselectedIconColor = unselectedColor,
-                selectedTextColor = selectedColor,
+                selectedTextColor = selectedTextColor,
                 unselectedTextColor = unselectedColor,
                 indicatorColor = indicatorColorFromTheme
             )
@@ -232,6 +278,7 @@ fun PlayerInternalNavigationBar(
     navBarStyle: String,
     compactMode: Boolean,
     bottomBarPadding: Dp = 0.dp,
+    navigationEnabled: Boolean = true,
     onSearchIconDoubleTap: () -> Unit = {}
 ) {
     PlayerInternalNavigationItemsRow(
@@ -241,6 +288,7 @@ fun PlayerInternalNavigationBar(
         navBarStyle = navBarStyle,
         compactMode = compactMode,
         bottomBarPadding = bottomBarPadding,
+        navigationEnabled = navigationEnabled,
         onSearchIconDoubleTap = onSearchIconDoubleTap,
         modifier = modifier
     )

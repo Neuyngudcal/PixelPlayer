@@ -1,9 +1,12 @@
 package com.theveloper.pixelplay.data.model
 
+import androidx.compose.runtime.Immutable
+
 /**
  * Preference for lyrics source priority order.
  * Determines which source to try first when fetching lyrics.
  */
+@Immutable
 enum class LyricsSourcePreference(val displayName: String) {
     /**
      * Try online API first, then embedded lyrics, then local .lrc files

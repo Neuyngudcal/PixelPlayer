@@ -1,7 +1,10 @@
 package com.theveloper.pixelplay.presentation.components
 
 import android.Manifest
+import android.annotation.SuppressLint
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.togetherWith
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -29,6 +32,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
@@ -51,8 +55,10 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Cast
 import androidx.compose.material.icons.filled.Devices
@@ -60,21 +66,26 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.rounded.Bluetooth
 import androidx.compose.material.icons.rounded.BluetoothDisabled
 import androidx.compose.material.icons.rounded.BatteryFull
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Headphones
 import androidx.compose.material.icons.rounded.Speaker
 import androidx.compose.material.icons.rounded.Tv
 import androidx.compose.material.icons.rounded.Wifi
 import androidx.compose.material.icons.rounded.WifiOff
+import com.theveloper.pixelplay.presentation.components.player.PlayerCardOverlayDialog
+import com.theveloper.pixelplay.presentation.components.player.PlayerCardOverlaySheet
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.CircularWavyProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.PrimaryTabRow
@@ -153,6 +164,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Velocity
 import com.theveloper.pixelplay.utils.shapes.RoundedStarShape
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlin.math.abs
@@ -164,7 +176,8 @@ import kotlin.math.roundToInt
 fun CastBottomSheet(
     playerViewModel: PlayerViewModel,
     onDismiss: () -> Unit,
-    onExpansionChanged: (Float) -> Unit = {}
+    onExpansionChanged: (Float) -> Unit = {},
+    isContainedInCard: Boolean = false
 ) {
     val routes by playerViewModel.castRoutes.collectAsStateWithLifecycle()
     val selectedRoute by playerViewModel.selectedRoute.collectAsStateWithLifecycle()
@@ -176,9 +189,10 @@ fun CastBottomSheet(
     val isBluetoothEnabled by playerViewModel.isBluetoothEnabled.collectAsStateWithLifecycle()
     val bluetoothName by playerViewModel.bluetoothName.collectAsStateWithLifecycle()
     val bluetoothAudioDeviceStates by playerViewModel.bluetoothAudioDeviceStates.collectAsStateWithLifecycle()
+    val connectingBluetoothAddress by playerViewModel.connectingBluetoothAddress.collectAsStateWithLifecycle()
     val isRemotePlaybackActive by playerViewModel.isRemotePlaybackActive.collectAsStateWithLifecycle()
     val isCastConnecting by playerViewModel.isCastConnecting.collectAsStateWithLifecycle()
-    val trackVolume by playerViewModel.trackVolume.collectAsStateWithLifecycle()
+    val localDeviceVolume by playerViewModel.localDeviceVolume.collectAsStateWithLifecycle()
     val isPlaying = playerViewModel.stablePlayerState.collectAsStateWithLifecycle().value.isPlaying
     val context = LocalContext.current
 
@@ -203,6 +217,7 @@ fun CastBottomSheet(
     ) {
         missingPermissions = missingCastPermissions(context, requiredPermissions)
         if (missingPermissions.isEmpty()) {
+            playerViewModel.refreshCastRoutes()
             playerViewModel.refreshLocalConnectionInfo(refreshBluetoothDevices = true)
         }
     }
@@ -210,6 +225,7 @@ fun CastBottomSheet(
     LaunchedEffect(Unit) {
         missingPermissions = missingCastPermissions(context, requiredPermissions)
         if (missingPermissions.isEmpty()) {
+            playerViewModel.refreshCastRoutes()
             playerViewModel.refreshLocalConnectionInfo(refreshBluetoothDevices = true)
         }
     }
@@ -229,8 +245,9 @@ fun CastBottomSheet(
     val activeBluetoothName = bluetoothName
         ?.trim()
         ?.takeIf { activeName ->
-            activeName.isNotEmpty() && bluetoothDevices.any { it.name == activeName }
+            activeName.isNotEmpty() && bluetoothDevices.any { it.name.equals(activeName, ignoreCase = true) }
         }
+        ?: bluetoothDevices.firstOrNull { it.isConnected }?.name
 
     val devices = buildList {
         if (isWifiEnabled) {
@@ -264,24 +281,29 @@ fun CastBottomSheet(
 
         if (isBluetoothEnabled) {
             bluetoothDevices.forEach { bluetoothDevice ->
-                val isConnected = bluetoothDevice.name == activeBluetoothName
+                val isConnected = bluetoothDevice.isConnected ||
+                    bluetoothDevice.name.equals(activeBluetoothName, ignoreCase = true)
+                val isConnectingBt = !isConnected &&
+                    bluetoothDevice.address != null &&
+                    bluetoothDevice.address.equals(connectingBluetoothAddress, ignoreCase = true)
                 add(
                     CastDeviceUi(
                         id = "bluetooth_${bluetoothDevice.stableId()}",
                         name = bluetoothDevice.name,
                         deviceType = MediaRouter.RouteInfo.DEVICE_TYPE_BLUETOOTH_A2DP,
                         playbackType = MediaRouter.RouteInfo.PLAYBACK_TYPE_LOCAL,
-                        connectionState = if (isConnected) {
-                            MediaRouter.RouteInfo.CONNECTION_STATE_CONNECTED
-                        } else {
-                            MediaRouter.RouteInfo.CONNECTION_STATE_DISCONNECTED
+                        connectionState = when {
+                            isConnected -> MediaRouter.RouteInfo.CONNECTION_STATE_CONNECTED
+                            isConnectingBt -> MediaRouter.RouteInfo.CONNECTION_STATE_CONNECTING
+                            else -> MediaRouter.RouteInfo.CONNECTION_STATE_DISCONNECTED
                         },
                         volumeHandling = MediaRouter.RouteInfo.PLAYBACK_VOLUME_VARIABLE,
-                        volume = if (isConnected) (trackVolume * 100).toInt() else 0,
+                        volume = if (isConnected) (localDeviceVolume * 100).roundToInt() else 0,
                         volumeMax = 100,
                         isSelected = isConnected && !isRemoteSession,
                         batteryPercent = bluetoothDevice.batteryPercent,
-                        isBluetooth = true
+                        isBluetooth = true,
+                        bluetoothAddress = bluetoothDevice.address
                     )
                 )
             }
@@ -308,6 +330,13 @@ fun CastBottomSheet(
         )
     } else {
         val isBluetoothAudio = isBluetoothEnabled && !activeBluetoothName.isNullOrEmpty()
+        val activeBluetoothDevice = if (isBluetoothAudio) {
+            bluetoothDevices.firstOrNull {
+                it.isConnected || it.name.equals(activeBluetoothName, ignoreCase = true)
+            }
+        } else {
+            null
+        }
         ActiveDeviceUi(
             id = "phone",
             title = if (isBluetoothAudio) activeBluetoothName else stringResource(R.string.cast_this_phone),
@@ -315,9 +344,11 @@ fun CastBottomSheet(
             isRemote = false,
             icon = if (isBluetoothAudio) Icons.Rounded.Bluetooth else Icons.Rounded.Headphones,
             isConnecting = false,
-            volume = trackVolume,
+            volume = localDeviceVolume,
             volumeRange = 0f..1f,
-            connectionLabel = if (isPlaying) stringResource(R.string.cast_playing) else stringResource(R.string.cast_paused)
+            connectionLabel = if (isPlaying) stringResource(R.string.cast_playing) else stringResource(R.string.cast_paused),
+            isBluetooth = isBluetoothAudio,
+            batteryPercent = activeBluetoothDevice?.batteryPercent
         )
     }
 
@@ -325,7 +356,7 @@ fun CastBottomSheet(
         wifiRadioOn = isWifiRadioOn,
         wifiEnabled = isWifiEnabled,
         wifiSsid = wifiName,
-        isScanning = isRefreshing && availableRoutes.isEmpty(),
+        isScanning = isRefreshing && devices.isEmpty() && (isWifiEnabled || isBluetoothEnabled),
         isRefreshing = isRefreshing,
         devices = devices,
         activeDevice = activeDevice,
@@ -343,28 +374,24 @@ fun CastBottomSheet(
         onDispose { onExpansionChanged(0f) }
     }
 
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = sheetState,
-        dragHandle = { BottomSheetDefaults.DragHandle() },
-        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
-        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-        tonalElevation = 12.dp
-    ) {
-        // AQUÍ APLICAMOS EL FIX: Anulamos la fábrica de overscroll para todo lo que esté aquí adentro
+    var showCastSecurityDialog by remember { mutableStateOf(false) }
+    var onConfirmCastSecurityScan by remember { mutableStateOf<() -> Unit>({}) }
+
+    val sheetBody: @Composable () -> Unit = {
         CompositionLocalProvider(
             LocalOverscrollFactory provides null
         ) {
             Box(
                 modifier = Modifier
-                    .padding(bottom = 18.dp)
+                    .padding(bottom = if (isContainedInCard) 6.dp else 18.dp)
             ) {
                 if (missingPermissions.isNotEmpty()) {
                     CastPermissionStep(
                         missingPermissions = missingPermissions,
                         onRequestPermissions = {
                             permissionLauncher.launch(missingPermissions.toTypedArray())
-                        }
+                        },
+                        isContainedInCard = isContainedInCard
                     )
                 } else {
                     CastSheetContent(
@@ -372,9 +399,26 @@ fun CastBottomSheet(
                         onSelectDevice = { id ->
                             when {
                                 id.startsWith("bluetooth_") -> {
-                                    val intent = Intent(Settings.ACTION_BLUETOOTH_SETTINGS)
-                                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                    context.startActivity(intent)
+                                    val targetDevice = devices.firstOrNull { it.id == id }
+                                    val isAlreadyConnected =
+                                        targetDevice?.connectionState == MediaRouter.RouteInfo.CONNECTION_STATE_CONNECTED
+                                    val isConnecting =
+                                        targetDevice?.connectionState == MediaRouter.RouteInfo.CONNECTION_STATE_CONNECTING
+                                    when {
+                                        isAlreadyConnected && isRemoteSession -> {
+                                            playerViewModel.disconnect()
+                                        }
+                                        isAlreadyConnected || isConnecting -> Unit
+                                        targetDevice?.bluetoothAddress != null -> {
+                                            val started = playerViewModel.connectToBluetoothDevice(targetDevice.bluetoothAddress)
+                                            if (started) {
+                                                playerViewModel.refreshLocalConnectionInfo(refreshBluetoothDevices = false)
+                                            } else {
+                                                launchBluetoothEnableOrSettings(context, isBluetoothEnabled)
+                                            }
+                                        }
+                                        else -> launchBluetoothEnableOrSettings(context, isBluetoothEnabled)
+                                    }
                                 }
                                 else -> routes.firstOrNull { it.id == id }?.let { playerViewModel.selectRoute(it) }
                             }
@@ -385,29 +429,93 @@ fun CastBottomSheet(
                         },
                         onVolumeChange = { value ->
                             if (uiState.activeDevice.isRemote) {
-                                playerViewModel.setRouteVolume(value.toInt())
+                                playerViewModel.setRouteVolume(value.roundToInt())
                             } else {
-                                playerViewModel.setTrackVolume(value)
+                                playerViewModel.setLocalDeviceVolume(value)
                             }
                         },
                         onTurnOnWifi = {
-                            val intent = Intent(Settings.ACTION_WIFI_SETTINGS)
-                            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                            context.startActivity(intent)
+                            launchWifiPanelOrSettings(context)
                         },
                         onOpenBluetoothSettings = {
-                            val intent = Intent(Settings.ACTION_BLUETOOTH_SETTINGS)
-                            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                            context.startActivity(intent)
+                            launchBluetoothEnableOrSettings(context, isBluetoothEnabled)
                         },
                         onRefresh = {
                             playerViewModel.refreshCastRoutes()
                             playerViewModel.refreshLocalConnectionInfo(refreshBluetoothDevices = true)
                         },
-                        startWithControls = isRemoteSession
+                        startWithControls = isRemoteSession,
+                        isContainedInCard = isContainedInCard,
+                        onClose = if (isContainedInCard) onDismiss else null,
+                        onRequestSecurityWarning = { onConfirmScan ->
+                            onConfirmCastSecurityScan = onConfirmScan
+                            showCastSecurityDialog = true
+                        }
                     )
                 }
             }
+        }
+    }
+
+    if (isContainedInCard) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            PlayerCardOverlaySheet(
+                onDismissRequest = onDismiss,
+                containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                tonalElevation = 12.dp,
+                maxHeightFraction = 0.90f
+            ) {
+                sheetBody()
+            }
+
+            if (showCastSecurityDialog) {
+                CastSecurityWarningDialog(
+                    wifiEnabled = uiState.wifiEnabled,
+                    wifiSsid = uiState.wifiSsid,
+                    onConfirmScan = {
+                        showCastSecurityDialog = false
+                        onConfirmCastSecurityScan()
+                    },
+                    onOpenWifiSettings = {
+                        showCastSecurityDialog = false
+                        launchWifiPanelOrSettings(context)
+                    },
+                    onDismiss = {
+                        showCastSecurityDialog = false
+                    },
+                    isContainedInCard = true
+                )
+            }
+        }
+    } else {
+        ModalBottomSheet(
+            onDismissRequest = onDismiss,
+            sheetState = sheetState,
+            dragHandle = { BottomSheetDefaults.DragHandle() },
+            shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+            tonalElevation = 12.dp
+        ) {
+            sheetBody()
+        }
+
+        if (showCastSecurityDialog) {
+            CastSecurityWarningDialog(
+                wifiEnabled = uiState.wifiEnabled,
+                wifiSsid = uiState.wifiSsid,
+                onConfirmScan = {
+                    showCastSecurityDialog = false
+                    onConfirmCastSecurityScan()
+                },
+                onOpenWifiSettings = {
+                    showCastSecurityDialog = false
+                    launchWifiPanelOrSettings(context)
+                },
+                onDismiss = {
+                    showCastSecurityDialog = false
+                },
+                isContainedInCard = false
+            )
         }
     }
 }
@@ -423,7 +531,8 @@ private data class CastDeviceUi(
     val volumeMax: Int,
     val isSelected: Boolean,
     val batteryPercent: Int? = null,
-    val isBluetooth: Boolean = false
+    val isBluetooth: Boolean = false,
+    val bluetoothAddress: String? = null
 )
 
 private data class ActiveDeviceUi(
@@ -435,7 +544,9 @@ private data class ActiveDeviceUi(
     val isConnecting: Boolean,
     val volume: Float,
     val volumeRange: ClosedFloatingPointRange<Float>,
-    val connectionLabel: String
+    val connectionLabel: String,
+    val isBluetooth: Boolean = false,
+    val batteryPercent: Int? = null
 )
 
 private data class CastSheetUiState(
@@ -457,15 +568,19 @@ private fun BluetoothAudioDeviceState.stableId(): String {
 @Composable
 private fun CastPermissionStep(
     missingPermissions: List<String>,
-    onRequestPermissions: () -> Unit
+    onRequestPermissions: () -> Unit,
+    isContainedInCard: Boolean = false
 ) {
     val colors = MaterialTheme.colorScheme
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .navigationBarsPadding()
-            .padding(horizontal = 20.dp, vertical = 24.dp),
-        verticalArrangement = Arrangement.spacedBy(18.dp)
+            .then(if (isContainedInCard) Modifier.verticalScroll(rememberScrollState()) else Modifier.navigationBarsPadding())
+            .padding(
+                horizontal = if (isContainedInCard) 16.dp else 20.dp,
+                vertical = if (isContainedInCard) 18.dp else 24.dp
+            ),
+        verticalArrangement = Arrangement.spacedBy(if (isContainedInCard) 14.dp else 18.dp)
     ) {
         Text(
             text = stringResource(R.string.cast_perm_title),
@@ -493,11 +608,13 @@ private fun CastPermissionStep(
                     title = stringResource(R.string.cast_perm_nearby_title),
                     description = stringResource(R.string.cast_perm_nearby_desc)
                 )
-                PermissionHighlight(
-                    icon = Icons.Rounded.Wifi,
-                    title = stringResource(R.string.cast_perm_location_title),
-                    description = stringResource(R.string.cast_perm_location_desc)
-                )
+                if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.R) {
+                    PermissionHighlight(
+                        icon = Icons.Rounded.Wifi,
+                        title = stringResource(R.string.cast_perm_location_title),
+                        description = stringResource(R.string.cast_perm_location_desc)
+                    )
+                }
             }
         }
 
@@ -564,6 +681,59 @@ private fun missingCastPermissions(context: Context, permissions: List<String>):
     }
 }
 
+private fun Context.findActivity(): android.app.Activity? {
+    var ctx = this
+    while (ctx is android.content.ContextWrapper) {
+        if (ctx is android.app.Activity) return ctx
+        ctx = ctx.baseContext
+    }
+    return null
+}
+
+private fun launchWifiPanelOrSettings(context: Context) {
+    val activity = context.findActivity()
+    val panelIntent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        Intent(Settings.Panel.ACTION_WIFI)
+    } else {
+        Intent(Settings.ACTION_WIFI_SETTINGS)
+    }
+    runCatching {
+        if (activity != null) {
+            activity.startActivity(panelIntent)
+        } else {
+            panelIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            context.startActivity(panelIntent)
+        }
+    }.onFailure {
+        val fallback = Intent(Settings.ACTION_WIFI_SETTINGS).apply {
+            if (activity == null) addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        runCatching { (activity ?: context).startActivity(fallback) }
+    }
+}
+
+private fun launchBluetoothEnableOrSettings(
+    context: Context,
+    isBluetoothEnabled: Boolean
+) {
+    val activity = context.findActivity()
+    if (!isBluetoothEnabled) {
+        val enableIntent = Intent(android.bluetooth.BluetoothAdapter.ACTION_REQUEST_ENABLE).apply {
+            if (activity == null) addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        if (runCatching { (activity ?: context).startActivity(enableIntent) }.isSuccess) {
+            return
+        }
+    }
+    // Try System Media Output Slice / Dialog on Android 11+ if Bluetooth is already ON, else Bluetooth Settings
+    val btIntent = Intent(Settings.ACTION_BLUETOOTH_SETTINGS).apply {
+        if (activity == null) addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    }
+    runCatching { (activity ?: context).startActivity(btIntent) }
+}
+
+@SuppressLint("UnusedBoxWithConstraintsScope")
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun CastSheetContent(
     state: CastSheetUiState,
@@ -573,12 +743,15 @@ private fun CastSheetContent(
     onTurnOnWifi: () -> Unit,
     onOpenBluetoothSettings: () -> Unit,
     onRefresh: () -> Unit,
-    startWithControls: Boolean = true
+    startWithControls: Boolean = true,
+    isContainedInCard: Boolean = false,
+    onClose: (() -> Unit)? = null,
+    onRequestSecurityWarning: ((onConfirmScan: () -> Unit) -> Unit)? = null
 ) {
     val allConnectivityOff = !state.wifiEnabled && !state.isBluetoothEnabled
     val configuration = LocalConfiguration.current
     val safeInsets = WindowInsets.safeDrawing.asPaddingValues()
-    val maxPagerHeight = (
+    val fullscreenMaxPagerHeight = (
         configuration.screenHeightDp.dp -
             safeInsets.calculateTopPadding() -
             safeInsets.calculateBottomPadding() -
@@ -589,7 +762,9 @@ private fun CastSheetContent(
         pageCount = { 2 }
     )
     val scope = rememberCoroutineScope()
+    val motionScheme = MaterialTheme.motionScheme
     var heightAnimationEnabled by remember { mutableStateOf(false) }
+    var showCastSecurityDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         withFrameNanos { }
@@ -597,153 +772,248 @@ private fun CastSheetContent(
         heightAnimationEnabled = true
     }
 
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
+    BoxWithConstraints(
+        modifier = Modifier.fillMaxWidth()
     ) {
+        val maxPagerHeight = if (isContainedInCard) {
+            if (constraints.hasBoundedHeight) {
+                (maxHeight - 156.dp).coerceIn(200.dp, 520.dp)
+            } else {
+                440.dp
+            }
+        } else {
+            fullscreenMaxPagerHeight
+        }
+
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 20.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Box(
-                modifier = Modifier.background(
-                    color = MaterialTheme.colorScheme.surfaceContainerLow,
-                    shape = CircleShape
-                )
-            ) {
-                Text(
-                    modifier = Modifier.padding(start = 6.dp, end = 8.dp),
-                    text = stringResource(R.string.cast_title_connect),
-                    style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.SemiBold)
-                )
-            }
-
-            AnimatedVisibility(
-                visible = state.isScanning,
-                enter = fadeIn(animationSpec = tween(180)),
-                exit = fadeOut(animationSpec = tween(160)),
-                label = "tabScanningIndicator"
-            ) {
-                BadgeChip(
-                    text = stringResource(R.string.cast_scanning_nearby),
-                    iconVector = Icons.Filled.Refresh,
-                    contentColor = MaterialTheme.colorScheme.primary
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(max = maxPagerHeight)
-                .animateContentSize(
-                    animationSpec = if (heightAnimationEnabled) {
-                        tween(durationMillis = 280, easing = FastOutSlowInEasing)
-                    } else {
-                        snap()
-                    },
-                    alignment = Alignment.TopCenter
-                )
-        ) {
-            HorizontalPager(
-                state = pagerState,
+            Row(
                 modifier = Modifier
-                    .wrapContentHeight()
-                    .fillMaxWidth(),
-                verticalAlignment = Alignment.Top
-            ) { page ->
-                when (page) {
-                    0 -> CastControlsTabContent(
-                        state = state,
-                        allConnectivityOff = allConnectivityOff,
-                        onDisconnect = onDisconnect,
-                        onVolumeChange = onVolumeChange,
-                        onTurnOnWifi = onTurnOnWifi,
-                        onOpenBluetoothSettings = onOpenBluetoothSettings,
-                        onRefresh = onRefresh,
-                        bottomSpacing = 20.dp,
-                    )
-                    1 -> CastDevicesTabContent(
-                        state = state,
-                        allConnectivityOff = allConnectivityOff,
-                        onSelectDevice = onSelectDevice,
-                        onDisconnect = onDisconnect,
-                        onTurnOnWifi = onTurnOnWifi,
-                        onOpenBluetoothSettings = onOpenBluetoothSettings,
-                        onRefresh = onRefresh,
-                        maxContentHeight = maxPagerHeight,
+                    .fillMaxWidth()
+                    .padding(horizontal = if (isContainedInCard) 16.dp else 20.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .weight(1f, fill = false)
+                        .background(
+                            color = MaterialTheme.colorScheme.surfaceContainerLow,
+                            shape = CircleShape
+                        )
+                ) {
+                    Text(
+                        modifier = Modifier.padding(start = 4.dp, end = 8.dp),
+                        text = stringResource(R.string.cast_title_connect),
+                        style = if (isContainedInCard) {
+                            MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.SemiBold)
+                        } else {
+                            MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.SemiBold)
+                        },
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
-            }
-        }
 
-        PrimaryTabRow(
-            selectedTabIndex = pagerState.currentPage,
-            modifier = Modifier
-                .fillMaxWidth()
-                .navigationBarsPadding()
-                .padding(horizontal = 16.dp, vertical = 8.dp)
-                .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-                .padding(5.dp),
-            containerColor = Color.Transparent,
-            divider = {},
-            indicator = {}
-        ) {
-            TabAnimation(
-                index = 0,
-                title = stringResource(R.string.cast_tab_controls),
-                selectedIndex = pagerState.currentPage,
-                onClick = {
-                    scope.launch {
-                        pagerState.animateScrollToPage(0)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    AnimatedVisibility(
+                        visible = state.isScanning,
+                        enter = fadeIn(animationSpec = motionScheme.fastEffectsSpec()),
+                        exit = fadeOut(animationSpec = motionScheme.fastEffectsSpec()),
+                        label = "tabScanningIndicator"
+                    ) {
+                        BadgeChip(
+                            text = stringResource(R.string.cast_scanning_nearby),
+                            iconVector = Icons.Filled.Refresh,
+                            contentColor = MaterialTheme.colorScheme.primary
+                        )
                     }
-                },
-                transformOrigin = TransformOrigin(0f, 0.5f)
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        Icons.Rounded.Speaker,
-                        contentDescription = stringResource(R.string.cast_tab_controls),
-                        modifier = Modifier.padding(horizontal = 4.dp)
-                    )
-                    Spacer(Modifier.width(4.dp))
-                    Text(
-                        "CONTROLS",
-                        fontFamily = GoogleSansRounded,
-                        fontWeight = FontWeight.Bold
-                    )
+
+                    if (isContainedInCard && onClose != null) {
+                        Box(
+                            modifier = Modifier
+                                .size(34.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                                .clickable(onClick = onClose),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Close,
+                                contentDescription = stringResource(R.string.player_panel_close),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
                 }
             }
 
-            TabAnimation(
-                index = 1,
-                title = stringResource(R.string.cast_tab_devices),
-                selectedIndex = pagerState.currentPage,
-                onClick = {
-                    scope.launch {
-                        pagerState.animateScrollToPage(1)
-                    }
-                },
-                transformOrigin = TransformOrigin(1f, 0.5f)
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = maxPagerHeight)
+                    .animateContentSize(
+                        animationSpec = if (heightAnimationEnabled) {
+                            motionScheme.defaultSpatialSpec()
+                        } else {
+                            snap()
+                        },
+                        alignment = Alignment.TopCenter
+                    )
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        Icons.Filled.Devices,
-                        contentDescription = stringResource(R.string.cast_tab_devices),
-                        modifier = Modifier.padding(horizontal = 4.dp)
-                    )
-                    Spacer(Modifier.width(4.dp))
-                    Text(
-                        "DEVICES",
-                        fontFamily = GoogleSansRounded,
-                        fontWeight = FontWeight.Bold
-                    )
+                HorizontalPager(
+                    state = pagerState,
+                    modifier = Modifier
+                        .wrapContentHeight()
+                        .fillMaxWidth(),
+                    verticalAlignment = Alignment.Top
+                ) { page ->
+                    when (page) {
+                        0 -> CastControlsTabContent(
+                            state = state,
+                            allConnectivityOff = allConnectivityOff,
+                            onDisconnect = onDisconnect,
+                            onVolumeChange = onVolumeChange,
+                            onCastClick = {
+                                val confirmScan = {
+                                    onRefresh()
+                                    scope.launch {
+                                        pagerState.animateScrollToPage(1)
+                                    }
+                                    Unit
+                                }
+                                if (onRequestSecurityWarning != null) {
+                                    onRequestSecurityWarning(confirmScan)
+                                } else {
+                                    showCastSecurityDialog = true
+                                }
+                            },
+                            onOpenBluetoothSettings = {
+                                if (state.isBluetoothEnabled) {
+                                    onRefresh()
+                                    scope.launch { pagerState.animateScrollToPage(1) }
+                                } else {
+                                    onOpenBluetoothSettings()
+                                }
+                            },
+                            onRefresh = onRefresh,
+                            bottomSpacing = if (isContainedInCard) 8.dp else 20.dp,
+                            isContainedInCard = isContainedInCard
+                        )
+                        1 -> CastDevicesTabContent(
+                            state = state,
+                            allConnectivityOff = allConnectivityOff,
+                            onSelectDevice = onSelectDevice,
+                            onDisconnect = onDisconnect,
+                            onTurnOnWifi = onTurnOnWifi,
+                            onOpenBluetoothSettings = onOpenBluetoothSettings,
+                            onRefresh = onRefresh,
+                            maxContentHeight = maxPagerHeight,
+                            isContainedInCard = isContainedInCard
+                        )
+                    }
                 }
+            }
+
+            PrimaryTabRow(
+                selectedTabIndex = pagerState.currentPage,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .then(if (isContainedInCard) Modifier else Modifier.navigationBarsPadding())
+                    .padding(
+                        horizontal = if (isContainedInCard) 14.dp else 16.dp,
+                        vertical = 8.dp
+                    )
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                    .padding(5.dp),
+                containerColor = Color.Transparent,
+                divider = {},
+                indicator = {}
+            ) {
+                val controlsLabel = stringResource(R.string.cast_tab_controls)
+                TabAnimation(
+                    index = 0,
+                    title = controlsLabel,
+                    selectedIndex = pagerState.currentPage,
+                    onClick = {
+                        scope.launch {
+                            pagerState.animateScrollToPage(0)
+                        }
+                    },
+                    transformOrigin = TransformOrigin(0f, 0.5f)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            Icons.Rounded.Speaker,
+                            contentDescription = controlsLabel,
+                            modifier = Modifier.padding(horizontal = 4.dp)
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            controlsLabel.uppercase(),
+                            fontFamily = GoogleSansRounded,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+
+                val devicesLabel = stringResource(R.string.cast_tab_devices)
+                TabAnimation(
+                    index = 1,
+                    title = devicesLabel,
+                    selectedIndex = pagerState.currentPage,
+                    onClick = {
+                        scope.launch {
+                            pagerState.animateScrollToPage(1)
+                        }
+                    },
+                    transformOrigin = TransformOrigin(1f, 0.5f)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            Icons.Filled.Devices,
+                            contentDescription = devicesLabel,
+                            modifier = Modifier.padding(horizontal = 4.dp)
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            devicesLabel.uppercase(),
+                            fontFamily = GoogleSansRounded,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
+
+            if (showCastSecurityDialog && onRequestSecurityWarning == null) {
+                CastSecurityWarningDialog(
+                    wifiEnabled = state.wifiEnabled,
+                    wifiSsid = state.wifiSsid,
+                    onConfirmScan = {
+                        showCastSecurityDialog = false
+                        onRefresh()
+                        scope.launch {
+                            pagerState.animateScrollToPage(1)
+                        }
+                    },
+                    onOpenWifiSettings = {
+                        showCastSecurityDialog = false
+                        onTurnOnWifi()
+                    },
+                    onDismiss = {
+                        showCastSecurityDialog = false
+                    },
+                    isContainedInCard = isContainedInCard
+                )
             }
         }
     }
@@ -755,33 +1025,39 @@ private fun CastControlsTabContent(
     allConnectivityOff: Boolean,
     onDisconnect: () -> Unit,
     onVolumeChange: (Float) -> Unit,
-    onTurnOnWifi: () -> Unit,
+    onCastClick: () -> Unit,
     onOpenBluetoothSettings: () -> Unit,
     onRefresh: () -> Unit,
     bottomSpacing: Dp,
+    isContainedInCard: Boolean = false
 ) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 20.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
+            .then(if (isContainedInCard) Modifier.verticalScroll(rememberScrollState()) else Modifier)
+            .padding(horizontal = if (isContainedInCard) 16.dp else 20.dp),
+        verticalArrangement = Arrangement.spacedBy(if (isContainedInCard) 12.dp else 16.dp),
     ) {
         ActiveDeviceHero(
             device = state.activeDevice,
             onDisconnect = onDisconnect,
-            onVolumeChange = onVolumeChange
+            onVolumeChange = onVolumeChange,
+            isContainedInCard = isContainedInCard
         )
 
         Column(
             modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
                     Text(
                         text = stringResource(R.string.cast_connectivity),
                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
@@ -790,10 +1066,12 @@ private fun CastControlsTabContent(
                         text = if (allConnectivityOff) {
                             stringResource(R.string.cast_turn_on_wifi_bt)
                         } else {
-                            "Manage active radios and rescan"
+                            stringResource(R.string.cast_manage_radios_rescan)
                         },
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
                 IconButton(onClick = onRefresh) {
@@ -801,19 +1079,21 @@ private fun CastControlsTabContent(
                 }
             }
             QuickSettingsRow(
-                wifiOn = state.wifiRadioOn,
+                isCasting = state.activeDevice.isRemote,
+                activeCastDeviceName = state.activeDevice.title.takeIf { state.activeDevice.isRemote },
                 wifiConnected = state.wifiEnabled,
-                wifiSsid = state.wifiSsid,
-                onWifiClick = onTurnOnWifi,
+                onCastClick = onCastClick,
                 bluetoothEnabled = state.isBluetoothEnabled,
                 bluetoothName = state.bluetoothName,
-                onBluetoothClick = onOpenBluetoothSettings
+                onBluetoothClick = onOpenBluetoothSettings,
+                isContainedInCard = isContainedInCard
             )
         }
         Spacer(modifier = Modifier.height(bottomSpacing))
     }
 }
 
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun CastDevicesTabContent(
     state: CastSheetUiState,
@@ -824,34 +1104,37 @@ private fun CastDevicesTabContent(
     onOpenBluetoothSettings: () -> Unit,
     onRefresh: () -> Unit,
     maxContentHeight: Dp,
+    isContainedInCard: Boolean = false
 ) {
     val colors = MaterialTheme.colorScheme
+    val motionScheme = MaterialTheme.motionScheme
 
     LazyColumn(
         modifier = Modifier
             .fillMaxWidth()
             .heightIn(max = maxContentHeight)
-            .padding(horizontal = 20.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-        contentPadding = PaddingValues(bottom = 20.dp)
+            .padding(horizontal = if (isContainedInCard) 16.dp else 20.dp),
+        verticalArrangement = Arrangement.spacedBy(if (isContainedInCard) 12.dp else 16.dp),
+        contentPadding = PaddingValues(bottom = if (isContainedInCard) 12.dp else 20.dp)
     ) {
-        if (!allConnectivityOff) {
-            item(key = "deviceSectionHeader") {
-                DeviceSectionHeader(
-                    modifier = Modifier.fillMaxWidth(),
-                    hasDevices = state.devices.isNotEmpty(),
-                        onRefresh = onRefresh
-                )
-            }
+        item(key = "deviceSectionHeader") {
+            DeviceSectionHeader(
+                modifier = Modifier.fillMaxWidth(),
+                hasDevices = state.devices.isNotEmpty(),
+                isRefreshing = state.isRefreshing && !allConnectivityOff,
+                onRefresh = onRefresh
+            )
+        }
 
+        if (!allConnectivityOff) {
             item(key = "refreshIndicator") {
                 AnimatedVisibility(
-                    visible = state.isRefreshing,
-                    enter = fadeIn(animationSpec = tween(200, easing = FastOutSlowInEasing)),
-                    exit = fadeOut(animationSpec = tween(180)),
+                    visible = state.isRefreshing && state.devices.isNotEmpty(),
+                    enter = fadeIn(animationSpec = motionScheme.fastEffectsSpec()),
+                    exit = fadeOut(animationSpec = motionScheme.fastEffectsSpec()),
                     label = "refreshIndicator"
                 ) {
-                    LinearProgressIndicator(
+                    LinearWavyProgressIndicator(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(18.dp)),
@@ -862,13 +1145,14 @@ private fun CastDevicesTabContent(
             }
         }
 
-        if (state.isScanning && state.devices.isEmpty()) {
-            item(key = "scanningPlaceholder") {
-                ScanningPlaceholderList()
-            }
-        } else if (state.devices.isEmpty()) {
-            item(key = "emptyDevices") {
-                EmptyDeviceState()
+        if (state.devices.isEmpty()) {
+            item(key = "emptyOrScanningDevices") {
+                EmptyDeviceState(
+                    isScanning = state.isRefreshing && !allConnectivityOff,
+                    allConnectivityOff = allConnectivityOff,
+                    onTurnOnWifi = onTurnOnWifi,
+                    onOpenBluetoothSettings = onOpenBluetoothSettings
+                )
             }
         } else {
             items(state.devices, key = { it.id }) { device ->
@@ -883,359 +1167,13 @@ private fun CastDevicesTabContent(
 }
 
 @Composable
-private fun CastSheetContainer(
-    onDismiss: () -> Unit,
-    onExpansionChanged: (Float) -> Unit = {},
-    content: @Composable () -> Unit
-) {
-    val density = LocalDensity.current
-    val scope = rememberCoroutineScope()
-    var sheetHeightPx by remember { mutableFloatStateOf(0f) }
-    val hiddenOffsetPx = remember { mutableFloatStateOf(0f) }
-    val sheetOffset = remember { Animatable(0f) }
-    val contentAlpha = remember { Animatable(0f) }
-    var isVisible by remember { mutableStateOf(false) }
-    var isDismissing by remember { mutableStateOf(false) }
-    var pendingOpenAnimation by remember { mutableStateOf(false) }
-    var dragOffsetCache by remember { mutableStateOf<Float?>(null) }
-    var pendingDragTarget by remember { mutableStateOf<Float?>(null) }
-    var dragSnapJob by remember { mutableStateOf<Job?>(null) }
-
-    fun resetDragPipeline() {
-        dragOffsetCache = null
-        pendingDragTarget = null
-        dragSnapJob?.cancel()
-        dragSnapJob = null
-    }
-
-    fun launchDragSnapLoopIfNeeded() {
-        if (dragSnapJob?.isActive == true) return
-        dragSnapJob = scope.launch {
-            while (isActive) {
-                val target = pendingDragTarget ?: break
-                pendingDragTarget = null
-                sheetOffset.snapTo(target)
-                withFrameNanos { }
-            }
-            dragSnapJob = null
-        }
-    }
-
-    val scrimAlpha by animateFloatAsState(
-        targetValue = if (isVisible) 0.45f else 0f,
-        animationSpec = tween(durationMillis = 240, easing = FastOutSlowInEasing),
-        label = "scrimAlpha"
-    )
-
-    LaunchedEffect(sheetHeightPx) {
-        if (sheetHeightPx == 0f) return@LaunchedEffect
-        hiddenOffsetPx.floatValue = sheetHeightPx
-
-        if (!isVisible) {
-            sheetOffset.snapTo(sheetHeightPx)
-            // Once we are snapped to the hidden position, make content visible (alpha 1)
-            // so we can see it slide in.
-            contentAlpha.snapTo(1f)
-            isVisible = true
-            onExpansionChanged(1f)
-            pendingOpenAnimation = true
-        }
-
-        if (!isDismissing && sheetOffset.value > 0.5f) {
-            resetDragPipeline()
-            if (pendingOpenAnimation) {
-                withFrameNanos { }
-                pendingOpenAnimation = false
-            }
-            val hidden = hiddenOffsetPx.floatValue
-            val travelFraction = if (hidden > 0f) {
-                (abs(sheetOffset.value) / hidden).coerceIn(0f, 1f)
-            } else {
-                1f
-            }
-            val durationMillis = (220f + (130f * travelFraction)).toInt()
-            sheetOffset.animateTo(0f, tween(durationMillis = durationMillis, easing = FastOutSlowInEasing))
-        }
-    }
-
-    suspend fun animateToRest() {
-        val hidden = hiddenOffsetPx.floatValue
-        val travelFraction = if (hidden > 0f) {
-            (abs(sheetOffset.value) / hidden).coerceIn(0f, 1f)
-        } else {
-            1f
-        }
-        val durationMillis = (170f + (120f * travelFraction)).toInt()
-        sheetOffset.animateTo(0f, tween(durationMillis = durationMillis, easing = FastOutSlowInEasing))
-    }
-
-    fun dismissSheet(velocity: Float = 0f) {
-        if (isDismissing) return
-        isDismissing = true
-        resetDragPipeline()
-        val targetOffset = when {
-            hiddenOffsetPx.floatValue > 0f -> hiddenOffsetPx.floatValue
-            sheetHeightPx > 0f -> sheetHeightPx
-            else -> sheetOffset.value + 1f // Ensure a movement path exists
-        }
-        scope.launch {
-            isVisible = false
-            onExpansionChanged(0f)
-            try {
-                sheetOffset.animateTo(
-                    targetValue = targetOffset,
-                    animationSpec = tween(durationMillis = 240, easing = FastOutSlowInEasing),
-                    initialVelocity = velocity
-                )
-            } finally {
-                onDismiss()
-            }
-        }
-    }
-
-    val dragThreshold = with(density) { 72.dp.toPx() }
-
-    // Shared logic for manual dragging (from header or nested scroll)
-    fun onDrag(dragAmount: Float) {
-        if (isDismissing) return
-        val current = dragOffsetCache ?: sheetOffset.value
-        val target = (current + dragAmount).coerceIn(0f, hiddenOffsetPx.floatValue)
-        dragOffsetCache = target
-        pendingDragTarget = target
-        launchDragSnapLoopIfNeeded()
-    }
-
-    fun onDragEnd(velocity: Float) {
-        if (isDismissing) return
-        val settledOffset = pendingDragTarget ?: dragOffsetCache ?: sheetOffset.value
-        resetDragPipeline()
-        if (settledOffset > dragThreshold || velocity > 1400f) {
-            dismissSheet(velocity)
-        } else {
-            scope.launch { animateToRest() }
-        }
-    }
-
-    // Drag modifier for non-scrollable areas (e.g. Header)
-    val sheetDragModifier = Modifier.pointerInput(dragThreshold, hiddenOffsetPx.floatValue) {
-        val velocityTracker = VelocityTracker()
-        detectVerticalDragGestures(
-            onDragStart = { velocityTracker.resetTracking() },
-            onVerticalDrag = { change, dragAmount ->
-                change.consume()
-                velocityTracker.addPosition(change.uptimeMillis, change.position)
-                onDrag(dragAmount)
-            },
-            onDragEnd = {
-                val velocity = velocityTracker.calculateVelocity().y
-                onDragEnd(velocity)
-            },
-            onDragCancel = {
-                resetDragPipeline()
-                scope.launch { animateToRest() }
-            }
-        )
-    }
-
-    // Nested scroll connection for the list area
-    val nestedScrollConnection = remember {
-        object : androidx.compose.ui.input.nestedscroll.NestedScrollConnection {
-            override fun onPreScroll(available: Offset, source: androidx.compose.ui.input.nestedscroll.NestedScrollSource): Offset {
-                if (sheetOffset.value > 0f) {
-                    // Sheet is moving (dragging up/down while partially open).
-                    // We consume all vertical delta to move the sheet.
-                    val delta = available.y
-                    // Dragging up (delta < 0) reduces offset (moves sheet up towards 0).
-                    // Dragging down (delta > 0) increases offset (moves sheet down).
-                    // Logic in onDrag handles addition correctly.
-                    onDrag(delta)
-                    return Offset(0f, delta)
-                }
-                return Offset.Zero
-            }
-
-            override fun onPostScroll(consumed: Offset, available: Offset, source: androidx.compose.ui.input.nestedscroll.NestedScrollSource): Offset {
-                // If list reached top and user drags down (available.y > 0)
-                if (available.y > 0f) {
-                    onDrag(available.y)
-                    return Offset(0f, available.y)
-                }
-                return Offset.Zero
-            }
-
-            override suspend fun onPreFling(available: Velocity): Velocity {
-                if (sheetOffset.value > 0f) {
-                    onDragEnd(available.y)
-                    return available
-                }
-                return Velocity.Zero
-            }
-        }
-    }
-
-    BackHandler(enabled = isVisible && !isDismissing) { dismissSheet() }
-
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color.Transparent)
-    ) {
-        Box(
-            modifier = Modifier
-                .matchParentSize()
-                .background(MaterialTheme.colorScheme.scrim.copy(alpha = scrimAlpha))
-                .clickable(
-                    indication = null,
-                    interactionSource = remember { MutableInteractionSource() }
-                ) { dismissSheet() }
-        )
-
-        Surface(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Horizontal))
-                .onGloballyPositioned {
-                    val height = it.size.height.toFloat()
-                    if (height != sheetHeightPx) sheetHeightPx = height
-                }
-                // Transform-only motion keeps frame budget predictable during open/close animations.
-                .graphicsLayer {
-                    translationY = sheetOffset.value
-                    alpha = contentAlpha.value
-                }
-                .then(sheetDragModifier)
-                .nestedScroll(nestedScrollConnection),
-            shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
-            tonalElevation = 12.dp,
-            color = MaterialTheme.colorScheme.surfaceContainerLow
-        ) {
-            Box(modifier = Modifier.padding(bottom = 18.dp)) {
-                content()
-            }
-        }
-    }
-
-    // Cast overlay fraction is handled at state-level to avoid frame-by-frame parent recomposition.
-}
-
-@Composable
-private fun CollapsibleCastTopBar(
-    modifier: Modifier = Modifier,
-    collapseFraction: Float,
-    isScanning: Boolean,
-    wifiOn: Boolean,
-    wifiConnected: Boolean,
-    wifiSsid: String?,
-    onWifiClick: () -> Unit,
-    isBluetoothEnabled: Boolean,
-    bluetoothName: String?,
-    onBluetoothClick: () -> Unit,
-    maxHeight: Dp
-) {
-    val contentAlpha by animateFloatAsState(
-        targetValue = 1f - collapseFraction,
-        animationSpec = tween(durationMillis = 200, easing = FastOutSlowInEasing),
-        label = "topBarAlpha"
-    )
-    val translationYOffset by animateDpAsState(
-        targetValue = (-12).dp * collapseFraction,
-        animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing),
-        label = "topBarTranslation"
-    )
-    val collapsedTitleAlpha by animateFloatAsState(
-        targetValue = collapseFraction,
-        animationSpec = tween(durationMillis = 200, easing = FastOutSlowInEasing),
-        label = "collapsedTitle"
-    )
-
-    val density = LocalDensity.current
-
-    Box(
-        modifier = modifier
-            .heightIn(min = 0.dp, max = maxHeight)
-            .clipToBounds()
-    ) {
-        //Ch
-//        Box(
-//            modifier = Modifier
-//                .align(Alignment.BottomStart)
-//                .padding(bottom = 20.dp, start = 4.dp)
-//                .graphicsLayer{
-//                    alpha = (collapsedTitleAlpha)
-//                }
-//                .background(
-//                    color = MaterialTheme.colorScheme.surfaceContainerLow,
-//                    shape = CircleShape
-//                )
-//        ) {
-//            Text(
-//                text = stringResource(R.string.cast_title_connect),
-//                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
-//                modifier = Modifier
-//                    .align(Alignment.Center)
-//                    .padding(horizontal = 10.dp, vertical = 6.dp)
-//                    .graphicsLayer { alpha = (collapsedTitleAlpha) },
-//                maxLines = 1
-//            )
-//        }
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .align(Alignment.BottomStart)
-                .padding(bottom = 12.dp)
-                .graphicsLayer {
-                    alpha = contentAlpha
-                    translationY = with(density) { translationYOffset.toPx() }
-                },
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            Box(
-                modifier = Modifier
-                    .background(
-                        color = MaterialTheme.colorScheme.surfaceContainerLow,
-                        shape = CircleShape
-                    )
-            ) {
-                Text(
-                    modifier = Modifier.padding(start = 4.dp),
-                    text = stringResource(R.string.cast_title_connect),
-                    style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.SemiBold)
-                )
-            }
-
-            AnimatedVisibility(
-                visible = isScanning,
-                enter = fadeIn(animationSpec = tween(180)),
-                exit = fadeOut(animationSpec = tween(160)),
-                label = "scanningIndicator"
-            ) {
-                BadgeChip(
-                    text = stringResource(R.string.cast_scanning_nearby),
-                    iconVector = Icons.Filled.Refresh,
-                    contentColor = MaterialTheme.colorScheme.primary
-                )
-            }
-
-            QuickSettingsRow(
-                wifiOn = wifiOn,
-                wifiConnected = wifiConnected,
-                wifiSsid = wifiSsid,
-                onWifiClick = onWifiClick,
-                bluetoothEnabled = isBluetoothEnabled,
-                bluetoothName = bluetoothName,
-                onBluetoothClick = onBluetoothClick
-            )
-        }
-    }
-}
-
-@Composable
 private fun DeviceSectionHeader(
     modifier: Modifier = Modifier,
     hasDevices: Boolean,
+    isRefreshing: Boolean,
     onRefresh: () -> Unit
 ) {
+    val colors = LocalMaterialTheme.current
     Row(
         modifier = modifier,
         horizontalArrangement = Arrangement.SpaceBetween,
@@ -1250,17 +1188,21 @@ private fun DeviceSectionHeader(
                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
             )
             Text(
-                text = if (hasDevices) "Tap to connect" else "No devices yet",
+                text = when {
+                    hasDevices -> stringResource(R.string.cast_tap_to_connect)
+                    isRefreshing -> stringResource(R.string.cast_searching)
+                    else -> stringResource(R.string.cast_no_devices_yet)
+                },
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                color = colors.onSurfaceVariant
             )
         }
 
         IconButton(
             onClick = onRefresh,
             colors = IconButtonDefaults.iconButtonColors(
-                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                contentColor = MaterialTheme.colorScheme.onSurface
+                containerColor = colors.surfaceContainerHigh,
+                contentColor = colors.onSurface
             ),
             modifier = Modifier.clip(RoundedCornerShape(16.dp))
         ) {
@@ -1274,41 +1216,61 @@ private fun DeviceSectionHeader(
 private fun ActiveDeviceHero(
     device: ActiveDeviceUi,
     onDisconnect: () -> Unit,
-    onVolumeChange: (Float) -> Unit
+    onVolumeChange: (Float) -> Unit,
+    isContainedInCard: Boolean = false
 ) {
-    var sliderValue by remember(device.id, device.volume) { mutableFloatStateOf(device.volume) }
-    LaunchedEffect(device.volume) { sliderValue = device.volume }
+    var sliderValue by remember(device.id) { mutableFloatStateOf(device.volume) }
+    var isDraggingSlider by remember(device.id) { mutableStateOf(false) }
+    var justFinishedDrag by remember(device.id) { mutableStateOf(false) }
+    LaunchedEffect(device.volume, isDraggingSlider) {
+        if (!isDraggingSlider) {
+            if (justFinishedDrag) {
+                delay(300)
+                justFinishedDrag = false
+            }
+            sliderValue = device.volume
+        }
+    }
     val haptics = LocalHapticFeedback.current
 
-    val discreteSteps = remember(device.volumeRange) {
-        val span = device.volumeRange.endInclusive - device.volumeRange.start
-        if (span <= 1f) 20 else span.toInt().coerceAtLeast(0) - 1
-    }.coerceAtLeast(0)
     var lastStep by remember(device.id) { mutableIntStateOf(-1) }
 
-    val heroShape = AbsoluteSmoothCornerShape(
-        cornerRadiusTL = 42.dp,
-        cornerRadiusTR = 20.dp,
-        cornerRadiusBL = 20.dp,
-        cornerRadiusBR = 42.dp,
-        smoothnessAsPercentTL = 70,
-        smoothnessAsPercentTR = 70,
-        smoothnessAsPercentBL = 70,
-        smoothnessAsPercentBR = 70
-    )
+    val heroShape = remember {
+        AbsoluteSmoothCornerShape(
+            cornerRadiusTL = 42.dp,
+            smoothnessAsPercentTL = 60,
+            cornerRadiusTR = 20.dp,
+            smoothnessAsPercentTR = 60,
+            cornerRadiusBL = 20.dp,
+            smoothnessAsPercentBL = 60,
+            cornerRadiusBR = 42.dp,
+            smoothnessAsPercentBR = 60
+        )
+    }
+
+    val heroContainerColor = if (device.isRemote) {
+        MaterialTheme.colorScheme.tertiaryContainer
+    } else {
+        MaterialTheme.colorScheme.secondaryContainer
+    }
+    val heroContentColor = if (device.isRemote) {
+        MaterialTheme.colorScheme.onTertiaryContainer
+    } else {
+        MaterialTheme.colorScheme.onSecondaryContainer
+    }
 
     Card(
         shape = heroShape,
         colors = CardDefaults.cardColors(
-            containerColor = if (device.isRemote) MaterialTheme.colorScheme.tertiaryContainer else MaterialTheme.colorScheme.tertiaryContainer
+            containerColor = heroContainerColor
         ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 6.dp)
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+                .padding(if (isContainedInCard) 16.dp else 20.dp),
+            verticalArrangement = Arrangement.spacedBy(if (isContainedInCard) 12.dp else 16.dp)
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -1320,14 +1282,14 @@ private fun ActiveDeviceHero(
                 Box(
                     modifier = Modifier
                         .fillMaxHeight()
-                        .width(62.dp),
+                        .width(if (isContainedInCard) 52.dp else 62.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     Box(
                         modifier = Modifier
                             .matchParentSize()
                             .background(
-                                color = MaterialTheme.colorScheme.onTertiaryContainer.copy(
+                                color = heroContentColor.copy(
                                     alpha = if (device.isConnecting) 0.18f else 0.12f
                                 ),
                                 shape = CircleShape
@@ -1335,32 +1297,33 @@ private fun ActiveDeviceHero(
                         contentAlignment = Alignment.Center
                     ) {
                         if (device.isConnecting) {
-                            CircularProgressIndicator(
+                            CircularWavyProgressIndicator(
                                 modifier = Modifier.size(34.dp),
-                                color = MaterialTheme.colorScheme.onTertiaryContainer,
-                                trackColor = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.2f),
-                                strokeWidth = 4.dp,
-                                strokeCap = StrokeCap.Round
+                                color = heroContentColor,
+                                trackColor = heroContentColor.copy(alpha = 0.2f)
                             )
                         } else {
                             Icon(
                                 imageVector = device.icon,
                                 contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onTertiaryContainer
+                                tint = heroContentColor
                             )
                         }
                     }
                 }
 
-                // La columna de texto dicta la altura de la Row
                 Column(
                     modifier = Modifier.weight(1f),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Text(
                         text = device.title,
-                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                        color = MaterialTheme.colorScheme.onTertiaryContainer,
+                        style = if (isContainedInCard) {
+                            MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                        } else {
+                            MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
+                        },
+                        color = heroContentColor,
                         maxLines = 2
                     )
 
@@ -1370,40 +1333,68 @@ private fun ActiveDeviceHero(
                         append(device.connectionLabel)
                     }
 
-                    Text(
-                        text = if (device.isConnecting && device.isRemote) stringResource(R.string.cast_connecting_ellipsis) else statusText,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onTertiaryContainer,
-                        maxLines = 1
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = if (device.isConnecting && device.isRemote) stringResource(R.string.cast_connecting_ellipsis) else statusText,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = heroContentColor,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false)
+                        )
+
+                        if (device.batteryPercent != null) {
+                            Row(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(50))
+                                    .background(heroContentColor.copy(alpha = 0.12f))
+                                    .padding(horizontal = 8.dp, vertical = 3.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(3.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.BatteryFull,
+                                    contentDescription = stringResource(R.string.cast_cd_battery),
+                                    tint = heroContentColor,
+                                    modifier = Modifier.size(13.dp)
+                                )
+                                Text(
+                                    text = stringResource(R.string.common_percentage_text, device.batteryPercent),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = heroContentColor,
+                                    maxLines = 1
+                                )
+                            }
+                        }
+                    }
                     if (device.isRemote) {
                         Button(
                             onClick = onDisconnect,
                             enabled = !device.isConnecting,
                             shape = RoundedCornerShape(50),
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                                containerColor = MaterialTheme.colorScheme.errorContainer,
                                 contentColor = MaterialTheme.colorScheme.onErrorContainer
                             ),
                             modifier = Modifier
-                                .height(46.dp)
                                 .padding(top = 4.dp)
+                                .height(46.dp)
                         ) {
                             Icon(
                                 modifier = Modifier.size(22.dp),
                                 painter = painterResource(R.drawable.rounded_mimo_disconnect_24),
                                 contentDescription = stringResource(R.string.cast_disconnect),
                             )
-                            Spacer(
-                                modifier = Modifier.width(6.dp)
-                            )
+                            Spacer(modifier = Modifier.width(6.dp))
                             Text(stringResource(R.string.cast_disconnect))
                         }
                     }
                 }
             }
 
-            // Sección de Volumen (Sin cambios)
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -1411,20 +1402,25 @@ private fun ActiveDeviceHero(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = if (device.isRemote) stringResource(R.string.cast_volume_device) else stringResource(R.string.cast_volume_phone),
+                        text = if (device.isRemote || device.isBluetooth) {
+                            stringResource(R.string.cast_volume_device)
+                        } else {
+                            stringResource(R.string.cast_volume_phone)
+                        },
                         style = MaterialTheme.typography.titleSmall,
-                        color = MaterialTheme.colorScheme.onTertiaryContainer
+                        color = heroContentColor
                     )
                     Text(
                         text = buildVolumeLabel(sliderValue, device.volumeRange.endInclusive),
                         style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onTertiaryContainer
+                        color = heroContentColor
                     )
                 }
                 val interactionSource = remember { MutableInteractionSource() }
                 Slider(
                     value = sliderValue.coerceIn(device.volumeRange.start, device.volumeRange.endInclusive),
                     onValueChange = { newValue ->
+                        isDraggingSlider = true
                         sliderValue = newValue
                         val quantized = if (device.volumeRange.endInclusive <= 1f) {
                             (newValue * 20).toInt()
@@ -1437,6 +1433,10 @@ private fun ActiveDeviceHero(
                         }
                         onVolumeChange(newValue)
                     },
+                    onValueChangeFinished = {
+                        justFinishedDrag = true
+                        isDraggingSlider = false
+                    },
                     valueRange = device.volumeRange,
                     track = { sliderState ->
                         SliderDefaults.Track(
@@ -1445,25 +1445,24 @@ private fun ActiveDeviceHero(
                                 .height(30.dp)
                                 .clip(RoundedCornerShape(12.dp)),
                             colors = SliderDefaults.colors(
-                                activeTrackColor = MaterialTheme.colorScheme.onTertiaryContainer,
-                                inactiveTrackColor = MaterialTheme.colorScheme.onTertiary.copy(alpha = 0.2f),
-                                thumbColor = MaterialTheme.colorScheme.onTertiary
+                                activeTrackColor = heroContentColor,
+                                inactiveTrackColor = heroContentColor.copy(alpha = 0.2f),
+                                thumbColor = heroContentColor
                             )
                         )
                     },
                     thumb = { sliderState ->
                         SliderDefaults.Thumb(
-                            modifier = Modifier
-                                .height(36.dp),
+                            modifier = Modifier.height(36.dp),
                             interactionSource = interactionSource,
                             sliderState = sliderState,
-                            colors = SliderDefaults.colors(thumbColor = MaterialTheme.colorScheme.onTertiaryContainer)
+                            colors = SliderDefaults.colors(thumbColor = heroContentColor)
                         )
                     },
                     colors = SliderDefaults.colors(
-                        activeTrackColor = MaterialTheme.colorScheme.tertiary,
-                        inactiveTrackColor = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.2f),
-                        thumbColor = MaterialTheme.colorScheme.onTertiary
+                        activeTrackColor = heroContentColor,
+                        inactiveTrackColor = heroContentColor.copy(alpha = 0.2f),
+                        thumbColor = heroContentColor
                     ),
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -1480,73 +1479,198 @@ private fun buildVolumeLabel(value: Float, max: Float): String {
     }
 }
 
+private enum class EmptyDeviceStateMode {
+    CONNECTIVITY_OFF,
+    SCANNING,
+    IDLE
+}
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-private fun EmptyDeviceState() {
+private fun EmptyDeviceState(
+    isScanning: Boolean = false,
+    allConnectivityOff: Boolean = false,
+    onTurnOnWifi: () -> Unit = {},
+    onOpenBluetoothSettings: () -> Unit = {}
+) {
+    val motionScheme = MaterialTheme.motionScheme
+    val effectiveScanning = isScanning && !allConnectivityOff
+    val mode = when {
+        allConnectivityOff -> EmptyDeviceStateMode.CONNECTIVITY_OFF
+        effectiveScanning -> EmptyDeviceStateMode.SCANNING
+        else -> EmptyDeviceStateMode.IDLE
+    }
+
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 148.dp),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainer
         ),
         shape = RoundedCornerShape(22.dp)
     ) {
-        Column(
-            modifier = Modifier.padding(20.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(20.dp),
+            contentAlignment = Alignment.Center
         ) {
-            Icon(
-                imageVector = Icons.Filled.Devices,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(36.dp)
-            )
-            Text(
-                text = stringResource(R.string.cast_searching),
-                style = MaterialTheme.typography.bodyLarge,
-                textAlign = TextAlign.Center,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Text(
-                text = stringResource(R.string.cast_searching_hint),
-                style = MaterialTheme.typography.bodySmall,
-                textAlign = TextAlign.Center,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            AnimatedContent(
+                targetState = mode,
+                transitionSpec = {
+                    fadeIn(animationSpec = motionScheme.defaultEffectsSpec()) togetherWith
+                        fadeOut(animationSpec = motionScheme.defaultEffectsSpec())
+                },
+                contentAlignment = Alignment.Center,
+                label = "emptyDeviceScanningTransition"
+            ) { currentMode ->
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    when (currentMode) {
+                        EmptyDeviceStateMode.CONNECTIVITY_OFF -> {
+                            Icon(
+                                imageVector = Icons.Rounded.WifiOff,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(36.dp)
+                            )
+                            Text(
+                                text = stringResource(R.string.cast_turn_on_wifi_bt),
+                                style = MaterialTheme.typography.bodyLarge,
+                                textAlign = TextAlign.Center,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Button(
+                                    onClick = onTurnOnWifi,
+                                    shape = RoundedCornerShape(50)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Wifi,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = stringResource(R.string.cast_wifi),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                                Button(
+                                    onClick = onOpenBluetoothSettings,
+                                    shape = RoundedCornerShape(50),
+                                    colors = ButtonDefaults.filledTonalButtonColors()
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Bluetooth,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = stringResource(R.string.cast_bluetooth),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+                        }
+                        EmptyDeviceStateMode.SCANNING -> {
+                            CircularWavyProgressIndicator(
+                                modifier = Modifier.size(36.dp),
+                                color = MaterialTheme.colorScheme.primary,
+                                trackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
+                            )
+                            Text(
+                                text = stringResource(R.string.cast_searching),
+                                style = MaterialTheme.typography.bodyLarge,
+                                textAlign = TextAlign.Center,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                text = stringResource(R.string.cast_searching_hint),
+                                style = MaterialTheme.typography.bodySmall,
+                                textAlign = TextAlign.Center,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        EmptyDeviceStateMode.IDLE -> {
+                            Icon(
+                                imageVector = Icons.Filled.Devices,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(36.dp)
+                            )
+                            Text(
+                                text = stringResource(R.string.cast_no_devices_yet),
+                                style = MaterialTheme.typography.bodyLarge,
+                                textAlign = TextAlign.Center,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                text = stringResource(R.string.cast_searching_hint),
+                                style = MaterialTheme.typography.bodySmall,
+                                textAlign = TextAlign.Center,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
         }
     }
 }
 
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun CastDeviceRow(
     device: CastDeviceUi,
     onSelect: () -> Unit,
     onDisconnect: () -> Unit
 ) {
+    val motionScheme = MaterialTheme.motionScheme
     val (containerColor, onContainer) = when {
         device.isSelected -> MaterialTheme.colorScheme.primaryContainer to MaterialTheme.colorScheme.onPrimaryContainer
         device.isBluetooth -> MaterialTheme.colorScheme.secondaryContainer to MaterialTheme.colorScheme.onSecondaryContainer
-        else -> MaterialTheme.colorScheme.surfaceVariant to MaterialTheme.colorScheme.onSurface
+        else -> MaterialTheme.colorScheme.surfaceContainerHigh to MaterialTheme.colorScheme.onSurface
     }
 
     val isActiveDevice = device.isSelected && device.connectionState == MediaRouter.RouteInfo.CONNECTION_STATE_CONNECTED
-    val scallopShape = RoundedStarShape(sides = 8, curve = 0.10, rotation = 0f)
+    val scallopShape = remember { RoundedStarShape(sides = 8, curve = 0.10, rotation = 0f) }
 
-    // Animaciones
-    val infiniteRotation = rememberInfiniteTransition(label = "activeDeviceRotation")
-    val rotation by infiniteRotation.animateFloat(
-        initialValue = 0f,
-        targetValue = 360f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 9000, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "deviceRotation"
-    )
-    val backgroundScale by animateFloatAsState(
+    val rotationState = if (isActiveDevice) {
+        val infiniteRotation = rememberInfiniteTransition(label = "activeDeviceRotation")
+        infiniteRotation.animateFloat(
+            initialValue = 0f,
+            targetValue = 360f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(durationMillis = 9000, easing = LinearEasing),
+                repeatMode = RepeatMode.Restart
+            ),
+            label = "deviceRotation"
+        )
+    } else {
+        null
+    }
+    val backgroundScaleState = animateFloatAsState(
         targetValue = if (isActiveDevice) 1.16f else 1f,
-        animationSpec = tween(durationMillis = 450, easing = FastOutSlowInEasing),
+        animationSpec = motionScheme.fastSpatialSpec(),
         label = "activeDeviceScale"
     )
+    val itemCornerRadius by animateDpAsState(
+        targetValue = if (device.isSelected) 50.dp else 22.dp,
+        animationSpec = motionScheme.fastSpatialSpec(),
+        label = "deviceRowCornerRadius"
+    )
+    val rowShape = RoundedCornerShape(itemCornerRadius)
 
     val deviceIcon = when (device.deviceType) {
         MediaRouter.RouteInfo.DEVICE_TYPE_TV -> Icons.Rounded.Tv
@@ -1555,49 +1679,50 @@ private fun CastDeviceRow(
         else -> Icons.Filled.Cast
     }
 
+    val isConnecting = device.connectionState == MediaRouter.RouteInfo.CONNECTION_STATE_CONNECTING
+
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(CircleShape) // Mantenemos el clip circular para el ripple
+            .clip(rowShape)
             .clickable(
-                enabled = true,
+                enabled = !isConnecting,
                 onClick = when {
+                    isConnecting -> ({})
                     device.isBluetooth -> onSelect
                     device.isSelected &&
                         device.connectionState == MediaRouter.RouteInfo.CONNECTION_STATE_CONNECTED -> onDisconnect
-                    device.isSelected &&
-                        device.connectionState == MediaRouter.RouteInfo.CONNECTION_STATE_CONNECTING -> ({})
                     else -> onSelect
                 }
             ),
+        shape = rowShape,
         color = containerColor,
         tonalElevation = 2.dp
     ) {
-        // Usamos Row con IntrinsicSize.Min para que la altura se adapte al contenido de texto
-        // pero permita que el icono se centre verticalmente de forma real.
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(IntrinsicSize.Min)
-                .padding(12.dp), // Padding uniforme en los 4 lados
+                .padding(12.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Contenedor del Icono (Leading Content)
+            // Đặt padding(start = 4.dp) TRƯỚC size(52.dp) để khung chứa luôn vuông 52x52dp, không làm méo ngôi sao khi xoay
             Box(
                 modifier = Modifier
-                    .size(52.dp)
-                    .padding(start = 4.dp), // Tamaño fijo para asegurar simetría
+                    .padding(start = 4.dp)
+                    .size(52.dp),
                 contentAlignment = Alignment.Center
             ) {
                 Box(
                     modifier = Modifier
                         .matchParentSize()
-                        .graphicsLayer(
-                            rotationZ = if (isActiveDevice) rotation else 0f,
-                            scaleX = backgroundScale,
-                            scaleY = backgroundScale
-                        )
+                        .graphicsLayer {
+                            val scale = backgroundScaleState.value
+                            rotationZ = rotationState?.value ?: 0f
+                            scaleX = scale
+                            scaleY = scale
+                        }
                         .background(
                             color = onContainer.copy(alpha = 0.12f),
                             shape = if (isActiveDevice) scallopShape else CircleShape
@@ -1612,7 +1737,6 @@ private fun CastDeviceRow(
                 )
             }
 
-            // Cuerpo de texto
             Column(
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.Center
@@ -1631,6 +1755,8 @@ private fun CastDeviceRow(
                 val statusText = when {
                     device.isBluetooth &&
                         device.connectionState == MediaRouter.RouteInfo.CONNECTION_STATE_CONNECTED -> stringResource(R.string.cast_status_connected)
+                    device.isBluetooth &&
+                        device.connectionState == MediaRouter.RouteInfo.CONNECTION_STATE_CONNECTING -> stringResource(R.string.cast_status_connecting)
                     device.isBluetooth -> stringResource(R.string.cast_status_available_connect)
                     device.isSelected && device.connectionState == MediaRouter.RouteInfo.CONNECTION_STATE_CONNECTED -> stringResource(R.string.cast_status_connected)
                     device.isSelected && device.connectionState == MediaRouter.RouteInfo.CONNECTION_STATE_CONNECTING -> stringResource(R.string.cast_status_connecting)
@@ -1743,43 +1869,258 @@ private fun BadgeChip(
 
 @Composable
 private fun QuickSettingsRow(
-    wifiOn: Boolean,
+    isCasting: Boolean,
+    activeCastDeviceName: String?,
     wifiConnected: Boolean,
-    wifiSsid: String?,
-    onWifiClick: () -> Unit,
+    onCastClick: () -> Unit,
     bluetoothEnabled: Boolean,
     bluetoothName: String?,
-    onBluetoothClick: () -> Unit
+    onBluetoothClick: () -> Unit,
+    isContainedInCard: Boolean = false
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(12.dp)
+        horizontalArrangement = Arrangement.spacedBy(if (isContainedInCard) 8.dp else 12.dp)
     ) {
         QuickSettingTile(
-            label = if (wifiConnected && !wifiSsid.isNullOrEmpty()) wifiSsid else stringResource(R.string.cast_wifi),
-            subtitle = when {
-                !wifiOn -> stringResource(R.string.cast_wifi_off)
-                wifiConnected -> stringResource(R.string.cast_wifi_connected)
-                else -> stringResource(R.string.cast_wifi_on)
+            label = if (isCasting && !activeCastDeviceName.isNullOrEmpty()) {
+                activeCastDeviceName
+            } else {
+                stringResource(R.string.cast_tile_title)
             },
-            icon = if (wifiOn) Icons.Rounded.Wifi else Icons.Rounded.WifiOff,
-            isActive = wifiOn,
-            onClick = onWifiClick,
-            modifier = Modifier.weight(1f)
+            subtitle = when {
+                isCasting -> stringResource(R.string.cast_connected)
+                wifiConnected -> stringResource(R.string.cast_tile_subtitle_ready)
+                else -> stringResource(R.string.cast_tile_subtitle_wifi_needed)
+            },
+            icon = Icons.Filled.Cast,
+            isActive = isCasting || wifiConnected,
+            onClick = onCastClick,
+            modifier = Modifier.weight(1f),
+            isContainedInCard = isContainedInCard
         )
         QuickSettingTile(
-            label = if (bluetoothEnabled && !bluetoothName.isNullOrEmpty()) bluetoothName else stringResource(R.string.cast_bluetooth),
+            label = if (bluetoothEnabled && !bluetoothName.isNullOrEmpty()) {
+                bluetoothName
+            } else {
+                stringResource(R.string.cast_bluetooth)
+            },
             subtitle = if (bluetoothEnabled) {
-                if (!bluetoothName.isNullOrEmpty()) stringResource(R.string.cast_bt_connected) else stringResource(R.string.cast_bt_on)
-            } else stringResource(R.string.cast_bt_off),
+                if (!bluetoothName.isNullOrEmpty()) {
+                    stringResource(R.string.cast_bt_connected)
+                } else {
+                    stringResource(R.string.cast_bt_on)
+                }
+            } else {
+                stringResource(R.string.cast_bt_off)
+            },
             icon = if (bluetoothEnabled) Icons.Rounded.Bluetooth else Icons.Rounded.BluetoothDisabled,
             isActive = bluetoothEnabled,
             onClick = onBluetoothClick,
-            modifier = Modifier.weight(1f)
+            modifier = Modifier.weight(1f),
+            isContainedInCard = isContainedInCard
         )
     }
 }
 
+@Composable
+private fun CastSecurityWarningDialog(
+    wifiEnabled: Boolean,
+    wifiSsid: String?,
+    onConfirmScan: () -> Unit,
+    onOpenWifiSettings: () -> Unit,
+    onDismiss: () -> Unit,
+    isContainedInCard: Boolean = false
+) {
+    val colors = MaterialTheme.colorScheme
+    if (isContainedInCard) {
+        PlayerCardOverlayDialog(
+            onDismissRequest = onDismiss,
+            containerColor = colors.surfaceContainerHigh
+        ) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.CenterHorizontally)
+                    .size(48.dp)
+                    .clip(CircleShape)
+                    .background(colors.primaryContainer),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Cast,
+                    contentDescription = null,
+                    tint = colors.onPrimaryContainer,
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+            Spacer(modifier = Modifier.height(14.dp))
+            Text(
+                text = stringResource(R.string.cast_security_dialog_title),
+                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth()
+            )
+            Spacer(modifier = Modifier.height(10.dp))
+            Column(
+                modifier = Modifier
+                    .weight(1f, fill = false)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text(
+                    text = stringResource(R.string.cast_security_dialog_body),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = colors.onSurfaceVariant
+                )
+                if (!wifiEnabled) {
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = colors.errorContainer
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(12.dp),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.WifiOff,
+                                contentDescription = null,
+                                tint = colors.onErrorContainer,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Text(
+                                text = stringResource(R.string.cast_security_dialog_wifi_off_hint),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = colors.onErrorContainer
+                            )
+                        }
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                androidx.compose.material3.TextButton(
+                    onClick = onDismiss,
+                    shape = RoundedCornerShape(50)
+                ) {
+                    Text(
+                        text = stringResource(R.string.cast_security_dialog_dismiss),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                Button(
+                    onClick = if (wifiEnabled) onConfirmScan else onOpenWifiSettings,
+                    shape = RoundedCornerShape(50)
+                ) {
+                    Text(
+                        text = if (wifiEnabled) {
+                            stringResource(R.string.cast_security_dialog_confirm)
+                        } else {
+                            stringResource(R.string.cast_security_dialog_open_wifi)
+                        },
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+        }
+    } else {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = onDismiss,
+            shape = RoundedCornerShape(28.dp),
+            containerColor = colors.surfaceContainerHigh,
+            icon = {
+                Box(
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clip(CircleShape)
+                        .background(colors.primaryContainer),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Cast,
+                        contentDescription = null,
+                        tint = colors.onPrimaryContainer,
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
+            },
+            title = {
+                Text(
+                    text = stringResource(R.string.cast_security_dialog_title),
+                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                    textAlign = TextAlign.Center
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(
+                        text = stringResource(R.string.cast_security_dialog_body),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = colors.onSurfaceVariant
+                    )
+                    if (!wifiEnabled) {
+                        Surface(
+                            shape = RoundedCornerShape(16.dp),
+                            color = colors.errorContainer
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(12.dp),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.WifiOff,
+                                    contentDescription = null,
+                                    tint = colors.onErrorContainer,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Text(
+                                    text = stringResource(R.string.cast_security_dialog_wifi_off_hint),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = colors.onErrorContainer
+                                )
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = if (wifiEnabled) onConfirmScan else onOpenWifiSettings,
+                    shape = RoundedCornerShape(50)
+                ) {
+                    Text(
+                        text = if (wifiEnabled) {
+                            stringResource(R.string.cast_security_dialog_confirm)
+                        } else {
+                            stringResource(R.string.cast_security_dialog_open_wifi)
+                        }
+                    )
+                }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(
+                    onClick = onDismiss,
+                    shape = RoundedCornerShape(50)
+                ) {
+                    Text(text = stringResource(R.string.cast_security_dialog_dismiss))
+                }
+            }
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun QuickSettingTile(
     label: String,
@@ -1787,54 +2128,57 @@ private fun QuickSettingTile(
     icon: ImageVector,
     isActive: Boolean,
     onClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    isContainedInCard: Boolean = false
 ) {
-    // Definimos la forma específica para el estado activo
-    val activeShape = remember {
-        AbsoluteSmoothCornerShape(
-            cornerRadiusTL = 18.dp,
-            cornerRadiusTR = 18.dp,
-            cornerRadiusBL = 18.dp,
-            cornerRadiusBR = 18.dp,
-            smoothnessAsPercentTL = 70,
-            smoothnessAsPercentTR = 70,
-            smoothnessAsPercentBL = 70,
-            smoothnessAsPercentBR = 70
-        )
-    }
+    val motionScheme = MaterialTheme.motionScheme
+    val cornerRadius by animateDpAsState(
+        targetValue = if (isActive) 18.dp else 36.dp,
+        animationSpec = motionScheme.fastSpatialSpec(),
+        label = "tileCornerRadius"
+    )
+    val tileShape = AbsoluteSmoothCornerShape(
+        cornerRadiusTL = cornerRadius,
+        smoothnessAsPercentTL = 60,
+        cornerRadiusTR = cornerRadius,
+        smoothnessAsPercentTR = 60,
+        cornerRadiusBL = cornerRadius,
+        smoothnessAsPercentBL = 60,
+        cornerRadiusBR = cornerRadius,
+        smoothnessAsPercentBR = 60
+    )
 
-    // El fondo del Tile ahora siempre es surface, pero mantenemos una transición suave si quisieras cambiarlo levemente
     val containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
     val contentColor = MaterialTheme.colorScheme.onSurface
 
-    // Colores dinámicos para el ICONO (Círculo interno)
     val iconBoxColor by animateColorAsState(
         targetValue = if (isActive) MaterialTheme.colorScheme.primary else contentColor.copy(alpha = 0.1f),
+        animationSpec = motionScheme.defaultEffectsSpec(),
         label = "iconBoxColor"
     )
     val iconTint by animateColorAsState(
         targetValue = if (isActive) MaterialTheme.colorScheme.onPrimary else contentColor,
+        animationSpec = motionScheme.defaultEffectsSpec(),
         label = "iconTint"
     )
 
     Surface(
         modifier = modifier
-            .height(72.dp)
-            // Aquí alternamos la forma según el estado
-            .clip(if (isActive) activeShape else CircleShape)
+            .height(if (isContainedInCard) 64.dp else 72.dp)
+            .clip(tileShape)
             .clickable(onClick = onClick),
+        shape = tileShape,
         color = containerColor,
         contentColor = contentColor
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 16.dp),
+            modifier = Modifier.padding(horizontal = if (isContainedInCard) 12.dp else 16.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
+            horizontalArrangement = Arrangement.spacedBy(if (isContainedInCard) 10.dp else 12.dp)
         ) {
-            // El contenedor del icono es el que lleva el color primario ahora
             Box(
                 modifier = Modifier
-                    .size(40.dp) // Un poco más grande para lucir la forma y el color
+                    .size(if (isContainedInCard) 36.dp else 40.dp)
                     .clip(CircleShape)
                     .background(iconBoxColor),
                 contentAlignment = Alignment.Center
@@ -1842,14 +2186,14 @@ private fun QuickSettingTile(
                 Icon(
                     imageVector = icon,
                     contentDescription = null,
-                    modifier = Modifier.size(20.dp),
+                    modifier = Modifier.size(if (isContainedInCard) 18.dp else 20.dp),
                     tint = iconTint
                 )
             }
 
             Column(
                 verticalArrangement = Arrangement.Center,
-                modifier = Modifier.weight(1f) // Asegura que el texto ocupe el espacio restante
+                modifier = Modifier.weight(1f)
             ) {
                 Text(
                     text = label,
@@ -1869,52 +2213,6 @@ private fun QuickSettingTile(
     }
 }
 
-@Composable
-private fun ScanningPlaceholderList() {
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        repeat(3) {
-            ShimmerBox(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(68.dp)
-                    .clip(
-                        RoundedCornerShape(
-                            topStart = 28.dp,
-                            topEnd = 4.dp,
-                            bottomEnd = 28.dp,
-                            bottomStart = 4.dp
-                        )
-                    )
-            )
-        }
-    }
-}
-
-@Composable
-private fun ScanningIndicator(isActive: Boolean) {
-    val infinite = rememberInfiniteTransition(label = "scanPulse")
-    val pulse by infinite.animateFloat(
-        initialValue = 0.6f,
-        targetValue = 1.2f,
-        animationSpec = infiniteRepeatable(tween(durationMillis = 900, easing = FastOutSlowInEasing)),
-        label = "pulse"
-    )
-    val prim = MaterialTheme.colorScheme.primary
-    Box(
-        modifier = Modifier
-            .size(18.dp)
-            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f), CircleShape),
-        contentAlignment = Alignment.Center
-    ) {
-        Canvas(modifier = Modifier.size(18.dp)) {
-            drawCircle(
-                color = prim,
-                radius = (size.minDimension / 2) * if (isActive) pulse else 0.8f,
-                alpha = if (isActive) 0.8f else 0.4f
-            )
-        }
-    }
-}
 
 @Composable
 @Preview(showBackground = true)

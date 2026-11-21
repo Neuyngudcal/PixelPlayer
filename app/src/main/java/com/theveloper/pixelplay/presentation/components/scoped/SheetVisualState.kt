@@ -28,13 +28,18 @@ internal data class SheetVisualState(
     val playerContentActualBottomRadiusProvider: () -> Dp,
     /** Draw-phase providers: read inside graphicsLayer to avoid layout relayout per frame. */
     val currentHorizontalPaddingStartPxProvider: () -> Float,
-    val currentHorizontalPaddingEndPxProvider: () -> Float
+    val currentHorizontalPaddingEndPxProvider: () -> Float,
+    /** Target expanded dimensions for innerLayout (408dp x dockedHeight in Side-Docked, full screen in Fullscreen). */
+    val targetExpandedWidthPxProvider: () -> Float,
+    val targetExpandedHeightPxProvider: () -> Float
 )
 
 @Composable
 internal fun rememberSheetVisualState(
     showPlayerContentArea: Boolean,
     collapsedStateHorizontalPadding: Dp,
+    collapsedStartHorizontalPadding: Dp = collapsedStateHorizontalPadding,
+    collapsedEndHorizontalPadding: Dp = collapsedStateHorizontalPadding,
     predictiveBackCollapseProgress: Float,
     predictiveBackSwipeEdge: Int?,
     currentSheetContentState: PlayerSheetState,
@@ -47,7 +52,15 @@ internal fun rememberSheetVisualState(
     isNavBarHidden: Boolean,
     isPlaying: Boolean,
     hasCurrentSong: Boolean,
-    swipeDismissProgress: Float
+    swipeDismissProgress: Float,
+    containerWidth: Dp = Dp.Unspecified,
+    supportsSideDockedMode: Boolean = false,
+    sideDockedWidth: Dp = 408.dp,
+    sideDockedEndMargin: Dp = 16.dp,
+    sideDockedTopMargin: Dp = 12.dp,
+    sideDockedBottomMargin: Dp = 12.dp,
+    sideDockedCornerRadius: Dp = 28.dp,
+    fullScreenFractionProvider: () -> Float = { 1f }
 ): SheetVisualState {
     // Compute in px to be read inside graphicsLayer (draw phase) — zero relayout per drag frame.
     val density = LocalDensity.current
@@ -61,16 +74,77 @@ internal fun rememberSheetVisualState(
 
     val miniHeightPx = remember(density) { with(density) { com.theveloper.pixelplay.presentation.components.MiniPlayerHeight.toPx() } }
     val containerHeightPx = remember(containerHeight, density) { with(density) { containerHeight.toPx() } }
-    val baseBottomPaddingPx = remember(baseBottomPadding, density) { with(density) { baseBottomPadding.toPx() } }
+    val containerWidthPx = remember(containerWidth, density) {
+        with(density) {
+            if (containerWidth != Dp.Unspecified) containerWidth.toPx() else 0f
+        }
+    }
+    val sideDockedWidthPx = remember(sideDockedWidth, density) { with(density) { sideDockedWidth.toPx() } }
+    val sideDockedEndMarginPx = remember(sideDockedEndMargin, density) { with(density) { sideDockedEndMargin.toPx() } }
+    val sideDockedTopMarginPx = remember(sideDockedTopMargin, density) { with(density) { sideDockedTopMargin.toPx() } }
+    val sideDockedBottomMarginPx = remember(sideDockedBottomMargin, density) { with(density) { sideDockedBottomMargin.toPx() } }
+
     val predictiveBackCollapseProgressState = rememberUpdatedState(predictiveBackCollapseProgress)
     val visualSheetTranslationYProvider: () -> Float = remember(
         currentSheetTranslationY,
-        sheetCollapsedTargetY
+        sheetCollapsedTargetY,
+        supportsSideDockedMode,
+        sideDockedTopMarginPx,
+        playerContentExpansionFraction,
+        fullScreenFractionProvider
     ) {
         {
             val progress = predictiveBackCollapseProgressState.value
-            currentSheetTranslationY.value * (1f - progress) +
+            val baseTranslationY = currentSheetTranslationY.value * (1f - progress) +
                 (sheetCollapsedTargetY * progress)
+            if (!supportsSideDockedMode) {
+                baseTranslationY
+            } else {
+                val fullScreenFraction = fullScreenFractionProvider().coerceIn(0f, 1f)
+                val expandedTopY = androidx.compose.ui.util.lerp(sideDockedTopMarginPx, 0f, fullScreenFraction)
+                val effectiveExpansion = (playerContentExpansionFraction.value * (1f - progress)).coerceIn(0f, 1f)
+                baseTranslationY + expandedTopY * effectiveExpansion
+            }
+        }
+    }
+
+    val targetExpandedHeightPxProvider: () -> Float = remember(
+        containerHeightPx,
+        miniHeightPx,
+        supportsSideDockedMode,
+        sideDockedTopMarginPx,
+        sideDockedBottomMarginPx,
+        fullScreenFractionProvider
+    ) {
+        {
+            if (!supportsSideDockedMode) {
+                containerHeightPx
+            } else {
+                val fullScreenFraction = fullScreenFractionProvider().coerceIn(0f, 1f)
+                val dockedHeightPx = (containerHeightPx - sideDockedTopMarginPx - sideDockedBottomMarginPx)
+                    .coerceAtLeast(miniHeightPx)
+                androidx.compose.ui.util.lerp(dockedHeightPx, containerHeightPx, fullScreenFraction)
+            }
+        }
+    }
+
+    val targetExpandedWidthPxProvider: () -> Float = remember(
+        containerWidthPx,
+        supportsSideDockedMode,
+        sideDockedWidthPx,
+        sideDockedEndMarginPx,
+        fullScreenFractionProvider
+    ) {
+        {
+            if (!supportsSideDockedMode || containerWidthPx <= 0f) {
+                containerWidthPx
+            } else {
+                val fullScreenFraction = fullScreenFractionProvider().coerceIn(0f, 1f)
+                val clampedDockedWidthPx = sideDockedWidthPx.coerceAtMost(
+                    (containerWidthPx - sideDockedEndMarginPx * 2f).coerceAtLeast(1f)
+                )
+                androidx.compose.ui.util.lerp(clampedDockedWidthPx, containerWidthPx, fullScreenFraction)
+            }
         }
     }
 
@@ -81,23 +155,38 @@ internal fun rememberSheetVisualState(
         miniHeightPx,
         containerHeightPx,
         visualSheetTranslationYProvider,
-        sheetCollapsedTargetY
+        sheetCollapsedTargetY,
+        supportsSideDockedMode,
+        sideDockedBottomMarginPx,
+        targetExpandedHeightPxProvider,
+        fullScreenFractionProvider
     ) {
         {
             if (showPlayerContentArea) {
                 val effectiveFraction = playerContentExpansionFraction.value * (1f - predictiveBackCollapseProgress)
                 val safeFraction = effectiveFraction.coerceIn(0f, 1f)
+                val fullScreenFraction = if (supportsSideDockedMode) {
+                    fullScreenFractionProvider().coerceIn(0f, 1f)
+                } else {
+                    1f
+                }
+                val expandedBottomY = androidx.compose.ui.util.lerp(
+                    containerHeightPx - sideDockedBottomMarginPx,
+                    containerHeightPx,
+                    fullScreenFraction
+                )
+                val expandedHeightPx = targetExpandedHeightPxProvider()
                 val translationY = visualSheetTranslationYProvider()
-                
+
                 if (translationY <= sheetCollapsedTargetY) {
                     val targetBottom = androidx.compose.ui.util.lerp(
                         sheetCollapsedTargetY + miniHeightPx,
-                        containerHeightPx,
+                        expandedBottomY,
                         safeFraction
                     )
                     (targetBottom - translationY).coerceAtLeast(0f)
                 } else {
-                    androidx.compose.ui.util.lerp(miniHeightPx, containerHeightPx, safeFraction)
+                    androidx.compose.ui.util.lerp(miniHeightPx, expandedHeightPx, safeFraction)
                 }
             } else {
                 0f
@@ -113,7 +202,10 @@ internal fun rememberSheetVisualState(
         navBarCornerRadiusDp,
         isNavBarHidden,
         swipeDismissProgress,
-        currentSheetContentState
+        currentSheetContentState,
+        supportsSideDockedMode,
+        sideDockedCornerRadius,
+        fullScreenFractionProvider
     ) {
         {
             val collapsedCornerTarget = if (isNavBarHidden) {
@@ -128,7 +220,12 @@ internal fun rememberSheetVisualState(
 
             val effectiveFraction = playerContentExpansionFraction.value * (1f - predictiveBackCollapseProgress)
             val safeFraction = effectiveFraction.coerceIn(0f, 1f)
-            val expandedTarget = 0.dp
+            val fullScreenFraction = if (supportsSideDockedMode) {
+                fullScreenFractionProvider().coerceIn(0f, 1f)
+            } else {
+                1f
+            }
+            val expandedTarget = lerp(sideDockedCornerRadius, 0.dp, fullScreenFraction)
             val calculatedNormally = if (showPlayerContentArea) {
                 lerp(collapsedCornerTarget, expandedTarget, safeFraction)
             } else {
@@ -162,7 +259,10 @@ internal fun rememberSheetVisualState(
         swipeDismissProgress,
         isNavBarHidden,
         navBarCornerRadiusDp,
-        currentSheetContentState
+        currentSheetContentState,
+        supportsSideDockedMode,
+        sideDockedCornerRadius,
+        fullScreenFractionProvider
     ) {
         {
             val collapsedRadius = if (isNavBarHidden) {
@@ -177,9 +277,14 @@ internal fun rememberSheetVisualState(
 
             val effectiveFraction = playerContentExpansionFraction.value * (1f - predictiveBackCollapseProgress)
             val safeFraction = effectiveFraction.coerceIn(0f, 1f)
+            val fullScreenFraction = if (supportsSideDockedMode) {
+                fullScreenFractionProvider().coerceIn(0f, 1f)
+            } else {
+                1f
+            }
             val calculatedNormally =
                 if (showPlayerContentArea) {
-                    val expandedTarget = 0.dp
+                    val expandedTarget = lerp(sideDockedCornerRadius, 0.dp, fullScreenFraction)
                     lerp(collapsedRadius, expandedTarget, safeFraction)
                 } else {
                     if (!isPlayingState.value || !hasCurrentSongState.value) {
@@ -216,44 +321,85 @@ internal fun rememberSheetVisualState(
         }
     }
 
-    val actualCollapsedStateHorizontalPadding =
-        if (navBarStyle == NavBarStyle.FULL_WIDTH) 14.dp else collapsedStateHorizontalPadding
-    val collapsedStateHorizontalPaddingPx = remember(actualCollapsedStateHorizontalPadding, density) {
-        with(density) { actualCollapsedStateHorizontalPadding.toPx() }
+    val hasCustomAsymmetricHorizontalPadding =
+        collapsedStartHorizontalPadding != collapsedStateHorizontalPadding ||
+            collapsedEndHorizontalPadding != collapsedStateHorizontalPadding
+    val actualCollapsedStartPadding = if (hasCustomAsymmetricHorizontalPadding) {
+        collapsedStartHorizontalPadding
+    } else if (navBarStyle == NavBarStyle.FULL_WIDTH) {
+        14.dp
+    } else {
+        collapsedStartHorizontalPadding
+    }
+    val actualCollapsedEndPadding = if (hasCustomAsymmetricHorizontalPadding) {
+        collapsedEndHorizontalPadding
+    } else if (navBarStyle == NavBarStyle.FULL_WIDTH) {
+        14.dp
+    } else {
+        collapsedEndHorizontalPadding
+    }
+    val collapsedStartHorizontalPaddingPx = remember(actualCollapsedStartPadding, density) {
+        with(density) { actualCollapsedStartPadding.toPx() }
+    }
+    val collapsedEndHorizontalPaddingPx = remember(actualCollapsedEndPadding, density) {
+        with(density) { actualCollapsedEndPadding.toPx() }
     }
 
-    // Draw-phase lambda providers for horizontal padding — read inside graphicsLayer to avoid
-    // per-frame relayout. The lambda captures Animatable/Float refs and reads them at draw time.
+    // Draw-phase lambda providers for horizontal padding — read inside graphicsLayer/layout to avoid
+    // per-frame recomposition. On tablets, start/end padding smoothly expand from the constrained
+    // content-centered pill out to either the right-docked phone card (SIDE_DOCKED) or full window width (FULLSCREEN).
     val currentHorizontalPaddingStartPxProvider: () -> Float = remember(
         showPlayerContentArea,
-        collapsedStateHorizontalPaddingPx,
+        collapsedStartHorizontalPaddingPx,
         playerContentExpansionFraction,
-        predictiveBackCollapseProgress
+        predictiveBackCollapseProgress,
+        supportsSideDockedMode,
+        containerWidthPx,
+        sideDockedWidthPx,
+        sideDockedEndMarginPx,
+        fullScreenFractionProvider
     ) {
         {
             if (showPlayerContentArea) {
                 val effectiveFraction = playerContentExpansionFraction.value * (1f - predictiveBackCollapseProgress)
                 val safeFraction = effectiveFraction.coerceIn(0f, 1f)
-                androidx.compose.ui.util.lerp(collapsedStateHorizontalPaddingPx, 0f, safeFraction)
+                val expandedStartPx = if (!supportsSideDockedMode || containerWidthPx <= 0f) {
+                    0f
+                } else {
+                    val fullScreenFraction = fullScreenFractionProvider().coerceIn(0f, 1f)
+                    val dockedStartPx = (containerWidthPx - sideDockedWidthPx - sideDockedEndMarginPx)
+                        .coerceAtLeast(sideDockedEndMarginPx)
+                    androidx.compose.ui.util.lerp(dockedStartPx, 0f, fullScreenFraction)
+                }
+                androidx.compose.ui.util.lerp(collapsedStartHorizontalPaddingPx, expandedStartPx, safeFraction)
             } else {
-                collapsedStateHorizontalPaddingPx
+                collapsedStartHorizontalPaddingPx
             }
         }
     }
 
     val currentHorizontalPaddingEndPxProvider: () -> Float = remember(
         showPlayerContentArea,
-        collapsedStateHorizontalPaddingPx,
+        collapsedEndHorizontalPaddingPx,
         playerContentExpansionFraction,
-        predictiveBackCollapseProgress
+        predictiveBackCollapseProgress,
+        supportsSideDockedMode,
+        sideDockedEndMarginPx,
+        fullScreenFractionProvider
     ) {
         {
             if (showPlayerContentArea) {
                 val effectiveFraction = playerContentExpansionFraction.value * (1f - predictiveBackCollapseProgress)
                 val safeFraction = effectiveFraction.coerceIn(0f, 1f)
-                androidx.compose.ui.util.lerp(collapsedStateHorizontalPaddingPx, 0f, safeFraction)
+                val expandedEndPx = if (!supportsSideDockedMode) {
+                    0f
+                } else {
+                    val fullScreenFraction = fullScreenFractionProvider().coerceIn(0f, 1f)
+                    androidx.compose.ui.util.lerp(sideDockedEndMarginPx, 0f, fullScreenFraction)
+                }
+                androidx.compose.ui.util.lerp(collapsedEndHorizontalPaddingPx, expandedEndPx, safeFraction)
             } else {
-                collapsedStateHorizontalPaddingPx
+                collapsedEndHorizontalPaddingPx
             }
         }
     }
@@ -266,6 +412,8 @@ internal fun rememberSheetVisualState(
         overallSheetTopCornerRadiusProvider = overallSheetTopCornerRadiusProvider,
         playerContentActualBottomRadiusProvider = playerContentActualBottomRadiusProvider,
         currentHorizontalPaddingStartPxProvider = currentHorizontalPaddingStartPxProvider,
-        currentHorizontalPaddingEndPxProvider = currentHorizontalPaddingEndPxProvider
+        currentHorizontalPaddingEndPxProvider = currentHorizontalPaddingEndPxProvider,
+        targetExpandedWidthPxProvider = targetExpandedWidthPxProvider,
+        targetExpandedHeightPxProvider = targetExpandedHeightPxProvider
     )
 }

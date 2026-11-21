@@ -1095,33 +1095,30 @@ interface MusicDao {
             albums.artist_id AS artist_id,
             albums.album_artist AS album_artist,
             albums.album_art_uri_string AS album_art_uri_string,
-            COUNT(songs.id) AS song_count,
+            filtered.song_count AS song_count,
             albums.date_added AS date_added,
             albums.year AS year
-        FROM songs
-        INNER JOIN albums ON albums.id = songs.album_id
-        WHERE (:applyDirectoryFilter = 0 OR songs.id < 0 OR songs.parent_directory_path IN (:allowedParentDirs))
-        AND (
-            :filterMode = 0
-            OR (
-                :filterMode = 1
-                AND songs.source_type = 0
+        FROM (
+            SELECT
+                songs.album_id AS album_id,
+                COUNT(songs.id) AS song_count
+            FROM songs
+            WHERE (:applyDirectoryFilter = 0 OR songs.id < 0 OR songs.parent_directory_path IN (:allowedParentDirs))
+            AND (
+                :filterMode = 0
+                OR (
+                    :filterMode = 1
+                    AND songs.source_type = 0
+                )
+                OR (
+                    :filterMode = 2
+                    AND songs.source_type != 0
+                )
             )
-            OR (
-                :filterMode = 2
-                AND songs.source_type != 0
-            )
-        )
-        GROUP BY
-            albums.id,
-            albums.title,
-            albums.artist_name,
-            albums.artist_id,
-            albums.album_artist,
-            albums.album_art_uri_string,
-            albums.date_added,
-            albums.year
-        HAVING COUNT(songs.id) >= :minTracks
+            GROUP BY songs.album_id
+            HAVING COUNT(songs.id) >= :minTracks
+        ) AS filtered
+        INNER JOIN albums ON albums.id = filtered.album_id
         ORDER BY albums.title ASC
     """)
     fun getAlbums(
@@ -1139,33 +1136,30 @@ interface MusicDao {
             albums.artist_id AS artist_id,
             albums.album_artist AS album_artist,
             albums.album_art_uri_string AS album_art_uri_string,
-            COUNT(songs.id) AS song_count,
+            filtered.song_count AS song_count,
             albums.date_added AS date_added,
             albums.year AS year
-        FROM songs
-        INNER JOIN albums ON albums.id = songs.album_id
-        WHERE (:applyDirectoryFilter = 0 OR songs.id < 0 OR songs.parent_directory_path IN (:allowedParentDirs))
-        AND (
-            :filterMode = 0
-            OR (
-                :filterMode = 1
-                AND songs.source_type = 0
+        FROM (
+            SELECT
+                songs.album_id AS album_id,
+                COUNT(songs.id) AS song_count
+            FROM songs
+            WHERE (:applyDirectoryFilter = 0 OR songs.id < 0 OR songs.parent_directory_path IN (:allowedParentDirs))
+            AND (
+                :filterMode = 0
+                OR (
+                    :filterMode = 1
+                    AND songs.source_type = 0
+                )
+                OR (
+                    :filterMode = 2
+                    AND songs.source_type != 0
+                )
             )
-            OR (
-                :filterMode = 2
-                AND songs.source_type != 0
-            )
-        )
-        GROUP BY
-            albums.id,
-            albums.title,
-            albums.artist_name,
-            albums.artist_id,
-            albums.album_artist,
-            albums.album_art_uri_string,
-            albums.date_added,
-            albums.year
-        HAVING COUNT(songs.id) >= :minTracks
+            GROUP BY songs.album_id
+            HAVING COUNT(songs.id) >= :minTracks
+        ) AS filtered
+        INNER JOIN albums ON albums.id = filtered.album_id
         ORDER BY
             CASE WHEN :sortOrder = 'album_title_az' THEN albums.title END COLLATE NOCASE ASC,
             CASE WHEN :sortOrder = 'album_title_za' THEN albums.title END COLLATE NOCASE DESC,
@@ -1174,8 +1168,8 @@ interface MusicDao {
             CASE WHEN :sortOrder = 'album_release_year' THEN albums.year END DESC,
             CASE WHEN :sortOrder = 'album_release_year_asc' THEN albums.year END ASC,
             CASE WHEN :sortOrder = 'album_date_added' THEN albums.date_added END DESC,
-            CASE WHEN :sortOrder = 'album_size_asc' THEN song_count END ASC,
-            CASE WHEN :sortOrder = 'album_size_desc' THEN song_count END DESC,
+            CASE WHEN :sortOrder = 'album_size_asc' THEN filtered.song_count END ASC,
+            CASE WHEN :sortOrder = 'album_size_desc' THEN filtered.song_count END DESC,
             albums.title COLLATE NOCASE ASC,
             albums.artist_name COLLATE NOCASE ASC,
             albums.id ASC
@@ -1196,33 +1190,30 @@ interface MusicDao {
             albums.artist_id AS artist_id,
             albums.album_artist AS album_artist,
             albums.album_art_uri_string AS album_art_uri_string,
-            COUNT(songs.id) AS song_count,
+            filtered.song_count AS song_count,
             albums.date_added AS date_added,
             albums.year AS year
-        FROM songs
-        INNER JOIN albums ON albums.id = songs.album_id
-        WHERE (:applyDirectoryFilter = 0 OR songs.id < 0 OR songs.parent_directory_path IN (:allowedParentDirs))
-        AND (
-            :filterMode = 0
-            OR (
-                :filterMode = 1
-                AND songs.source_type = 0
+        FROM (
+            SELECT
+                songs.album_id AS album_id,
+                COUNT(songs.id) AS song_count
+            FROM songs
+            WHERE (:applyDirectoryFilter = 0 OR songs.id < 0 OR songs.parent_directory_path IN (:allowedParentDirs))
+            AND (
+                :filterMode = 0
+                OR (
+                    :filterMode = 1
+                    AND songs.source_type = 0
+                )
+                OR (
+                    :filterMode = 2
+                    AND songs.source_type != 0
+                )
             )
-            OR (
-                :filterMode = 2
-                AND songs.source_type != 0
-            )
-        )
-        GROUP BY
-            albums.id,
-            albums.title,
-            albums.artist_name,
-            albums.artist_id,
-            albums.album_artist,
-            albums.album_art_uri_string,
-            albums.date_added,
-            albums.year
-        HAVING COUNT(songs.id) >= :minTracks
+            GROUP BY songs.album_id
+            HAVING COUNT(songs.id) >= :minTracks
+        ) AS filtered
+        INNER JOIN albums ON albums.id = filtered.album_id
         ORDER BY
             CASE WHEN :sortOrder = 'album_title_az' THEN albums.title END COLLATE NOCASE ASC,
             CASE WHEN :sortOrder = 'album_title_za' THEN albums.title END COLLATE NOCASE DESC,
@@ -1231,8 +1222,8 @@ interface MusicDao {
             CASE WHEN :sortOrder = 'album_release_year' THEN albums.year END DESC,
             CASE WHEN :sortOrder = 'album_release_year_asc' THEN albums.year END ASC,
             CASE WHEN :sortOrder = 'album_date_added' THEN albums.date_added END DESC,
-            CASE WHEN :sortOrder = 'album_size_asc' THEN song_count END ASC,
-            CASE WHEN :sortOrder = 'album_size_desc' THEN song_count END DESC,
+            CASE WHEN :sortOrder = 'album_size_asc' THEN filtered.song_count END ASC,
+            CASE WHEN :sortOrder = 'album_size_desc' THEN filtered.song_count END DESC,
             albums.title COLLATE NOCASE ASC,
             albums.artist_name COLLATE NOCASE ASC,
             albums.id ASC
@@ -1303,22 +1294,19 @@ interface MusicDao {
             albums.artist_id AS artist_id,
             albums.album_artist AS album_artist,
             albums.album_art_uri_string AS album_art_uri_string,
-            COUNT(songs.id) AS song_count,
+            filtered.song_count AS song_count,
             albums.date_added AS date_added,
             albums.year AS year
-        FROM songs
-        INNER JOIN albums ON albums.id = songs.album_id
-        WHERE (:applyDirectoryFilter = 0 OR songs.id < 0 OR songs.parent_directory_path IN (:allowedParentDirs))
-        GROUP BY
-            albums.id,
-            albums.title,
-            albums.artist_name,
-            albums.artist_id,
-            albums.album_artist,
-            albums.album_art_uri_string,
-            albums.date_added,
-            albums.year
-        HAVING COUNT(songs.id) >= :minTracks
+        FROM (
+            SELECT
+                songs.album_id AS album_id,
+                COUNT(songs.id) AS song_count
+            FROM songs
+            WHERE (:applyDirectoryFilter = 0 OR songs.id < 0 OR songs.parent_directory_path IN (:allowedParentDirs))
+            GROUP BY songs.album_id
+            HAVING COUNT(songs.id) >= :minTracks
+        ) AS filtered
+        INNER JOIN albums ON albums.id = filtered.album_id
         ORDER BY albums.title ASC
     """)
     suspend fun getAllAlbumsList(

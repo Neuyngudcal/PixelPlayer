@@ -11,13 +11,17 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.LocalConfiguration
+import com.theveloper.pixelplay.presentation.components.player.PlayerCardOverlayDialog
+import com.theveloper.pixelplay.presentation.components.player.PlayerCardOverlaySheet
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.FormatAlignLeft
 import androidx.compose.material.icons.automirrored.rounded.FormatAlignRight
@@ -102,26 +106,22 @@ fun LyricsMoreBottomSheet(
     accentColor: Color = MaterialTheme.colorScheme.primary,
     onAccentColor: Color = MaterialTheme.colorScheme.onPrimary,
     tertiaryColor: Color = MaterialTheme.colorScheme.tertiary,
-    onTertiaryColor: Color = MaterialTheme.colorScheme.onTertiary
+    onTertiaryColor: Color = MaterialTheme.colorScheme.onTertiary,
+    isContainedInCard: Boolean = false
 ) {
-    val navigationBarsPadding = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    val navigationBarsPadding = if (isContainedInCard) {
+        0.dp
+    } else {
+        WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    }
     var showResetDialog by remember { mutableStateOf(false) }
 
-    ModalBottomSheet(
-        onDismissRequest = onDismissRequest,
-        sheetState = sheetState,
-        containerColor = containerColor,
-        contentColor = contentColor,
-        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
-        contentWindowInsets = { WindowInsets(top = 0, bottom = 0) }
-    ) {
-        val screenHeight = LocalConfiguration.current.screenHeightDp.dp
+    val sheetContent: @Composable () -> Unit = {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                //.heightIn(max = screenHeight * 0.85f)
                 .padding(horizontal = 16.dp)
-                .padding(bottom = 24.dp + navigationBarsPadding)
+                .padding(bottom = if (isContainedInCard) 16.dp else 24.dp + navigationBarsPadding)
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
@@ -278,7 +278,7 @@ fun LyricsMoreBottomSheet(
                 )
             }
 
-            if (showResetDialog) {
+            if (showResetDialog && !isContainedInCard) {
                 androidx.compose.material3.AlertDialog(
                     onDismissRequest = { showResetDialog = false },
                     title = { Text(stringResource(R.string.lyrics_reset_dialog_title)) },
@@ -394,14 +394,23 @@ fun LyricsMoreBottomSheet(
             val isKeepScreenOnVisible = true
 
             if (isSyncVisible || isRomanizationVisible || isTranslationVisible || isKeepScreenOnVisible) {
-                // Determine first and last items for rounding
-                val isRomanizationFirst = isRomanizationVisible && !isSyncVisible
-                val isTranslationFirst = isTranslationVisible && !isSyncVisible && !isRomanizationVisible
-
-                val isSyncLast = isSyncVisible && !isRomanizationVisible && !isTranslationVisible && !isImmersiveVisible && !isKeepScreenOnVisible
-                val isRomanizationLast = isRomanizationVisible && !isTranslationVisible && !isImmersiveVisible && !isKeepScreenOnVisible
-                val isTranslationLast = isTranslationVisible && !isImmersiveVisible && !isKeepScreenOnVisible
-                val isImmersiveLast = isImmersiveVisible && !isKeepScreenOnVisible
+                val visibleControlKeys = buildList {
+                    if (isSyncVisible) add("sync")
+                    if (isRomanizationVisible) add("romanization")
+                    if (isTranslationVisible) add("translation")
+                    if (isImmersiveVisible) add("immersive")
+                    if (isKeepScreenOnVisible) add("keep_screen_on")
+                }
+                fun controlItemShape(key: String): RoundedCornerShape {
+                    val isFirst = visibleControlKeys.firstOrNull() == key
+                    val isLast = visibleControlKeys.lastOrNull() == key
+                    return RoundedCornerShape(
+                        topStart = if (isFirst) 18.dp else 8.dp,
+                        topEnd = if (isFirst) 18.dp else 8.dp,
+                        bottomStart = if (isLast) 24.dp else 8.dp,
+                        bottomEnd = if (isLast) 24.dp else 8.dp
+                    )
+                }
 
                 Column(
                     verticalArrangement = Arrangement.spacedBy(2.dp),
@@ -434,14 +443,7 @@ fun LyricsMoreBottomSheet(
                             },
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(
-                                    RoundedCornerShape(
-                                        topStart = 18.dp,
-                                        topEnd = 18.dp,
-                                        bottomStart = if (isSyncLast) 24.dp else 8.dp,
-                                        bottomEnd = if (isSyncLast) 24.dp else 8.dp
-                                    )
-                                )
+                                .clip(controlItemShape("sync"))
                                 .background(itemBackgroundColor)
                                 .clickable {
                                     onDismissRequest()
@@ -478,14 +480,7 @@ fun LyricsMoreBottomSheet(
                             },
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(
-                                    RoundedCornerShape(
-                                        topStart = if (isRomanizationFirst) 18.dp else 8.dp,
-                                        topEnd = if (isRomanizationFirst) 18.dp else 8.dp,
-                                        bottomStart = if (isRomanizationLast) 24.dp else 8.dp,
-                                        bottomEnd = if (isRomanizationLast) 24.dp else 8.dp
-                                    )
-                                )
+                                .clip(controlItemShape("romanization"))
                                 .background(itemBackgroundColor)
                                 .clickable { onShowRomanizationChange(!showRomanization) },
                             colors = ListItemDefaults.colors(
@@ -519,14 +514,7 @@ fun LyricsMoreBottomSheet(
                             },
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(
-                                    RoundedCornerShape(
-                                        topStart = if (isTranslationFirst) 18.dp else 8.dp,
-                                        topEnd = if (isTranslationFirst) 18.dp else 8.dp,
-                                        bottomStart = if (isTranslationLast) 24.dp else 8.dp,
-                                        bottomEnd = if (isTranslationLast) 24.dp else 8.dp
-                                    )
-                                )
+                                .clip(controlItemShape("translation"))
                                 .background(itemBackgroundColor)
                                 .clickable { onShowTranslationChange(!showTranslation) },
                             colors = ListItemDefaults.colors(
@@ -564,15 +552,11 @@ fun LyricsMoreBottomSheet(
                             },
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(
-                                    RoundedCornerShape(
-                                        topStart = 8.dp,
-                                        topEnd = 8.dp,
-                                        bottomStart = if (isImmersiveLast) 24.dp else 8.dp,
-                                        bottomEnd = if (isImmersiveLast) 24.dp else 8.dp
-                                    )
-                                )
-                                .background(itemBackgroundColor),
+                                .clip(controlItemShape("immersive"))
+                                .background(itemBackgroundColor)
+                                .clickable {
+                                    onSetImmersiveTemporarilyDisabled(!isImmersiveTemporarilyDisabled)
+                                },
                             colors = ListItemDefaults.colors(
                                 containerColor = Color.Transparent,
                                 headlineColor = contentColor,
@@ -605,14 +589,7 @@ fun LyricsMoreBottomSheet(
                             },
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(
-                                    RoundedCornerShape(
-                                        topStart = 8.dp,
-                                        topEnd = 8.dp,
-                                        bottomStart = 24.dp,
-                                        bottomEnd = 24.dp
-                                    )
-                                )
+                                .clip(controlItemShape("keep_screen_on"))
                                 .background(itemBackgroundColor)
                                 .clickable { onKeepScreenOnChange(!keepScreenOn) },
                             colors = ListItemDefaults.colors(
@@ -635,11 +612,11 @@ fun LyricsMoreBottomSheet(
                     //.background(contentColor.copy(alpha = 0.08f))
                     .padding(vertical = 0.dp, horizontal = 0.dp)
             ) {
-                 BottomToggleRow(
+                BottomToggleRow(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(74.dp)
-                        .padding(horizontal = 20.dp),
+                        .height(if (isContainedInCard) 64.dp else 74.dp)
+                        .padding(horizontal = if (isContainedInCard) 8.dp else 20.dp),
                     isShuffleEnabled = isShuffleEnabled,
                     repeatMode = repeatMode,
                     isFavoriteProvider = isFavoriteProvider,
@@ -648,6 +625,78 @@ fun LyricsMoreBottomSheet(
                     onFavoriteToggle = onFavoriteToggle
                 )
             }
+        }
+    }
+
+    if (isContainedInCard) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            PlayerCardOverlaySheet(
+                onDismissRequest = onDismissRequest,
+                containerColor = containerColor,
+                contentColor = contentColor
+            ) {
+                sheetContent()
+            }
+
+            if (showResetDialog) {
+                PlayerCardOverlayDialog(
+                    onDismissRequest = { showResetDialog = false },
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+                ) {
+                    Text(
+                        text = stringResource(R.string.lyrics_reset_dialog_title),
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Text(
+                        text = stringResource(R.string.lyrics_reset_dialog_message),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(18.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)
+                    ) {
+                        androidx.compose.material3.TextButton(
+                            onClick = { showResetDialog = false }
+                        ) {
+                            Text(
+                                stringResource(R.string.common_cancel),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        androidx.compose.material3.TextButton(
+                            onClick = {
+                                showResetDialog = false
+                                onDismissRequest()
+                                onResetImportedLyrics()
+                            }
+                        ) {
+                            Text(
+                                stringResource(R.string.common_reset),
+                                color = MaterialTheme.colorScheme.error,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    } else {
+        ModalBottomSheet(
+            onDismissRequest = onDismissRequest,
+            sheetState = sheetState,
+            containerColor = containerColor,
+            contentColor = contentColor,
+            shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+            contentWindowInsets = { WindowInsets(top = 0, bottom = 0) }
+        ) {
+            sheetContent()
         }
     }
 }

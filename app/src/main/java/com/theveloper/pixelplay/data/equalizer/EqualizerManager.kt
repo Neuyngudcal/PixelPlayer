@@ -3,12 +3,16 @@ package com.theveloper.pixelplay.data.equalizer
 
 import android.media.audiofx.Equalizer
 import android.media.audiofx.BassBoost
+import android.media.audiofx.LoudnessEnhancer
 import android.media.audiofx.Virtualizer
 import android.os.SystemClock
+import androidx.annotation.VisibleForTesting
 import com.theveloper.pixelplay.data.diagnostics.AdvancedPerformanceDiagnostics
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import timber.log.Timber
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -30,12 +34,27 @@ class EqualizerManager @Inject constructor() {
         private const val MIN_LEVEL = -15
         private const val MAX_LEVEL = 15
         private const val MAX_LOUDNESS_GAIN_MB = 1000
+        private const val MAX_FAILED_SESSIONS_CACHE = 16
     }
-    
+
+    private val attachMutex = Mutex()
+    private val effectHandleLock = Any()
+    @Volatile
+    private var latestRequestedSessionId: Int = 0
+
     private var equalizer: Equalizer? = null
     private var bassBoost: BassBoost? = null
     private var virtualizer: Virtualizer? = null
     private var currentAudioSessionId: Int = 0
+
+    @VisibleForTesting
+    internal var equalizerFactory: (Int) -> Equalizer = { sessionId -> Equalizer(0, sessionId) }
+    @VisibleForTesting
+    internal var bassBoostFactory: (Int) -> BassBoost = { sessionId -> BassBoost(0, sessionId) }
+    @VisibleForTesting
+    internal var virtualizerFactory: (Int) -> Virtualizer = { sessionId -> Virtualizer(0, sessionId) }
+    @VisibleForTesting
+    internal var loudnessEnhancerFactory: (Int) -> LoudnessEnhancer = { sessionId -> LoudnessEnhancer(sessionId) }
 
     val isAttached: Boolean
         get() = equalizer != null && currentAudioSessionId != 0
@@ -78,66 +97,57 @@ class EqualizerManager @Inject constructor() {
     private var minEqLevel: Short = -1500
     private var maxEqLevel: Short = 1500
 
-    private var loudnessEnhancer: android.media.audiofx.LoudnessEnhancer? = null
+    private var loudnessEnhancer: LoudnessEnhancer? = null
 
     // Global device capabilities (Checking existence of effect UUIDs)
     private var isBassBoostSupportedGlobal = false
     private var isVirtualizerSupportedGlobal = false
-    private var effectsDisabledForProcess = false
-    private var effectsDisableReason: String? = null
-    
+
+    // Session-scoped failure tracking so an offload/incompatible route never bricks EQ for subsequent sessions
+    private val failedEqualizerSessionIds = LinkedHashSet<Int>()
+    private val failedBassBoostSessionIds = LinkedHashSet<Int>()
+    private val failedVirtualizerSessionIds = LinkedHashSet<Int>()
+
     init {
         checkDeviceSupport()
     }
-    
+
     private fun checkDeviceSupport() {
         try {
             val effects = android.media.audiofx.AudioEffect.queryEffects()
-            isBassBoostSupportedGlobal = effects.any { it.type == android.media.audiofx.AudioEffect.EFFECT_TYPE_BASS_BOOST }
-            isVirtualizerSupportedGlobal = effects.any { it.type == android.media.audiofx.AudioEffect.EFFECT_TYPE_VIRTUALIZER }
+            isBassBoostSupportedGlobal = effects?.any { it.type == android.media.audiofx.AudioEffect.EFFECT_TYPE_BASS_BOOST } == true
+            isVirtualizerSupportedGlobal = effects?.any { it.type == android.media.audiofx.AudioEffect.EFFECT_TYPE_VIRTUALIZER } == true
             Timber.tag(TAG).d("Global Support Check - BassBoost: $isBassBoostSupportedGlobal, Virtualizer: $isVirtualizerSupportedGlobal")
         } catch (e: Exception) {
             Timber.tag(TAG).e(e, "Failed to query global audio effects")
-            // Fallback to assuming false until proven otherwise? Or true? 
-            // Better false to avoid broken UI, but unlikely to fail.
         }
     }
 
-    private fun markBassBoostUnavailable(reason: String) {
-        if (!isBassBoostSupportedGlobal && bassBoost == null) return
-
-        isBassBoostSupportedGlobal = false
-        _bassBoostEnabled.value = false
-        bassBoost?.runCatching { release() }
-        bassBoost = null
-        Timber.tag(TAG).w("BassBoost disabled for this process: %s", reason)
-    }
-
-    private fun markVirtualizerUnavailable(reason: String) {
-        if (!isVirtualizerSupportedGlobal && virtualizer == null) return
-
-        isVirtualizerSupportedGlobal = false
-        _virtualizerEnabled.value = false
-        virtualizer?.runCatching { release() }
-        virtualizer = null
-        Timber.tag(TAG).w("Virtualizer disabled for this process: %s", reason)
+    private fun recordFailedSession(cache: LinkedHashSet<Int>, sessionId: Int) {
+        if (sessionId == 0) return
+        if (cache.size >= MAX_FAILED_SESSIONS_CACHE) {
+            val oldest = cache.firstOrNull()
+            if (oldest != null) cache.remove(oldest)
+        }
+        cache.add(sessionId)
     }
 
     /**
      * Attaches the equalizer to an audio session ID.
-     * Call this when the player is created or swapped during crossfade.
-     */
-    /**
-     * Attaches the equalizer to an audio session ID.
-     * Call this when the player is created or swapped during crossfade.
+     * Serialized with [attachMutex] so overlapping calls cannot leak or overwrite handles.
      */
     suspend fun attachToAudioSession(audioSessionId: Int) {
+        latestRequestedSessionId = audioSessionId
         if (AdvancedPerformanceDiagnostics.isEnabled) {
             AdvancedPerformanceDiagnostics.traceSuspend("Equalizer.attachToAudioSession") {
-                attachToAudioSessionInternal(audioSessionId)
+                attachMutex.withLock {
+                    attachToAudioSessionInternal(audioSessionId)
+                }
             }
         } else {
-            attachToAudioSessionInternal(audioSessionId)
+            attachMutex.withLock {
+                attachToAudioSessionInternal(audioSessionId)
+            }
         }
     }
 
@@ -154,10 +164,10 @@ class EqualizerManager @Inject constructor() {
         ) {
             mapOf("audioSessionId" to audioSessionId.toString())
         }
-        if (effectsDisabledForProcess) {
+
+        if (latestRequestedSessionId != 0 && latestRequestedSessionId != audioSessionId) {
             Timber.tag(TAG).d(
-                "Skipping attachToAudioSession($audioSessionId): audio effects disabled (%s)",
-                effectsDisableReason ?: "unknown reason"
+                "Skipping superseded attachToAudioSession($audioSessionId); latest=$latestRequestedSessionId"
             )
             AdvancedPerformanceDiagnostics.recordEventIfEnabled(
                 type = AdvancedPerformanceDiagnostics.EventTypes.AUDIO_EFFECT,
@@ -165,7 +175,7 @@ class EqualizerManager @Inject constructor() {
             ) {
                 mapOf(
                     "audioSessionId" to audioSessionId.toString(),
-                    "reason" to (effectsDisableReason ?: "effects_disabled_for_process")
+                    "reason" to "superseded"
                 )
             }
             return
@@ -181,7 +191,23 @@ class EqualizerManager @Inject constructor() {
             }
             return
         }
-        
+
+        if (audioSessionId in failedEqualizerSessionIds) {
+            Timber.tag(TAG).d(
+                "Skipping attachToAudioSession($audioSessionId): audio effects unavailable for this session"
+            )
+            AdvancedPerformanceDiagnostics.recordEventIfEnabled(
+                type = AdvancedPerformanceDiagnostics.EventTypes.AUDIO_EFFECT,
+                name = "equalizer_attach_skipped"
+            ) {
+                mapOf(
+                    "audioSessionId" to audioSessionId.toString(),
+                    "reason" to "session_effects_unavailable"
+                )
+            }
+            return
+        }
+
         if (currentAudioSessionId == audioSessionId && equalizer != null) {
             Timber.tag(TAG).d("Already attached to session $audioSessionId")
             AdvancedPerformanceDiagnostics.recordEventIfEnabled(
@@ -195,32 +221,27 @@ class EqualizerManager @Inject constructor() {
             }
             return
         }
-        
+
         Timber.tag(TAG).d("Attaching to audio session: $audioSessionId")
         release()
-        
+
         try {
-            // Initialize Equalizer
-            equalizer = try {
-                Equalizer(0, audioSessionId).apply {
+            // Initialize primary Equalizer first and apply bands immediately without waiting
+            // on optional secondary effects.
+            val newEqualizer = try {
+                equalizerFactory(audioSessionId).apply {
                     minEqLevel = bandLevelRange[0]
                     maxEqLevel = bandLevelRange[1]
                     enabled = _isEnabled.value
                 }
             } catch (e: Exception) {
-                // Some OEM/route combinations do not expose an effect engine for this session.
-                // Disable effects for this process to avoid repeated hard failures and log spam.
-                effectsDisabledForProcess = true
-                effectsDisableReason = "${e.javaClass.simpleName}: ${e.message ?: "unknown"}"
-                _isEnabled.value = false
-                _bassBoostEnabled.value = false
-                _virtualizerEnabled.value = false
-                _loudnessEnhancerEnabled.value = false
-                isBassBoostSupportedGlobal = false
-                isVirtualizerSupportedGlobal = false
+                val errorReason = "${e.javaClass.simpleName}: ${e.message ?: "unknown"}"
+                recordFailedSession(failedEqualizerSessionIds, audioSessionId)
                 Timber.tag(TAG).w(
                     e,
-                    "Audio effects unavailable on this device/audio route. Disabling EQ stack for this process."
+                    "Audio effects unavailable for audioSessionId=%d (%s); keeping user preferences intact for next session.",
+                    audioSessionId,
+                    errorReason
                 )
                 AdvancedPerformanceDiagnostics.recordEventIfEnabled(
                     type = AdvancedPerformanceDiagnostics.EventTypes.AUDIO_EFFECT,
@@ -228,84 +249,31 @@ class EqualizerManager @Inject constructor() {
                 ) {
                     mapOf(
                         "audioSessionId" to audioSessionId.toString(),
-                        "error" to (effectsDisableReason ?: e.javaClass.simpleName)
+                        "error" to errorReason
                     )
                 }
                 release()
                 return
             }
-            
-            // Retry loop for effects that might fail initially
-            val maxRetries = 3
-            var retryCount = 0
-            
-            while (bassBoost == null && retryCount < maxRetries) {
-                try {
-                    bassBoost = BassBoost(0, audioSessionId).apply {
-                        enabled = _bassBoostEnabled.value
-                        if (strengthSupported) {
-                            setStrength(_bassBoostStrength.value.toShort())
-                        }
-                    }
-                    if (bassBoost != null) Timber.tag(TAG).d("BassBoost initialized on attempt ${retryCount + 1}")
-                } catch (e: Exception) {
-                    Timber.tag(TAG).w("BassBoost init failed (attempt ${retryCount + 1}): ${e.message}")
-                    AdvancedPerformanceDiagnostics.recordEventIfEnabled(
-                        type = AdvancedPerformanceDiagnostics.EventTypes.AUDIO_EFFECT,
-                        name = "bass_boost_init_failed"
-                    ) {
-                        mapOf(
-                            "audioSessionId" to audioSessionId.toString(),
-                            "attempt" to (retryCount + 1).toString(),
-                            "error" to (e.message ?: e.javaClass.simpleName)
-                        )
-                    }
-                    if (retryCount < maxRetries - 1) kotlinx.coroutines.delay(300)
-                }
-                retryCount++
-            }
-            if (bassBoost == null) {
-                markBassBoostUnavailable("No effect engine was created for audio session $audioSessionId after $maxRetries attempts")
-            }
-            
-            retryCount = 0
-            while (virtualizer == null && retryCount < maxRetries) {
-                 try {
-                    virtualizer = Virtualizer(0, audioSessionId).apply {
-                        enabled = _virtualizerEnabled.value
-                        if (strengthSupported) {
-                            setStrength(_virtualizerStrength.value.toShort())
-                        }
-                    }
-                    if (virtualizer != null) Timber.tag(TAG).d("Virtualizer initialized on attempt ${retryCount + 1}")
-                } catch (e: Exception) {
-                    Timber.tag(TAG).w("Virtualizer init failed (attempt ${retryCount + 1}): ${e.message}")
-                    AdvancedPerformanceDiagnostics.recordEventIfEnabled(
-                        type = AdvancedPerformanceDiagnostics.EventTypes.AUDIO_EFFECT,
-                        name = "virtualizer_init_failed"
-                    ) {
-                        mapOf(
-                            "audioSessionId" to audioSessionId.toString(),
-                            "attempt" to (retryCount + 1).toString(),
-                            "error" to (e.message ?: e.javaClass.simpleName)
-                        )
-                    }
-                    if (retryCount < maxRetries - 1) kotlinx.coroutines.delay(300)
-                }
-                retryCount++
-            }
-            if (virtualizer == null) {
-                markVirtualizerUnavailable("No effect engine was created for audio session $audioSessionId after $maxRetries attempts")
+
+            synchronized(effectHandleLock) {
+                equalizer = newEqualizer
+                currentAudioSessionId = audioSessionId
             }
 
-            // Initialize Loudness Enhancer (usually robust, but let's be safe)
-            loudnessEnhancer = try {
-                android.media.audiofx.LoudnessEnhancer(audioSessionId).apply {
+            // Apply primary Equalizer band levels right away so EQ responds with zero retry delay.
+            val deviceBandCount = newEqualizer.numberOfBands.toInt()
+            Timber.tag(TAG).d("Device supports $deviceBandCount bands, UI has ${_bandLevels.value.size} bands")
+            applyBandLevels(_bandLevels.value)
+
+            // Initialize LoudnessEnhancer immediately after Equalizer (non-blocking).
+            val newLoudness = try {
+                loudnessEnhancerFactory(audioSessionId).apply {
                     setTargetGain(_loudnessEnhancerStrength.value.coerceIn(0, MAX_LOUDNESS_GAIN_MB))
                     enabled = _loudnessEnhancerEnabled.value
                 }
             } catch (e: Exception) {
-                Timber.tag(TAG).w(e, "LoudnessEnhancer not supported on this device")
+                Timber.tag(TAG).w(e, "LoudnessEnhancer unavailable for session $audioSessionId")
                 AdvancedPerformanceDiagnostics.recordEventIfEnabled(
                     type = AdvancedPerformanceDiagnostics.EventTypes.AUDIO_EFFECT,
                     name = "loudness_enhancer_init_failed"
@@ -317,16 +285,68 @@ class EqualizerManager @Inject constructor() {
                 }
                 null
             }
-            
-            currentAudioSessionId = audioSessionId
-            
-            // Apply current band levels with proper mapping
-            val deviceBandCount = equalizer?.numberOfBands?.toInt() ?: 0
-            Timber.tag(TAG).d("Device supports $deviceBandCount bands, UI has ${_bandLevels.value.size} bands")
-            applyBandLevels(_bandLevels.value)
+
+            // Probe BassBoost and Virtualizer for this session without blocking EQ activation.
+            val newBassBoost = if (audioSessionId !in failedBassBoostSessionIds) {
+                try {
+                    bassBoostFactory(audioSessionId).apply {
+                        enabled = _bassBoostEnabled.value
+                        if (strengthSupported) {
+                            setStrength(_bassBoostStrength.value.coerceIn(0, 1000).toShort())
+                        }
+                    }
+                } catch (e: Exception) {
+                    recordFailedSession(failedBassBoostSessionIds, audioSessionId)
+                    Timber.tag(TAG).w("BassBoost unavailable for session $audioSessionId: ${e.message}")
+                    AdvancedPerformanceDiagnostics.recordEventIfEnabled(
+                        type = AdvancedPerformanceDiagnostics.EventTypes.AUDIO_EFFECT,
+                        name = "bass_boost_init_failed"
+                    ) {
+                        mapOf(
+                            "audioSessionId" to audioSessionId.toString(),
+                            "error" to (e.message ?: e.javaClass.simpleName)
+                        )
+                    }
+                    null
+                }
+            } else {
+                null
+            }
+
+            val newVirtualizer = if (audioSessionId !in failedVirtualizerSessionIds) {
+                try {
+                    virtualizerFactory(audioSessionId).apply {
+                        enabled = _virtualizerEnabled.value
+                        if (strengthSupported) {
+                            setStrength(_virtualizerStrength.value.coerceIn(0, 1000).toShort())
+                        }
+                    }
+                } catch (e: Exception) {
+                    recordFailedSession(failedVirtualizerSessionIds, audioSessionId)
+                    Timber.tag(TAG).w("Virtualizer unavailable for session $audioSessionId: ${e.message}")
+                    AdvancedPerformanceDiagnostics.recordEventIfEnabled(
+                        type = AdvancedPerformanceDiagnostics.EventTypes.AUDIO_EFFECT,
+                        name = "virtualizer_init_failed"
+                    ) {
+                        mapOf(
+                            "audioSessionId" to audioSessionId.toString(),
+                            "error" to (e.message ?: e.javaClass.simpleName)
+                        )
+                    }
+                    null
+                }
+            } else {
+                null
+            }
+
+            synchronized(effectHandleLock) {
+                loudnessEnhancer = newLoudness
+                bassBoost = newBassBoost
+                virtualizer = newVirtualizer
+            }
             applyCurrentEffectStateToAttachedEffects()
-            
-            Timber.tag(TAG).d("Effects attached successfully. EQ bands: ${equalizer?.numberOfBands}, Range: $minEqLevel to $maxEqLevel")
+
+            Timber.tag(TAG).d("Effects attached successfully. EQ bands: ${newEqualizer.numberOfBands}, Range: $minEqLevel to $maxEqLevel")
             AdvancedPerformanceDiagnostics.recordEventIfEnabled(
                 type = AdvancedPerformanceDiagnostics.EventTypes.AUDIO_EFFECT,
                 name = "equalizer_attach_success"
@@ -334,13 +354,12 @@ class EqualizerManager @Inject constructor() {
                 mapOf(
                     "audioSessionId" to audioSessionId.toString(),
                     "durationMs" to (SystemClock.elapsedRealtime() - attachStartedMs).toString(),
-                    "eqBands" to (equalizer?.numberOfBands?.toString() ?: "unknown"),
-                    "bassBoostAvailable" to (bassBoost != null).toString(),
-                    "virtualizerAvailable" to (virtualizer != null).toString(),
-                    "loudnessAvailable" to (loudnessEnhancer != null).toString()
+                    "eqBands" to newEqualizer.numberOfBands.toString(),
+                    "bassBoostAvailable" to (newBassBoost != null).toString(),
+                    "virtualizerAvailable" to (newVirtualizer != null).toString(),
+                    "loudnessAvailable" to (newLoudness != null).toString()
                 )
             }
-            
         } catch (e: Exception) {
             Timber.tag(TAG).e(e, "Failed to initialize audio effects")
             AdvancedPerformanceDiagnostics.recordEventIfEnabled(
@@ -697,19 +716,21 @@ class EqualizerManager @Inject constructor() {
      * Releases all audio effect resources.
      */
     fun release() {
-        try {
-            equalizer?.release()
-            bassBoost?.release()
-            virtualizer?.release()
-            loudnessEnhancer?.release()
-        } catch (e: Exception) {
-            Timber.tag(TAG).e(e, "Error releasing audio effects")
+        synchronized(effectHandleLock) {
+            try {
+                equalizer?.release()
+                bassBoost?.release()
+                virtualizer?.release()
+                loudnessEnhancer?.release()
+            } catch (e: Exception) {
+                Timber.tag(TAG).e(e, "Error releasing audio effects")
+            }
+            equalizer = null
+            bassBoost = null
+            virtualizer = null
+            loudnessEnhancer = null
+            currentAudioSessionId = 0
         }
-        equalizer = null
-        bassBoost = null
-        virtualizer = null
-        loudnessEnhancer = null
-        currentAudioSessionId = 0
         Timber.tag(TAG).d("Audio effects released")
     }
 }

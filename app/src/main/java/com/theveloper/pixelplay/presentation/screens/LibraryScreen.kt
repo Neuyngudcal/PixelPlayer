@@ -10,6 +10,7 @@ import android.text.format.Formatter
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.ExperimentalAnimationApi
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateDpAsState
@@ -55,6 +56,7 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.MoreHoriz
+import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.SelectAll
 import androidx.compose.material.icons.rounded.Deselect
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
@@ -125,7 +127,6 @@ import androidx.media3.common.util.UnstableApi
 import androidx.navigation.NavController
 import androidx.paging.compose.collectAsLazyPagingItems
 import coil.compose.AsyncImage
-import coil.compose.AsyncImagePainter
 import coil.imageLoader
 import coil.request.ImageRequest
 import coil.size.Size
@@ -143,6 +144,12 @@ import com.theveloper.pixelplay.presentation.components.SmartImage
 import com.theveloper.pixelplay.presentation.components.SmartImageListTargetSize
 import com.theveloper.pixelplay.presentation.components.resolveMainScreenBottomGradientHeight
 import com.theveloper.pixelplay.presentation.components.resolveNavBarOccupiedHeight
+import com.theveloper.pixelplay.presentation.components.LocalInsideFloatingPane
+import com.theveloper.pixelplay.presentation.components.TabletPaneTokens
+import com.theveloper.pixelplay.presentation.components.resolveTabletPaneBottomMargin
+import com.theveloper.pixelplay.ui.theme.LocalPixelPlayWindowInfo
+import com.theveloper.pixelplay.ui.theme.LocalSpacing
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.asPaddingValues
@@ -171,7 +178,6 @@ import com.theveloper.pixelplay.data.model.LibraryTabId
 import com.theveloper.pixelplay.data.model.toLibraryTabIdOrNull
 import com.theveloper.pixelplay.data.preferences.LibraryNavigationMode
 import com.theveloper.pixelplay.data.worker.SyncProgress
-import com.theveloper.pixelplay.presentation.screens.search.components.GenreTypography
 import com.theveloper.pixelplay.presentation.components.SyncProgressBar
 import com.theveloper.pixelplay.presentation.viewmodel.LibraryViewModel
 import com.theveloper.pixelplay.utils.formatSongCount
@@ -399,6 +405,7 @@ private data class LibraryScreenPlayerProjection(
     val currentFavoriteSortOption: SortOption = SortOption.LikedSongDateLiked,
     val currentFolderSortOption: SortOption = SortOption.FolderNameAZ,
     val isAlbumsListView: Boolean = false,
+    val isSongsGridView: Boolean = false,
     val isSdCardAvailable: Boolean = false,
     val musicFolders: ImmutableList<MusicFolder> = persistentListOf(),
     val isLoadingLibraryCategories: Boolean = true,
@@ -420,6 +427,7 @@ private fun PlayerUiState.toLibraryScreenProjection(): LibraryScreenPlayerProjec
         currentFavoriteSortOption = currentFavoriteSortOption,
         currentFolderSortOption = currentFolderSortOption,
         isAlbumsListView = isAlbumsListView,
+        isSongsGridView = isSongsGridView,
         isSdCardAvailable = isSdCardAvailable,
         musicFolders = musicFolders,
         isLoadingLibraryCategories = isLoadingLibraryCategories,
@@ -495,9 +503,6 @@ fun LibraryScreen(
     }
     val currentTabId = tabTitles.getOrNull(currentTabIndex)?.toLibraryTabIdOrNull() ?: vmCurrentTabId
     val isSortSheetVisible by playerViewModel.isSortingSheetVisible.collectAsStateWithLifecycle()
-    val isSendingToWatch by songInfoBottomSheetViewModel.isSendingToWatch.collectAsStateWithLifecycle()
-    val activeWatchTransfer by songInfoBottomSheetViewModel.activeWatchTransfer.collectAsStateWithLifecycle()
-    var showWatchTransferDialog by remember { mutableStateOf(false) }
     val canNavigateBackInFolders by remember(playerViewModel) {
         playerViewModel.playerUiState
             .map { uiState -> uiState.currentFolder != null && uiState.folderBackGestureNavigationEnabled }
@@ -519,12 +524,6 @@ fun LibraryScreen(
 
     var showReorderTabsSheet by remember { mutableStateOf(false) }
     var showTabSwitcherSheet by remember { mutableStateOf(false) }
-
-    LaunchedEffect(activeWatchTransfer?.requestId) {
-        if (activeWatchTransfer == null) {
-            showWatchTransferDialog = false
-        }
-    }
 
     // Multi-selection state
     val multiSelectionState = playerViewModel.multiSelectionStateHolder
@@ -812,10 +811,19 @@ fun LibraryScreen(
         label = "Action Button Icon Transition"
     ) // UI sin cambios
 
+    val windowInfo = LocalPixelPlayWindowInfo.current
+    val spacing = LocalSpacing.current
     val systemNavBarInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     val navBarCompactMode by playerViewModel.navBarCompactMode.collectAsStateWithLifecycle()
-    val bottomBarHeightDp = resolveNavBarOccupiedHeight(systemNavBarInset, navBarCompactMode)
-    val bottomGradientHeight = resolveMainScreenBottomGradientHeight(navBarCompactMode)
+    val bottomBarHeightDp = if (windowInfo.useNavigationRail) {
+        0.dp
+    } else {
+        resolveNavBarOccupiedHeight(systemNavBarInset, navBarCompactMode)
+    }
+    val bottomGradientHeight = resolveMainScreenBottomGradientHeight(
+        compactMode = navBarCompactMode,
+        useNavigationRail = windowInfo.useNavigationRail
+    )
 
     val dm = LocalPixelPlayDarkTheme.current
 
@@ -853,10 +861,15 @@ fun LibraryScreen(
     val headerContainerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)
 
     Scaffold(
-        modifier = Modifier.background(brush = gradientBrush),
+        modifier = if (windowInfo.useNavigationRail) Modifier else Modifier.background(brush = gradientBrush),
+        containerColor = if (windowInfo.useNavigationRail) Color.Transparent else MaterialTheme.colorScheme.background,
         topBar = {
             Column(
-                modifier = Modifier.background(headerContainerColor)
+                modifier = if (windowInfo.useNavigationRail) {
+                    Modifier.padding(end = TabletPaneTokens.EndMargin)
+                } else {
+                    Modifier.background(headerContainerColor)
+                }
             ) {
                 TopAppBar(
                     title = {
@@ -865,10 +878,10 @@ fun LibraryScreen(
                                 modifier = Modifier,
                                 title = currentTabTitle,
                                 isExpanded = showTabSwitcherSheet,
-                                showIcon = !isSendingToWatch,
+                                showIcon = true,
                                 iconRes = currentTab.iconRes(),
                                 pageIndex = pagerState.currentPage,
-                                compressForWatchTransfer = isSendingToWatch,
+                                compressForWatchTransfer = false,
                                 onClick = {
                                     showTabSwitcherSheet = true
                                 },
@@ -887,55 +900,22 @@ fun LibraryScreen(
                         }
                     },
                     actions = {
-                        if (isSendingToWatch) {
-                            val watchTransferProgress = activeWatchTransfer?.progress ?: 0f
-                            val watchTransferPercent = (watchTransferProgress * 100f).toInt().coerceIn(0, 100)
-                            Surface(
-                                modifier = Modifier
-                                    .padding(end = 8.dp)
-                                    .wrapContentWidth()
-                                    .height(40.dp)
-                                    .clip(CircleShape)
-                                    .clickable(enabled = activeWatchTransfer != null) {
-                                        showWatchTransferDialog = true
-                                    },
-                                shape = CircleShape,
-                                color = MaterialTheme.colorScheme.secondaryContainer,
-                                contentColor = MaterialTheme.colorScheme.onSecondaryContainer
-                            ) {
-                                Row(
-                                    modifier = Modifier
-                                        .padding(horizontal = 8.dp),
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Icon(
-                                        painter = painterResource(R.drawable.rounded_watch_arrow_down_24),
-                                        contentDescription = stringResource(R.string.library_cd_watch_transfer),
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                    Text(
-                                        text = stringResource(R.string.common_percentage_text, watchTransferPercent),
-                                        style = MaterialTheme.typography.labelMedium,
-                                        fontWeight = FontWeight.Bold
-                                    )
+                        if (!windowInfo.useNavigationRail) {
+                            FilledIconButton(
+                                modifier = Modifier.padding(end = 14.dp),
+                                colors = IconButtonDefaults.filledIconButtonColors(
+                                    containerColor = MaterialTheme.colorScheme.primaryContainer,
+                                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                                ),
+                                onClick = {
+                                    navController.navigateSafely(Screen.Settings.route)
                                 }
+                            ) {
+                                Icon(
+                                    painter = painterResource(R.drawable.rounded_settings_24),
+                                    contentDescription = stringResource(R.string.library_cd_open_settings)
+                                )
                             }
-                        }
-                        FilledIconButton(
-                            modifier = Modifier.padding(end = 14.dp),
-                            colors = IconButtonDefaults.filledIconButtonColors(
-                                containerColor = MaterialTheme.colorScheme.primaryContainer,
-                                contentColor = MaterialTheme.colorScheme.onPrimaryContainer
-                            ),
-                            onClick = {
-                                navController.navigateSafely(Screen.Settings.route)
-                            }
-                        ) {
-                            Icon(
-                                painter = painterResource(R.drawable.rounded_settings_24),
-                                contentDescription = stringResource(R.string.library_cd_open_settings)
-                            )
                         }
                     },
                     colors = TopAppBarDefaults.topAppBarColors(
@@ -1031,26 +1011,44 @@ fun LibraryScreen(
         ) {
             Column(
                 modifier = Modifier
-                    .background(color = headerContainerColor)
+                    .then(if (windowInfo.useNavigationRail) Modifier else Modifier.background(color = headerContainerColor))
                     .fillMaxSize()
             ) {
                 Surface(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = 0.dp, vertical = 0.dp), // Removed horizontal padding for more space
-                    color = MaterialTheme.colorScheme.surface,
-                    shape = AbsoluteSmoothCornerShape(
-                        cornerRadiusTL = 34.dp,
-                        smoothnessAsPercentBL = 60,
-                        cornerRadiusBL = 0.dp,
-                        smoothnessAsPercentBR = 60,
-                        cornerRadiusBR = 0.dp,
-                        smoothnessAsPercentTR = 60,
-                        cornerRadiusTR = 34.dp,
-                        smoothnessAsPercentTL = 60
-                    )
-                    // shape = AbsoluteSmoothCornerShape(cornerRadiusTL = 24.dp, smoothnessAsPercentTR = 60, /*...*/) // Your custom shape
+                    modifier = if (windowInfo.useNavigationRail) {
+                        Modifier
+                            .fillMaxSize()
+                            .padding(
+                                start = TabletPaneTokens.StartMargin,
+                                top = spacing.xs,
+                                end = TabletPaneTokens.EndMargin,
+                                bottom = resolveTabletPaneBottomMargin(systemNavBarInset)
+                            )
+                    } else {
+                        Modifier.fillMaxSize()
+                    },
+                    color = if (windowInfo.useNavigationRail) {
+                        MaterialTheme.colorScheme.surfaceContainerLowest
+                    } else {
+                        MaterialTheme.colorScheme.surface
+                    },
+                    shape = if (windowInfo.useNavigationRail) {
+                        RoundedCornerShape(TabletPaneTokens.CornerRadius)
+                    } else {
+                        AbsoluteSmoothCornerShape(
+                            cornerRadiusTL = 34.dp,
+                            smoothnessAsPercentBL = 60,
+                            cornerRadiusBL = 0.dp,
+                            smoothnessAsPercentBR = 60,
+                            cornerRadiusBR = 0.dp,
+                            smoothnessAsPercentTR = 60,
+                            cornerRadiusTR = 34.dp,
+                            smoothnessAsPercentTL = 60
+                        )
+                    }
                 ) {
+                    CompositionLocalProvider(LocalInsideFloatingPane provides windowInfo.useNavigationRail) {
+                    Box(modifier = Modifier.fillMaxSize()) {
                     Column(Modifier.fillMaxSize()) {
                         // OPTIMIZACIÓN: La lógica de ordenamiento ahora es más eficiente.
                         val availableSortOptions by playerViewModel.availableSortOptions.collectAsStateWithLifecycle()
@@ -1073,51 +1071,9 @@ fun LibraryScreen(
                         }
 
                         val playlistUiState by playlistViewModel.uiState.collectAsStateWithLifecycle()
-                        val visiblePlaylists = remember(
-                            playlistUiState.playlists,
-                            playlistUiState.showTelegramCloudPlaylists,
-                            playlistUiState.telegramTopicDisplayMode
-                        ) {
-                            val mode = playlistUiState.telegramTopicDisplayMode
-                            val allPlaylists = playlistUiState.playlists
-
-                            // When Telegram cloud is hidden, remove all Telegram playlists
-                            if (!playlistUiState.showTelegramCloudPlaylists) {
-                                return@remember allPlaylists.filterNot {
-                                    it.source == "TELEGRAM" || it.source == "TELEGRAM_TOPIC"
-                                }
-                            }
-
-                            allPlaylists.filter { playlist ->
-                                when (playlist.source) {
-                                    "TELEGRAM_TOPIC" -> when (mode) {
-                                        com.theveloper.pixelplay.data.preferences.TelegramTopicDisplayMode.CHANNELS_ONLY ->
-                                            false
-                                        com.theveloper.pixelplay.data.preferences.TelegramTopicDisplayMode.TOPICS_ONLY,
-                                        com.theveloper.pixelplay.data.preferences.TelegramTopicDisplayMode.CHANNELS_AND_TOPICS ->
-                                            playlist.songIds.isNotEmpty()
-                                    }
-                                    "TELEGRAM" -> when (mode) {
-                                        com.theveloper.pixelplay.data.preferences.TelegramTopicDisplayMode.CHANNELS_ONLY ->
-                                            true
-                                        com.theveloper.pixelplay.data.preferences.TelegramTopicDisplayMode.TOPICS_ONLY -> {
-                                            // Hide combined playlist only for forum channels
-                                            // (those that have at least one topic playlist)
-                                            val chatId = playlist.id
-                                                .removePrefix("telegram_channel:")
-                                                .toLongOrNull()
-                                            if (chatId != null) {
-                                                allPlaylists.none { p ->
-                                                    p.source == "TELEGRAM_TOPIC" &&
-                                                            p.id.startsWith("telegram_topic:${chatId}_")
-                                                }
-                                            } else true
-                                        }
-                                        com.theveloper.pixelplay.data.preferences.TelegramTopicDisplayMode.CHANNELS_AND_TOPICS ->
-                                            true
-                                    }
-                                    else -> true
-                                }
+                        val visiblePlaylists = remember(playlistUiState.playlists) {
+                            playlistUiState.playlists.filterNot {
+                                it.source == "TELEGRAM" || it.source == "TELEGRAM_TOPIC"
                             }
                         }
                         val isLibraryLoading by libraryViewModel.isLoadingLibrary.collectAsStateWithLifecycle()
@@ -1180,6 +1136,19 @@ fun LibraryScreen(
                             }
                         }
 
+                        // Hoist LazyPagingItems and scroll states outside HorizontalPager so tab switches
+                        // do not destroy and recreate Paging presenters or lose scroll position.
+                        val allSongsLazyPagingItems = libraryViewModel.songsPagingFlow.collectAsLazyPagingItems()
+                        val albumsLazyPagingItems = libraryViewModel.albumsPagingFlow.collectAsLazyPagingItems()
+                        val artistsLazyPagingItems = libraryViewModel.artistsPagingFlow.collectAsLazyPagingItems()
+                        val favoritePagingItems = libraryViewModel.favoritesPagingFlow.collectAsLazyPagingItems()
+                        val songsListState = rememberLazyListState()
+                        val songsGridState = rememberLazyGridState()
+                        val albumsGridState = rememberLazyGridState()
+                        val albumsListState = rememberLazyListState()
+                        val artistsListState = rememberLazyListState()
+                        val favoritesListState = rememberLazyListState()
+
                         // Switch between normal action row and selection action row
                         AnimatedContent(
                             targetState = isSelectionMode || isPlaylistSelectionMode || isAlbumSelectionMode,
@@ -1220,7 +1189,13 @@ fun LibraryScreen(
                                                     )
                                                 )
                                             } else {
-                                                val albumsToAppend = playerViewModel.albumsFlow.value
+                                                val snapshotAlbums = albumsLazyPagingItems.itemSnapshotList.items
+                                                val sourceAlbums = if (snapshotAlbums.isNotEmpty()) {
+                                                    snapshotAlbums
+                                                } else {
+                                                    playerViewModel.albumsFlow.value
+                                                }
+                                                val albumsToAppend = sourceAlbums
                                                     .filterNot { selectedAlbumIds.contains(it.id) }
                                                     .take(remaining)
                                                 if (albumsToAppend.isNotEmpty()) {
@@ -1293,13 +1268,39 @@ fun LibraryScreen(
                                     onFolderClick = { playerViewModel.navigateToFolder(it) },
                                     onNavigateBack = { playerViewModel.navigateBackFolder() },
                                     isShuffleEnabled = isShuffleEnabled,
-                                    showStorageFilterButton = currentTabId == LibraryTabId.SONGS ||
-                                            currentTabId == LibraryTabId.ALBUMS ||
-                                            currentTabId == LibraryTabId.ARTISTS ||
-                                            currentTabId == LibraryTabId.LIKED ||
-                                            (ENABLE_FOLDERS_STORAGE_FILTER && currentTabId == LibraryTabId.FOLDERS),
+                                    showStorageFilterButton = false,
                                     currentStorageFilter = playerUiState.currentStorageFilter,
-                                    onStorageFilterClick = { playerViewModel.toggleStorageFilter() }
+                                    onStorageFilterClick = { playerViewModel.toggleStorageFilter() },
+                                    showViewModeButton = currentTabId == LibraryTabId.SONGS || currentTabId == LibraryTabId.ALBUMS,
+                                    isGridViewActive = when (currentTabId) {
+                                        LibraryTabId.SONGS -> playerUiState.isSongsGridView
+                                        LibraryTabId.ALBUMS -> !playerUiState.isAlbumsListView
+                                        else -> false
+                                    },
+                                    viewModeTooltipText = when (currentTabId) {
+                                        LibraryTabId.SONGS -> stringResource(
+                                            if (playerUiState.isSongsGridView) {
+                                                R.string.library_cd_switch_to_list_view
+                                            } else {
+                                                R.string.library_cd_switch_to_album_view
+                                            }
+                                        )
+                                        LibraryTabId.ALBUMS -> stringResource(
+                                            if (playerUiState.isAlbumsListView) {
+                                                R.string.library_cd_switch_to_grid_view
+                                            } else {
+                                                R.string.library_cd_switch_to_list_view
+                                            }
+                                        )
+                                        else -> ""
+                                    },
+                                    onViewModeToggleClick = {
+                                        when (currentTabId) {
+                                            LibraryTabId.SONGS -> playerViewModel.setSongsGridView(!playerUiState.isSongsGridView)
+                                            LibraryTabId.ALBUMS -> playerViewModel.setAlbumsListView(!playerUiState.isAlbumsListView)
+                                            else -> Unit
+                                        }
+                                    }
                                 )
                             }
                         }
@@ -1324,8 +1325,8 @@ fun LibraryScreen(
 
 
                             val isAlbumTab = currentTabId == LibraryTabId.ALBUMS
+                            val isSongsTab = currentTabId == LibraryTabId.SONGS
                             val isFoldersTab = currentTabId == LibraryTabId.FOLDERS
-                            val isPlaylistsTab = currentTabId == LibraryTabId.PLAYLISTS
 
                             LibrarySortBottomSheet(
                                 title = stringResource(R.string.library_sort_by_title),
@@ -1339,71 +1340,92 @@ fun LibraryScreen(
                                 onDirectionToggle = { option ->
                                     onSortOptionChanged(option)
                                 },
-                                showViewToggle = isFoldersTab || isPlaylistsTab,
-                                viewSectionTitle = if (isPlaylistsTab) {
-                                    stringResource(R.string.library_sort_section_cloud)
-                                } else {
-                                    stringResource(R.string.library_sort_section_view)
-                                },
-                                viewToggleLabel = if (isPlaylistsTab) {
-                                    stringResource(R.string.library_sort_toggle_telegram_channels)
-                                } else {
-                                    stringResource(R.string.library_sort_toggle_playlist_view)
-                                },
-                                viewToggleChecked = if (isPlaylistsTab) {
-                                    playlistUiState.showTelegramCloudPlaylists
-                                } else {
-                                    playerUiState.isFoldersPlaylistView
-                                },
+                                showViewToggle = isFoldersTab,
+                                viewSectionTitle = stringResource(R.string.library_sort_section_view),
+                                viewToggleLabel = stringResource(R.string.library_sort_toggle_playlist_view),
+                                viewToggleChecked = playerUiState.isFoldersPlaylistView,
                                 onViewToggleChange = { isChecked ->
-                                    if (isPlaylistsTab) {
-                                        playlistViewModel.setShowTelegramCloudPlaylists(isChecked)
-                                    } else {
-                                        playerViewModel.setFoldersPlaylistView(isChecked)
-                                    }
+                                    playerViewModel.setFoldersPlaylistView(isChecked)
                                 },
-                                viewToggleContent = if (isAlbumTab) {
-                                    {
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth().height(48.dp),
-                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                        ) {
-                                            val isList = playerUiState.isAlbumsListView
-                                            val primaryColor = MaterialTheme.colorScheme.tertiaryContainer
-                                            val onPrimaryColor = MaterialTheme.colorScheme.onTertiaryContainer
-                                            val surfaceColor = MaterialTheme.colorScheme.surfaceVariant
-                                            val onSurfaceColor = MaterialTheme.colorScheme.onSurfaceVariant
+                                viewToggleContent = when {
+                                    isAlbumTab -> {
+                                        {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth().height(48.dp),
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                            ) {
+                                                val isList = playerUiState.isAlbumsListView
 
-                                            // Grid Item
-                                            ToggleSegmentButton(
-                                                modifier = Modifier.weight(1f),
-                                                active = !isList,
-                                                activeColor = MaterialTheme.colorScheme.primary,
-                                                inactiveColor = MaterialTheme.colorScheme.surfaceVariant,
-                                                activeContentColor = MaterialTheme.colorScheme.onPrimary,
-                                                inactiveContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                activeCornerRadius = 32.dp,
-                                                onClick = { playerViewModel.setAlbumsListView(false) },
-                                                text = stringResource(R.string.library_view_mode_grid),
-                                                imageVector = Icons.Rounded.ViewModule
-                                            )
+                                                // Grid Item
+                                                ToggleSegmentButton(
+                                                    modifier = Modifier.weight(1f),
+                                                    active = !isList,
+                                                    activeColor = MaterialTheme.colorScheme.primary,
+                                                    inactiveColor = MaterialTheme.colorScheme.surfaceVariant,
+                                                    activeContentColor = MaterialTheme.colorScheme.onPrimary,
+                                                    inactiveContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    activeCornerRadius = 32.dp,
+                                                    onClick = { playerViewModel.setAlbumsListView(false) },
+                                                    text = stringResource(R.string.library_view_mode_grid),
+                                                    imageVector = Icons.Rounded.ViewModule
+                                                )
 
-                                            // List Item
-                                            ToggleSegmentButton(
-                                                modifier = Modifier.weight(1f),
-                                                active = isList,
-                                                activeColor = MaterialTheme.colorScheme.primary,
-                                                inactiveColor = MaterialTheme.colorScheme.surfaceVariant,
-                                                activeContentColor = MaterialTheme.colorScheme.onPrimary,
-                                                inactiveContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                activeCornerRadius = 32.dp,
-                                                onClick = { playerViewModel.setAlbumsListView(true) },
-                                                text = stringResource(R.string.library_view_mode_list),
-                                                imageVector = Icons.AutoMirrored.Rounded.ViewList
-                                            )
+                                                // List Item
+                                                ToggleSegmentButton(
+                                                    modifier = Modifier.weight(1f),
+                                                    active = isList,
+                                                    activeColor = MaterialTheme.colorScheme.primary,
+                                                    inactiveColor = MaterialTheme.colorScheme.surfaceVariant,
+                                                    activeContentColor = MaterialTheme.colorScheme.onPrimary,
+                                                    inactiveContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    activeCornerRadius = 32.dp,
+                                                    onClick = { playerViewModel.setAlbumsListView(true) },
+                                                    text = stringResource(R.string.library_view_mode_list),
+                                                    imageVector = Icons.AutoMirrored.Rounded.ViewList
+                                                )
+                                            }
                                         }
                                     }
-                                } else null,
+                                    isSongsTab -> {
+                                        {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth().height(48.dp),
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                            ) {
+                                                val isAlbumView = playerUiState.isSongsGridView
+
+                                                // List Item
+                                                ToggleSegmentButton(
+                                                    modifier = Modifier.weight(1f),
+                                                    active = !isAlbumView,
+                                                    activeColor = MaterialTheme.colorScheme.primary,
+                                                    inactiveColor = MaterialTheme.colorScheme.surfaceVariant,
+                                                    activeContentColor = MaterialTheme.colorScheme.onPrimary,
+                                                    inactiveContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    activeCornerRadius = 32.dp,
+                                                    onClick = { playerViewModel.setSongsGridView(false) },
+                                                    text = stringResource(R.string.library_view_mode_list),
+                                                    imageVector = Icons.AutoMirrored.Rounded.ViewList
+                                                )
+
+                                                // Album View Item
+                                                ToggleSegmentButton(
+                                                    modifier = Modifier.weight(1f),
+                                                    active = isAlbumView,
+                                                    activeColor = MaterialTheme.colorScheme.primary,
+                                                    inactiveColor = MaterialTheme.colorScheme.surfaceVariant,
+                                                    activeContentColor = MaterialTheme.colorScheme.onPrimary,
+                                                    inactiveContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    activeCornerRadius = 32.dp,
+                                                    onClick = { playerViewModel.setSongsGridView(true) },
+                                                    text = stringResource(R.string.library_view_mode_album_view),
+                                                    imageVector = Icons.Rounded.ViewModule
+                                                )
+                                            }
+                                        }
+                                    }
+                                    else -> null
+                                },
                                 sourceToggleContent = if (isFoldersTab && ENABLE_FOLDERS_SOURCE_TOGGLE) {
                                     {
                                         Row(
@@ -1450,75 +1472,9 @@ fun LibraryScreen(
                                         }
                                     }
                                 } else null,
-                                extraContent = {
-                                    if (isPlaylistsTab && playlistUiState.showTelegramCloudPlaylists) {
-                                        Text(
-                                            text = stringResource(R.string.library_telegram_topics_display_title),
-                                            style = MaterialTheme.typography.headlineSmall,
-                                            fontFamily = com.theveloper.pixelplay.ui.theme.GoogleSansRounded,
-                                            fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
-                                            modifier = Modifier.padding(start = 2.dp, bottom = 8.dp)
-                                        )
-                                        Row(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .height(48.dp),
-                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                        ) {
-                                            listOf(
-                                                com.theveloper.pixelplay.data.preferences.TelegramTopicDisplayMode.CHANNELS_ONLY to stringResource(R.string.library_telegram_topic_mode_channels),
-                                                com.theveloper.pixelplay.data.preferences.TelegramTopicDisplayMode.TOPICS_ONLY to stringResource(R.string.library_telegram_topic_mode_topics),
-                                                com.theveloper.pixelplay.data.preferences.TelegramTopicDisplayMode.CHANNELS_AND_TOPICS to stringResource(R.string.library_telegram_topic_mode_both)
-                                            ).forEach { (mode, label) ->
-                                                ToggleSegmentButton(
-                                                    modifier = Modifier.weight(1f),
-                                                    active = playlistUiState.telegramTopicDisplayMode == mode,
-                                                    activeColor = MaterialTheme.colorScheme.primary,
-                                                    inactiveColor = MaterialTheme.colorScheme.surfaceVariant,
-                                                    activeContentColor = MaterialTheme.colorScheme.onPrimary,
-                                                    inactiveContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                    activeCornerRadius = 32.dp,
-                                                    onClick = { playlistViewModel.setTelegramTopicDisplayMode(mode) },
-                                                    text = label
-                                                )
-                                            }
-                                        }
-                                    }
-                                    if (!isFoldersTab) {
-                                        Spacer(modifier = Modifier.height(12.dp))
-                                        Text(
-                                            text = stringResource(R.string.library_cloud_sources_heading),
-                                            style = MaterialTheme.typography.headlineSmall,
-                                            fontFamily = com.theveloper.pixelplay.ui.theme.GoogleSansRounded,
-                                            fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
-                                            modifier = Modifier.padding(start = 2.dp, bottom = 8.dp)
-                                        )
-                                        com.theveloper.pixelplay.presentation.components.LibrarySheetToggleCard(
-                                            label = stringResource(R.string.library_cloud_only_label),
-                                            checked = playerUiState.hideLocalMedia,
-                                            boxBackgroundColor = if (playerUiState.hideLocalMedia)
-                                                MaterialTheme.colorScheme.tertiary
-                                            else
-                                                MaterialTheme.colorScheme.surfaceContainerLow,
-                                            boxCornerRadius = if (playerUiState.hideLocalMedia) 18.dp else 50.dp,
-                                            onCheckedChange = { playerViewModel.setHideLocalMedia(it) }
-                                        )
-                                    }
-                                }
+                                extraContent = null
                             )
                         }
-
-                        // Hoist LazyPagingItems and scroll states outside HorizontalPager so tab switches
-                        // do not destroy and recreate Paging presenters or lose scroll position.
-                        val allSongsLazyPagingItems = libraryViewModel.songsPagingFlow.collectAsLazyPagingItems()
-                        val albumsLazyPagingItems = libraryViewModel.albumsPagingFlow.collectAsLazyPagingItems()
-                        val artistsLazyPagingItems = libraryViewModel.artistsPagingFlow.collectAsLazyPagingItems()
-                        val favoritePagingItems = libraryViewModel.favoritesPagingFlow.collectAsLazyPagingItems()
-                        val songsListState = rememberLazyListState()
-                        val albumsGridState = rememberLazyGridState()
-                        val albumsListState = rememberLazyListState()
-                        val artistsListState = rememberLazyListState()
-                        val favoritesListState = rememberLazyListState()
 
                         // Box wrapper to allow floating SelectionCountPill overlay
                         Box(modifier = Modifier.fillMaxSize()) {
@@ -1559,7 +1515,9 @@ fun LibraryScreen(
                                             sortOption = playerUiState.currentSongSortOption,
                                             storageFilter = playerUiState.currentStorageFilter,
                                             hasCurrentSong = hasCurrentSong,
-                                            listState = songsListState
+                                            isAlbumView = playerUiState.isSongsGridView,
+                                            listState = songsListState,
+                                            gridState = songsGridState
                                         )
                                     }
                                     LibraryTabId.ALBUMS -> {
@@ -1728,6 +1686,26 @@ fun LibraryScreen(
                             )
                         }
                     }
+                    if (windowInfo.useNavigationRail) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .align(Alignment.BottomCenter)
+                                .height(bottomGradientHeight)
+                                .background(
+                                    brush = Brush.verticalGradient(
+                                        colorStops = arrayOf(
+                                            0.0f to Color.Transparent,
+                                            0.2f to Color.Transparent,
+                                            0.8f to MaterialTheme.colorScheme.surfaceContainerLowest,
+                                            1.0f to MaterialTheme.colorScheme.surfaceContainerLowest
+                                        )
+                                    )
+                                )
+                        )
+                    }
+                    }
+                    }
                 }
                 if (
                     isLibraryContentEmpty &&
@@ -1744,24 +1722,26 @@ fun LibraryScreen(
                     LibrarySyncOverlay(syncManager = syncManager)
                 }
             }
-            //Grad box
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .align(Alignment.BottomCenter)
-                    .height(bottomGradientHeight)
-                    .background(
-                        brush = Brush.verticalGradient(
-                            colorStops = arrayOf(
-                                0.0f to Color.Transparent,
-                                0.2f to Color.Transparent,
-                                0.8f to MaterialTheme.colorScheme.surfaceContainerLowest,
-                                1.0f to MaterialTheme.colorScheme.surfaceContainerLowest
+            if (!windowInfo.useNavigationRail) {
+                //Grad box
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .align(Alignment.BottomCenter)
+                        .height(bottomGradientHeight)
+                        .background(
+                            brush = Brush.verticalGradient(
+                                colorStops = arrayOf(
+                                    0.0f to Color.Transparent,
+                                    0.2f to Color.Transparent,
+                                    0.8f to MaterialTheme.colorScheme.surfaceContainerLowest,
+                                    1.0f to MaterialTheme.colorScheme.surfaceContainerLowest
+                                )
                             )
                         )
-                    )
-            ) {
+                ) {
 
+                }
             }
         }
     }
@@ -1844,18 +1824,6 @@ fun LibraryScreen(
             )
         }
     )
-
-    if (showWatchTransferDialog && activeWatchTransfer != null) {
-        val currentWatchTransfer = activeWatchTransfer!!
-        WatchTransferProgressDialog(
-            transfer = currentWatchTransfer,
-            onDismiss = { showWatchTransferDialog = false },
-            onCancelTransfer = {
-                songInfoBottomSheetViewModel.cancelWatchTransfer(currentWatchTransfer.requestId)
-                showWatchTransferDialog = false
-            }
-        )
-    }
 
     if (showSongInfoBottomSheet && selectedSongForInfo != null) {
         val currentSong = selectedSongForInfo
@@ -3308,50 +3276,19 @@ fun AlbumGridItemRedesigned(
     onLongPress: () -> Unit = {},
     onSelectionToggle: () -> Unit = {}
 ) {
-    val albumColorSchemePair by albumColorSchemePairFlow.collectAsStateWithLifecycle()
-    val systemIsDark = LocalPixelPlayDarkTheme.current
-
-    // 1. Obtén el colorScheme del tema actual aquí, en el scope Composable.
-    val currentMaterialColorScheme = MaterialTheme.colorScheme
-
-    val itemDesignColorScheme = remember(albumColorSchemePair, systemIsDark, currentMaterialColorScheme) {
-        // 2. Ahora, currentMaterialColorScheme es una variable estable que puedes usar.
-        albumColorSchemePair?.let { pair ->
-            if (systemIsDark) pair.dark else pair.light
-        } ?: currentMaterialColorScheme // Usa la variable capturada
-    }
-
-    val gradientBaseColor = itemDesignColorScheme.primaryContainer
-    val onGradientColor = itemDesignColorScheme.onPrimaryContainer
-    val cardCornerRadius = 20.dp
-    val cardShape = RoundedCornerShape(cardCornerRadius)
-    val selectionScale by animateFloatAsState(
-        targetValue = if (isSelected) 0.985f else 1f,
-        animationSpec = tween(durationMillis = 220),
-        label = "albumGridSelectionScale"
-    )
-    val selectionBorderWidth by animateDpAsState(
-        targetValue = if (isSelected) 2.dp else 0.dp,
-        animationSpec = tween(durationMillis = 220),
-        label = "albumGridSelectionBorder"
-    )
+    val cardShape = remember { RoundedCornerShape(20.dp) }
 
     if (isLoading) {
         Card(
             modifier = Modifier.fillMaxWidth(),
             shape = cardShape,
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)
         ) {
-            Column(
-                modifier = Modifier.background(
-                    color = MaterialTheme.colorScheme.primaryContainer,
-                    shape = cardShape
-                )
-            ) {
+            Column {
                 ShimmerBox(
                     modifier = Modifier
+                        .fillMaxWidth()
                         .aspectRatio(3f / 2f)
-                        .fillMaxSize()
                 )
                 Column(
                     modifier = Modifier
@@ -3383,120 +3320,188 @@ fun AlbumGridItemRedesigned(
                 }
             }
         }
+        return
+    }
+
+    val albumColorSchemePair by albumColorSchemePairFlow.collectAsStateWithLifecycle()
+    val systemIsDark = LocalPixelPlayDarkTheme.current
+    val currentMaterialColorScheme = MaterialTheme.colorScheme
+
+    val itemDesignColorScheme = remember(albumColorSchemePair, systemIsDark, currentMaterialColorScheme) {
+        albumColorSchemePair?.let { pair ->
+            if (systemIsDark) pair.dark else pair.light
+        } ?: currentMaterialColorScheme
+    }
+
+    val targetGradientBaseColor = if (albumColorSchemePair != null) {
+        itemDesignColorScheme.primaryContainer
     } else {
-        Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .scale(selectionScale)
-                .then(
-                    if (isSelected) {
-                        Modifier.border(
-                            width = selectionBorderWidth,
-                            color = MaterialTheme.colorScheme.primary,
-                            shape = cardShape
-                        )
-                    } else {
-                        Modifier
-                    }
-                )
-                .clip(cardShape)
-                .combinedClickable(
-                    onClick = {
-                        if (isSelectionMode) {
-                            onSelectionToggle()
-                        } else {
-                            onClick()
-                        }
-                    },
-                    onLongClick = onLongPress
-                ),
-            shape = cardShape,
-            //elevation = CardDefaults.cardElevation(defaultElevation = 4.dp, pressedElevation = 8.dp),
-            colors = CardDefaults.cardColors(containerColor = itemDesignColorScheme.surfaceVariant.copy(alpha = 0.3f))
-        ) {
-            Box {
-                Column(
-                    modifier = Modifier.background(
-                        color = gradientBaseColor,
+        currentMaterialColorScheme.surfaceContainerHigh
+    }
+    val targetOnGradientColor = if (albumColorSchemePair != null) {
+        itemDesignColorScheme.onPrimaryContainer
+    } else {
+        currentMaterialColorScheme.onSurface
+    }
+
+    val startedWithNullScheme = remember(album.albumArtUriString) {
+        albumColorSchemePair == null
+    }
+    val shouldAnimateTheme = !album.albumArtUriString.isNullOrBlank() && startedWithNullScheme
+
+    val gradientBaseColor = if (shouldAnimateTheme) {
+        animateColorAsState(
+            targetValue = targetGradientBaseColor,
+            animationSpec = MaterialTheme.motionScheme.defaultEffectsSpec(),
+            label = "albumGridGradientBase"
+        ).value
+    } else {
+        targetGradientBaseColor
+    }
+    val onGradientColor = if (shouldAnimateTheme) {
+        animateColorAsState(
+            targetValue = targetOnGradientColor,
+            animationSpec = MaterialTheme.motionScheme.defaultEffectsSpec(),
+            label = "albumGridOnGradient"
+        ).value
+    } else {
+        targetOnGradientColor
+    }
+
+    var hasEverAnimatedSelection by remember { mutableStateOf(isSelected) }
+    if (isSelected) {
+        hasEverAnimatedSelection = true
+    }
+
+    val selectionScale = if (hasEverAnimatedSelection) {
+        animateFloatAsState(
+            targetValue = if (isSelected) 0.985f else 1f,
+            animationSpec = MaterialTheme.motionScheme.fastSpatialSpec(),
+            label = "albumGridSelectionScale"
+        ).value
+    } else {
+        1f
+    }
+    val selectionBorderWidth = if (hasEverAnimatedSelection) {
+        animateDpAsState(
+            targetValue = if (isSelected) 2.dp else 0.dp,
+            animationSpec = MaterialTheme.motionScheme.fastSpatialSpec(),
+            label = "albumGridSelectionBorder"
+        ).value
+    } else {
+        0.dp
+    }
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .scale(selectionScale)
+            .then(
+                if (selectionBorderWidth > 0.dp) {
+                    Modifier.border(
+                        width = selectionBorderWidth,
+                        color = currentMaterialColorScheme.primary,
                         shape = cardShape
                     )
-                ) {
-                    Box(contentAlignment = Alignment.BottomStart) {
-                        var isLoadingImage by remember { mutableStateOf(true) }
-                        SmartImage(
-                            model = album.albumArtUriString,
-                            contentDescription = stringResource(R.string.common_album_art_for_title, album.title),
-                            contentScale = ContentScale.Crop,
-                            // Reducido el tamaño para mejorar el rendimiento del scroll, como se sugiere en el informe.
-                            // ContentScale.Crop se encargará de ajustar la imagen al aspect ratio.
-                            targetSize = Size(256, 256),
-                            modifier = Modifier
-                                .aspectRatio(3f / 2f)
-                                .fillMaxSize(),
-                            onState = { state ->
-                                isLoadingImage = state is AsyncImagePainter.State.Loading
-                            }
-                        )
-                        if (isLoadingImage) {
-                            ShimmerBox(
-                                modifier = Modifier
-                                    .aspectRatio(3f / 2f)
-                                    .fillMaxSize()
-                            )
-                        }
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .aspectRatio(3f / 2f)
-                                .background(
-                                    remember(gradientBaseColor) { // Recordar el Brush
-                                        Brush.verticalGradient(
-                                            colors = listOf(
-                                                Color.Transparent, gradientBaseColor
-                                            )
-                                        )
-                                    })
-                        )
+                } else {
+                    Modifier
+                }
+            )
+            .clip(cardShape)
+            .combinedClickable(
+                onClick = {
+                    if (isSelectionMode) {
+                        onSelectionToggle()
+                    } else {
+                        onClick()
                     }
-                    Column(
+                },
+                onLongClick = onLongPress
+            ),
+        shape = cardShape,
+        colors = CardDefaults.cardColors(containerColor = gradientBaseColor)
+    ) {
+        Box {
+            Column(
+                modifier = Modifier.background(
+                    color = gradientBaseColor,
+                    shape = cardShape
+                )
+            ) {
+                Box(contentAlignment = Alignment.BottomStart) {
+                    SmartImage(
+                        model = album.albumArtUriString,
+                        contentDescription = stringResource(R.string.common_album_art_for_title, album.title),
+                        contentScale = ContentScale.Crop,
+                        targetSize = Size(256, 256),
+                        crossfadeDurationMillis = 150,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(84.dp)
-                            .padding(12.dp),
-                        verticalArrangement = Arrangement.Center
-                    ) {
-                        Text(
-                            album.title,
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = onGradientColor,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Text(album.artist, style = MaterialTheme.typography.bodySmall, color = onGradientColor.copy(alpha = 0.85f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(formatSongCount(album.songCount), style = MaterialTheme.typography.bodySmall, color = onGradientColor.copy(alpha = 0.7f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    }
-                }
-
-                if (isSelectionMode && isSelected) {
+                            .aspectRatio(3f / 2f)
+                    )
                     Box(
                         modifier = Modifier
-                            .align(Alignment.TopEnd)
-                            .padding(10.dp)
-                            .size(28.dp)
+                            .fillMaxWidth()
+                            .aspectRatio(3f / 2f)
                             .background(
-                                color = MaterialTheme.colorScheme.primary,
-                                shape = CircleShape
-                            ),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = selectionIndex?.toString() ?: "✓",
-                            color = MaterialTheme.colorScheme.onPrimary,
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
+                                remember(gradientBaseColor) {
+                                    Brush.verticalGradient(
+                                        colors = listOf(Color.Transparent, gradientBaseColor)
+                                    )
+                                }
+                            )
+                    )
+                }
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(84.dp)
+                        .padding(12.dp),
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    Text(
+                        album.title,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = onGradientColor,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        album.artist,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = onGradientColor.copy(alpha = 0.85f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        formatSongCount(album.songCount),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = onGradientColor.copy(alpha = 0.7f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+
+            if (isSelectionMode && isSelected) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(10.dp)
+                        .size(28.dp)
+                        .background(
+                            color = currentMaterialColorScheme.primary,
+                            shape = CircleShape
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = selectionIndex?.toString() ?: "✓",
+                        color = currentMaterialColorScheme.onPrimary,
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold
+                    )
                 }
             }
         }
@@ -3576,7 +3581,6 @@ fun ArtistListItem(artist: Artist, onClick: () -> Unit, isLoading: Boolean = fal
 @Composable
 fun AlbumListItem(
     album: Album,
-    albumColorSchemePairFlow: StateFlow<ColorSchemePair?>,
     onClick: () -> Unit,
     isLoading: Boolean = false,
     isSelectionMode: Boolean = false,
@@ -3585,204 +3589,205 @@ fun AlbumListItem(
     onLongPress: () -> Unit = {},
     onSelectionToggle: () -> Unit = {}
 ) {
-    val albumColorSchemePair by albumColorSchemePairFlow.collectAsStateWithLifecycle()
-    val systemIsDark = LocalPixelPlayDarkTheme.current
-    val currentMaterialColorScheme = MaterialTheme.colorScheme
-
-    val itemDesignColorScheme = remember(albumColorSchemePair, systemIsDark, currentMaterialColorScheme) {
-        albumColorSchemePair?.let { pair ->
-            if (systemIsDark) pair.dark else pair.light
-        } ?: currentMaterialColorScheme
-    }
-
-    val gradientBaseColor = itemDesignColorScheme.primaryContainer
-    val onGradientColor = itemDesignColorScheme.onPrimaryContainer
-    val cardCornerRadius = 16.dp
-    val cardShape = RoundedCornerShape(cardCornerRadius)
-    val selectionScale by animateFloatAsState(
-        targetValue = if (isSelected) 0.99f else 1f,
-        animationSpec = tween(durationMillis = 200),
-        label = "albumListSelectionScale"
-    )
-    val selectionBorderWidth by animateDpAsState(
-        targetValue = if (isSelected) 2.dp else 0.dp,
-        animationSpec = tween(durationMillis = 200),
-        label = "albumListSelectionBorder"
-    )
+    val colors = MaterialTheme.colorScheme
+    val cardShape = remember { RoundedCornerShape(22.dp) }
+    val artworkSize = 52.dp
+    val albumArtShape = remember { RoundedCornerShape(12.dp) }
 
     if (isLoading) {
-        Card(
+        Surface(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(80.dp),
+                .clip(cardShape),
             shape = cardShape,
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
+            color = colors.surfaceContainerLow
         ) {
-            Row(modifier = Modifier.fillMaxSize()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 13.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
                 ShimmerBox(
                     modifier = Modifier
-                        .aspectRatio(1f)
-                        .fillMaxHeight()
+                        .size(artworkSize)
+                        .clip(albumArtShape)
                 )
-                Column(
-                    modifier = Modifier
-                        .weight(1f)
-                        .padding(12.dp),
-                    verticalArrangement = Arrangement.Center
-                ) {
+                Spacer(modifier = Modifier.width(14.dp))
+                Column(modifier = Modifier.weight(1f)) {
                     ShimmerBox(
                         modifier = Modifier
-                            .fillMaxWidth(0.6f)
-                            .height(16.dp)
+                            .fillMaxWidth(0.65f)
+                            .height(20.dp)
                             .clip(RoundedCornerShape(4.dp))
                     )
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(6.dp))
                     ShimmerBox(
                         modifier = Modifier
-                            .fillMaxWidth(0.4f)
-                            .height(14.dp)
+                            .fillMaxWidth(0.45f)
+                            .height(16.dp)
                             .clip(RoundedCornerShape(4.dp))
                     )
                 }
             }
         }
+        return
+    }
+
+    val artworkTargetPx = with(LocalDensity.current) { artworkSize.roundToPx() }
+    var hasEverAnimated by remember { mutableStateOf(isSelected) }
+    if (isSelected) {
+        hasEverAnimated = true
+    }
+
+    val selectionScale = if (hasEverAnimated) {
+        animateFloatAsState(
+            targetValue = if (isSelected) 0.98f else 1f,
+            animationSpec = MaterialTheme.motionScheme.fastSpatialSpec(),
+            label = "albumListSelectionScale"
+        ).value
     } else {
-        Card(
+        1f
+    }
+    val selectionBorderWidth = if (hasEverAnimated) {
+        animateDpAsState(
+            targetValue = if (isSelected) 2.5.dp else 0.dp,
+            animationSpec = MaterialTheme.motionScheme.fastSpatialSpec(),
+            label = "albumListSelectionBorder"
+        ).value
+    } else {
+        0.dp
+    }
+    val containerColor = if (hasEverAnimated) {
+        animateColorAsState(
+            targetValue = if (isSelected) colors.secondaryContainer else colors.surfaceContainerLow,
+            animationSpec = MaterialTheme.motionScheme.defaultEffectsSpec(),
+            label = "albumListContainerColor"
+        ).value
+    } else {
+        colors.surfaceContainerLow
+    }
+    val contentColor = if (hasEverAnimated) {
+        animateColorAsState(
+            targetValue = if (isSelected) colors.onSecondaryContainer else colors.onSurface,
+            animationSpec = MaterialTheme.motionScheme.defaultEffectsSpec(),
+            label = "albumListContentColor"
+        ).value
+    } else {
+        colors.onSurface
+    }
+
+    val songCountText = formatSongCount(album.songCount)
+    val subtitle = remember(album.artist, songCountText, album.year) {
+        buildString {
+            append(album.artist)
+            append(" • ")
+            append(songCountText)
+            if (album.year > 0) {
+                append(" • ")
+                append(album.year)
+            }
+        }
+    }
+
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .scale(selectionScale)
+            .then(
+                if (selectionBorderWidth > 0.dp) {
+                    Modifier.border(
+                        width = selectionBorderWidth,
+                        color = colors.primary,
+                        shape = cardShape
+                    )
+                } else {
+                    Modifier
+                }
+            )
+            .clip(cardShape)
+            .combinedClickable(
+                onClick = {
+                    if (isSelectionMode) {
+                        onSelectionToggle()
+                    } else {
+                        onClick()
+                    }
+                },
+                onLongClick = onLongPress
+            ),
+        shape = cardShape,
+        color = containerColor
+    ) {
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(88.dp)
-                .scale(selectionScale)
-                .then(
-                    if (isSelected) {
-                        Modifier.border(
-                            width = selectionBorderWidth,
-                            color = MaterialTheme.colorScheme.primary,
-                            shape = cardShape
-                        )
-                    } else {
-                        Modifier
-                    }
-                )
-                .clip(cardShape)
-                .combinedClickable(
-                    onClick = {
-                        if (isSelectionMode) {
-                            onSelectionToggle()
-                        } else {
-                            onClick()
-                        }
-                    },
-                    onLongClick = onLongPress
-                ),
-            shape = cardShape,
-            colors = CardDefaults.cardColors(containerColor = itemDesignColorScheme.surfaceVariant.copy(alpha = 0.3f))
+                .padding(horizontal = 13.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Box(modifier = Modifier.fillMaxSize()) {
-                Row(
+            Box(
+                modifier = Modifier
+                    .size(artworkSize)
+                    .background(colors.surfaceVariant, albumArtShape)
+            ) {
+                SmartImage(
+                    model = album.albumArtUriString,
+                    contentDescription = stringResource(R.string.common_album_art_for_title, album.title),
+                    contentScale = ContentScale.Crop,
+                    shape = albumArtShape,
+                    targetSize = Size(artworkTargetPx, artworkTargetPx),
+                    crossfadeDurationMillis = 150,
                     modifier = Modifier.fillMaxSize()
-                ) {
-                    // LEFT: Album Art
-                    Box(
-                        modifier = Modifier
-                            .aspectRatio(1f)
-                            .fillMaxHeight()
-                    ) {
-                        var isLoadingImage by remember { mutableStateOf(true) }
-                        SmartImage(
-                            model = album.albumArtUriString,
-                            contentDescription = stringResource(R.string.common_album_art_for_title, album.title),
-                            contentScale = ContentScale.Crop,
-                            targetSize = Size(256, 256),
-                            modifier = Modifier.fillMaxSize(),
-                            onState = { state ->
-                                isLoadingImage = state is AsyncImagePainter.State.Loading
-                            }
-                        )
-                        if (isLoadingImage) {
-                            ShimmerBox(modifier = Modifier.fillMaxSize())
-                        }
-
-                        // Gradient Overlay
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .background(
-                                    Brush.horizontalGradient(
-                                        colors = listOf(
-                                            Color.Transparent,
-                                            gradientBaseColor
-                                        )
-                                    )
-                                )
-                        )
-                    }
-
-                    // MIDDLE: Solid Background
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxHeight()
-                            .background(gradientBaseColor)
-                    ) {
-                        // Text on top of the gradient/solid background
-                        Column(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(horizontal = 12.dp, vertical = 10.dp),
-                            verticalArrangement = Arrangement.Center
-                        ) {
-                            val variableTextStyle = remember(album.id, album.title) {
-                                GenreTypography.getGenreStyle(album.id.toString(), album.title)
-                            }
-
-                            Text(
-                                album.title,
-                                style = variableTextStyle.copy(fontSize = 22.sp),
-                                color = onGradientColor,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Spacer(
-                                modifier = Modifier.height(4.dp)
-                            )
-                            Text(
-                                album.artist,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = onGradientColor.copy(alpha = 0.85f),
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Text(
-                                formatSongCount(album.songCount),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = onGradientColor.copy(alpha = 0.7f),
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                    }
-                }
+                )
 
                 if (isSelectionMode && isSelected) {
                     Box(
                         modifier = Modifier
-                            .align(Alignment.TopEnd)
-                            .padding(8.dp)
-                            .size(24.dp)
+                            .fillMaxSize()
                             .background(
-                                color = MaterialTheme.colorScheme.primary,
-                                shape = CircleShape
+                                color = colors.primary.copy(alpha = 0.7f),
+                                shape = albumArtShape
                             ),
                         contentAlignment = Alignment.Center
                     ) {
-                        Text(
-                            text = selectionIndex?.toString() ?: "✓",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onPrimary,
-                            fontWeight = FontWeight.Bold
-                        )
+                        if (selectionIndex != null && selectionIndex >= 0) {
+                            Text(
+                                text = selectionIndex.toString(),
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = colors.onPrimary
+                            )
+                        } else {
+                            Icon(
+                                imageVector = Icons.Rounded.CheckCircle,
+                                contentDescription = stringResource(R.string.common_selected),
+                                tint = colors.onPrimary,
+                                modifier = Modifier.size(28.dp)
+                            )
+                        }
                     }
                 }
+            }
+
+            Spacer(modifier = Modifier.width(14.dp))
+
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = album.title,
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    color = contentColor,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = contentColor.copy(alpha = 0.7f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
             }
         }
     }

@@ -15,7 +15,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
+import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
@@ -38,10 +38,16 @@ class TransitionController @Inject constructor(
     private val transitionRepository: TransitionRepository,
     private val userPreferencesRepository: UserPreferencesRepository,
 ) {
-    private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    private var scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private var transitionListener: Player.Listener? = null
     private var transitionSchedulerJob: Job? = null
     private var currentObservedPlayer: Player? = null
+
+    private fun ensureActiveScope() {
+        if (!scope.isActive) {
+            scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+        }
+    }
 
     private val swapListener: (Player) -> Unit = { newPlayer ->
         Timber.tag("TransitionDebug").d("Controller detected player swap. Moving listener.")
@@ -57,6 +63,7 @@ class TransitionController @Inject constructor(
             if (newPlayer.isPlaying) {
                 val item = newPlayer.currentMediaItem
                 if (item != null) {
+                    ensureActiveScope()
                     scope.launch {
                         delay(1_000L)
                         // Re-check both that this is still the observed player AND that the
@@ -80,6 +87,7 @@ class TransitionController @Inject constructor(
      * Attaches the controller to the player engine to start listening for state changes.
      */
     fun initialize() {
+        ensureActiveScope()
         if (transitionListener != null) return // Already initialized
 
         Timber.tag("TransitionDebug").d("Initializing TransitionController...")
@@ -341,10 +349,12 @@ class TransitionController @Inject constructor(
     fun release() {
         Timber.tag("TransitionDebug").d("Releasing controller.")
         transitionSchedulerJob?.cancel()
+        transitionSchedulerJob = null
         engine.removePlayerSwapListener(swapListener)
         transitionListener?.let { currentObservedPlayer?.removeListener(it) }
         transitionListener = null
         currentObservedPlayer = null
-        scope.cancel()
+        // Cancel only child jobs so this @Singleton scope stays reusable across MusicService restarts.
+        scope.coroutineContext.cancelChildren()
     }
 }

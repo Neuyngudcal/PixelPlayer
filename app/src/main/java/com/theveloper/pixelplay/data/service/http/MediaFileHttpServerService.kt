@@ -31,6 +31,7 @@ import androidx.media3.decoder.ffmpeg.FfmpegLibrary
 import com.theveloper.pixelplay.R
 import com.theveloper.pixelplay.data.model.Song
 import com.theveloper.pixelplay.data.repository.MusicRepository
+import com.theveloper.pixelplay.data.service.cast.BoundedLruCache
 import com.theveloper.pixelplay.data.service.cast.CastAudioMimeUtils
 import com.theveloper.pixelplay.data.service.cast.IsoBmffAudioCodecDetector
 import com.theveloper.pixelplay.utils.AlbumArtUtils
@@ -58,10 +59,13 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.NonCancellable
+import kotlin.coroutines.coroutineContext
 import timber.log.Timber
 import java.io.ByteArrayInputStream
 import java.io.EOFException
@@ -90,6 +94,137 @@ import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import kotlin.math.max
 
+private val ADTS_SUPPORTED_SAMPLE_RATES = intArrayOf(
+    96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000, 7350
+)
+
+internal data class AdtsResamplePlan(
+    val targetSampleRate: Int,
+    val decimationFactor: Int
+)
+
+internal fun resolveAdtsSampleRateAndDecimation(inputSampleRate: Int): AdtsResamplePlan {
+    if (inputSampleRate <= 0) return AdtsResamplePlan(44100, 1)
+    if (inputSampleRate <= 96000) {
+        val exactOrNearest = if (ADTS_SUPPORTED_SAMPLE_RATES.contains(inputSampleRate)) {
+            inputSampleRate
+        } else {
+            ADTS_SUPPORTED_SAMPLE_RATES.firstOrNull { it <= inputSampleRate } ?: 44100
+        }
+        return AdtsResamplePlan(exactOrNearest, 1)
+    }
+    var factor = 2
+    while (inputSampleRate / factor > 96000) {
+        factor++
+    }
+    val divided = inputSampleRate / factor
+    val targetRate = if (ADTS_SUPPORTED_SAMPLE_RATES.contains(divided)) {
+        divided
+    } else {
+        ADTS_SUPPORTED_SAMPLE_RATES.firstOrNull { it <= divided } ?: 96000
+    }
+    return AdtsResamplePlan(targetSampleRate = targetRate, decimationFactor = factor)
+}
+
+internal fun adtsFrequencyIndex(sampleRate: Int): Int = when (sampleRate) {
+    96000 -> 0; 88200 -> 1; 64000 -> 2; 48000 -> 3
+    44100 -> 4; 32000 -> 5; 24000 -> 6; 22050 -> 7
+    16000 -> 8; 12000 -> 9; 11025 -> 10; 8000 -> 11
+    7350 -> 12; else -> 4
+}
+
+internal fun buildAdtsHeader(sampleRate: Int, channels: Int, aacFrameSize: Int): ByteArray {
+    val freqIdx = adtsFrequencyIndex(sampleRate)
+    val frameLen = aacFrameSize + 7
+    return byteArrayOf(
+        0xFF.toByte(),
+        0xF1.toByte(),
+        (0x40 or (freqIdx shl 2) or (channels shr 2)).toByte(),
+        ((channels and 0x3) shl 6 or (frameLen shr 11)).toByte(),
+        (frameLen shr 3 and 0xFF).toByte(),
+        ((frameLen and 0x7) shl 5 or 0x1F).toByte(),
+        0xFC.toByte()
+    )
+}
+
+internal fun downmixAndDecimatePcm16(
+    pcmBytes: ByteArray,
+    numInputBytes: Int,
+    inChannels: Int,
+    outChannels: Int,
+    decimationFactor: Int,
+    outBytes: ByteArray
+): Int {
+    val frameBytesIn = inChannels * 2
+    val frameBytesOut = outChannels * 2
+    if (frameBytesIn <= 0 || frameBytesOut <= 0 || numInputBytes < frameBytesIn) return 0
+    val safeDec = decimationFactor.coerceAtLeast(1)
+    val totalInputFrames = numInputBytes / frameBytesIn
+    val outFrames = totalInputFrames / safeDec
+    if (outFrames <= 0) return 0
+
+    val inBuf = ByteBuffer.wrap(pcmBytes, 0, totalInputFrames * frameBytesIn)
+        .order(ByteOrder.nativeOrder())
+        .asShortBuffer()
+    val outBuf = ByteBuffer.wrap(outBytes, 0, outFrames * frameBytesOut)
+        .order(ByteOrder.nativeOrder())
+        .asShortBuffer()
+
+    for (outFrameIdx in 0 until outFrames) {
+        if (outChannels == 1) {
+            var monoAcc = 0L
+            for (k in 0 until safeDec) {
+                var sum = 0f
+                if (inChannels == 1) {
+                    sum = inBuf.get().toFloat()
+                } else {
+                    for (c in 0 until inChannels) {
+                        sum += inBuf.get().toFloat()
+                    }
+                    sum /= inChannels.toFloat()
+                }
+                monoAcc += sum.toInt().coerceIn(-32768, 32767)
+            }
+            outBuf.put((monoAcc / safeDec).toInt().coerceIn(-32768, 32767).toShort())
+        } else {
+            var leftAcc = 0L
+            var rightAcc = 0L
+            for (k in 0 until safeDec) {
+                val (l, r) = when {
+                    inChannels == 6 -> {
+                        val c0 = inBuf.get()
+                        val c1 = inBuf.get()
+                        val c2 = inBuf.get()
+                        inBuf.get() // LFE
+                        val c4 = inBuf.get()
+                        val c5 = inBuf.get()
+                        val left = (c0 * 0.5f + c2 * 0.35f + c4 * 0.35f).toInt().coerceIn(-32768, 32767)
+                        val right = (c1 * 0.5f + c2 * 0.35f + c5 * 0.35f).toInt().coerceIn(-32768, 32767)
+                        left to right
+                    }
+                    inChannels >= 2 -> {
+                        val l = inBuf.get().toInt()
+                        val r = inBuf.get().toInt()
+                        for (c in 2 until inChannels) {
+                            inBuf.get()
+                        }
+                        l to r
+                    }
+                    else -> {
+                        val s = inBuf.get().toInt()
+                        s to s
+                    }
+                }
+                leftAcc += l
+                rightAcc += r
+            }
+            outBuf.put((leftAcc / safeDec).toInt().coerceIn(-32768, 32767).toShort())
+            outBuf.put((rightAcc / safeDec).toInt().coerceIn(-32768, 32767).toShort())
+        }
+    }
+    return outFrames * frameBytesOut
+}
+
 @AndroidEntryPoint
 class MediaFileHttpServerService : Service() {
 
@@ -105,9 +240,10 @@ class MediaFileHttpServerService : Service() {
     private val serviceJob = SupervisorJob()
     private val serviceScope = CoroutineScope(Dispatchers.IO + serviceJob)
     private val castHttpLogTag = "CastHttpServer"
-    private val signatureMimeCache = mutableMapOf<String, String?>()
+    private val signatureMimeCache = BoundedLruCache<String, String?>(MAX_PROBE_CACHE_ENTRIES)
     // Cache for the actual codec info (codec MIME, sample rate, channels) to avoid re-probing.
-    private val codecInfoCache = mutableMapOf<String, AudioCodecInfo?>()
+    private val codecInfoCache = BoundedLruCache<String, AudioCodecInfo?>(MAX_PROBE_CACHE_ENTRIES)
+    private val transcodeStartLock = Any()
     private val httpDateFormatter: DateTimeFormatter =
         DateTimeFormatter.RFC_1123_DATE_TIME.withZone(ZoneOffset.UTC)
 
@@ -170,6 +306,7 @@ class MediaFileHttpServerService : Service() {
         private var castAccessPolicy: CastAccessPolicy = CastAccessPolicy.EMPTY
         private const val SERVER_START_PORT_RETRY_LIMIT = 3
         private const val ISO_BMFF_CODEC_PROBE_BYTES = 1024 * 1024
+        private const val MAX_PROBE_CACHE_ENTRIES = 512
         private const val TRANSCODE_RANGE_WAIT_TIMEOUT_MINUTES = 10L
         private const val TRANSCODE_STREAM_IDLE_TIMEOUT_MS = 45_000L
 
@@ -399,7 +536,7 @@ class MediaFileHttpServerService : Service() {
                                 }
                                 if (!call.ensureAuthorizedCastMediaRequest(songId)) return@get
 
-                                val song = resolveSongForServing(songId)
+                                val song = withContext(Dispatchers.IO) { resolveSongForServing(songId) }
                                 if (song == null) {
                                     Timber.tag(castHttpLogTag).w(
                                         "GET /song unresolved songId=%s (repository+MediaStore fallback miss)",
@@ -413,18 +550,15 @@ class MediaFileHttpServerService : Service() {
 
                                 try {
                                     val uri = song.contentUriString.toUri()
-                                    val codecInfo = detectAudioCodecViaExtractor(song, uri)
+                                    val codecInfo = withContext(Dispatchers.IO) {
+                                        detectAudioCodecViaExtractor(song, uri)
+                                    }
                                     val isAlac = codecInfo?.codecMime == "audio/alac"
-                                    // Only transcode if ALAC AND a working decoder is available.
-                                    // On devices where c2.qti.alac.sw.decoder reports
-                                    // "Unsupported mediaType audio/alac" in AudioCapabilities,
-                                    // findDecoderForFormat returns null and we fall back to
-                                    // serving the raw M4A file as audio/mp4 instead.
-                                    val canTranscode = isAlac && isAlacTranscodeSupported(checkNotNull(codecInfo))
+                                    val canTranscodeAlac = withContext(Dispatchers.IO) {
+                                        isAlac && isAlacTranscodeSupported(checkNotNull(codecInfo))
+                                    }
 
-                                    if (canTranscode) {
-                                        // ALAC codec inside M4A — Cast DMR cannot play ALAC.
-                                        // Serve via temp-file transcode cache so Cast can seek.
+                                    if (canTranscodeAlac) {
                                         val c = checkNotNull(codecInfo)
                                         Timber.tag(castHttpLogTag).i(
                                             "GET /song ALAC→AAC transcode-cache songId=%s sr=%d ch=%d",
@@ -440,9 +574,7 @@ class MediaFileHttpServerService : Service() {
                                         return@get
                                     }
 
-                                    if (isAlac && !canTranscode) {
-                                        // ALAC decoder unavailable on this device — serve the raw
-                                        // M4A container. Newer Cast devices support ALAC natively.
+                                    if (isAlac && !canTranscodeAlac) {
                                         val c = checkNotNull(codecInfo)
                                         Timber.tag(castHttpLogTag).w(
                                             "GET /song ALAC decoder unavailable songId=%s sr=%d, serving raw M4A",
@@ -452,7 +584,9 @@ class MediaFileHttpServerService : Service() {
                                             .w("GET /song alac_fallback_raw songId=${song.id} sr=${c.sampleRate}")
 
                                         val rangeHeader = call.request.headers[HttpHeaders.Range]
-                                        val source = resolveAudioStreamSource(song, uri)
+                                        val source = withContext(Dispatchers.IO) {
+                                            resolveAudioStreamSource(song, uri)
+                                        }
                                         if (source == null) {
                                             call.respond(HttpStatusCode.NotFound, "File not found")
                                             return@get
@@ -468,46 +602,50 @@ class MediaFileHttpServerService : Service() {
                                         return@get
                                     }
 
-                                    // FLAC: Cast DMR supports FLAC natively but its duration
-                                    // estimate is wrong (VBR + missing seektable → reported duration
-                                    // differs from actual), so seeking overshoots and lands near EOF
-                                    // causing an involuntary track skip. Transcode to AAC-ADTS so
-                                    // Cast gets a CBR stream it can seek accurately.
                                     val isFlac = codecInfo?.codecMime == "audio/flac"
-                                    if (isFlac && isFlacTranscodeSupported(codecInfo)) {
+                                    val canTranscodeFlac = isFlac && withContext(Dispatchers.IO) {
+                                        isFlacTranscodeSupported(checkNotNull(codecInfo))
+                                    }
+                                    if (canTranscodeFlac) {
+                                        val c = checkNotNull(codecInfo)
                                         Timber.tag(castHttpLogTag).i(
                                             "GET /song FLAC→AAC transcode-cache songId=%s sr=%d ch=%d",
-                                            song.id, codecInfo.sampleRate, codecInfo.channelCount
+                                            song.id, c.sampleRate, c.channelCount
                                         )
                                         Timber.tag("PX_CAST_HTTP")
-                                            .i("GET /song transcode_flac songId=${song.id} sr=${codecInfo.sampleRate} ch=${codecInfo.channelCount}")
+                                            .i("GET /song transcode_flac songId=${song.id} sr=${c.sampleRate} ch=${c.channelCount}")
                                         call.respondTranscodedWithCache(
-                                            song = song, codecInfo = codecInfo, uri = uri,
+                                            song = song, codecInfo = c, uri = uri,
                                             rangeHeader = call.request.headers[HttpHeaders.Range]
                                         )
                                         return@get
                                     }
 
-                                    // AC3/EAC3: Cast DMR cannot play Dolby audio. Transcode to AAC
-                                    // when a decoder is available (Snapdragon Dolby decoder).
                                     val isAc3 = codecInfo?.codecMime == "audio/ac3" || codecInfo?.codecMime == "audio/eac3"
-                                    if (isAc3 && isAc3TranscodeSupported(codecInfo)) {
+                                    val canTranscodeAc3 = isAc3 && withContext(Dispatchers.IO) {
+                                        isAc3TranscodeSupported(checkNotNull(codecInfo))
+                                    }
+                                    if (canTranscodeAc3) {
+                                        val c = checkNotNull(codecInfo)
                                         Timber.tag(castHttpLogTag).i(
                                             "GET /song AC3/EAC3→AAC transcode-cache songId=%s sr=%d ch=%d",
-                                            song.id, codecInfo.sampleRate, codecInfo.channelCount
+                                            song.id, c.sampleRate, c.channelCount
                                         )
                                         Timber.tag("PX_CAST_HTTP")
-                                            .i("GET /song transcode_ac3 songId=${song.id} sr=${codecInfo.sampleRate} ch=${codecInfo.channelCount}")
+                                            .i("GET /song transcode_ac3 songId=${song.id} sr=${c.sampleRate} ch=${c.channelCount}")
                                         call.respondTranscodedWithCache(
-                                            song = song, codecInfo = codecInfo, uri = uri,
+                                            song = song, codecInfo = c, uri = uri,
                                             rangeHeader = call.request.headers[HttpHeaders.Range]
                                         )
                                         return@get
                                     }
 
-                                    val contentType = resolveAudioContentType(resolvePreferredAudioMimeType(song, uri))
+                                    val (contentType, source) = withContext(Dispatchers.IO) {
+                                        val resolvedType = resolveAudioContentType(resolvePreferredAudioMimeType(song, uri))
+                                        val resolvedSource = resolveAudioStreamSource(song, uri)
+                                        resolvedType to resolvedSource
+                                    }
                                     val rangeHeader = call.request.headers[HttpHeaders.Range]
-                                    val source = resolveAudioStreamSource(song, uri)
 
                                     if (source == null) {
                                         Timber.tag(castHttpLogTag).w(
@@ -574,7 +712,7 @@ class MediaFileHttpServerService : Service() {
                                 }
                                 if (!call.ensureAuthorizedCastMediaRequest(songId)) return@head
 
-                                val song = resolveSongForServing(songId)
+                                val song = withContext(Dispatchers.IO) { resolveSongForServing(songId) }
                                 if (song == null) {
                                     Timber.tag(castHttpLogTag).w(
                                         "HEAD /song unresolved songId=%s (repository+MediaStore fallback miss)",
@@ -588,83 +726,56 @@ class MediaFileHttpServerService : Service() {
 
                                 try {
                                     val uri = song.contentUriString.toUri()
-                                    val codecInfo = detectAudioCodecViaExtractor(song, uri)
+                                    val codecInfo = withContext(Dispatchers.IO) {
+                                        detectAudioCodecViaExtractor(song, uri)
+                                    }
                                     val isAlac = codecInfo?.codecMime == "audio/alac"
-                                    val canTranscode = isAlac && isAlacTranscodeSupported(checkNotNull(codecInfo))
+                                    val canTranscodeAlac = withContext(Dispatchers.IO) {
+                                        isAlac && isAlacTranscodeSupported(checkNotNull(codecInfo))
+                                    }
 
-                                    if (canTranscode) {
-                                        // ALAC: serve Content-Length from cache if temp file is ready.
-                                        call.response.header(HttpHeaders.ContentType, "audio/aac")
-                                        val entry = transcodeCache[song.id]
-                                        if (entry != null && entry.done && entry.tempFile.exists()) {
-                                            val tempSize = entry.tempFile.length()
-                                            call.response.header(HttpHeaders.AcceptRanges, "bytes")
-                                            call.response.header(HttpHeaders.ContentLength, tempSize.toString())
-                                            Timber.tag(castHttpLogTag).d("HEAD /song ALAC songId=%s -> audio/aac size=%d (cached)", song.id, tempSize)
-                                        } else {
-                                            Timber.tag(castHttpLogTag).d("HEAD /song ALAC songId=%s -> audio/aac (no cache yet)", song.id)
-                                        }
-                                        call.respond(HttpStatusCode.OK)
+                                    if (canTranscodeAlac) {
+                                        call.respondHeadForTranscoded("ALAC", song)
                                         return@head
                                     }
 
-                                    if (isAlac && !canTranscode) {
-                                        // ALAC decoder unavailable — raw M4A fallback
+                                    if (isAlac && !canTranscodeAlac) {
                                         call.response.header(HttpHeaders.ContentType, "audio/mp4")
                                         Timber.tag(castHttpLogTag).d("HEAD /song ALAC fallback songId=%s -> audio/mp4 (decoder unavailable)", song.id)
                                         call.respond(HttpStatusCode.OK)
                                         return@head
                                     }
 
-                                    // FLAC: transcoded to AAC-ADTS for reliable Cast seeking.
                                     val isFlac = codecInfo?.codecMime == "audio/flac"
-                                    if (isFlac && isFlacTranscodeSupported(codecInfo)) {
-                                        call.response.header(HttpHeaders.ContentType, "audio/aac")
-                                        val entry = transcodeCache[song.id]
-                                        if (entry != null && entry.done && entry.tempFile.exists()) {
-                                            val tempSize = entry.tempFile.length()
-                                            call.response.header(HttpHeaders.AcceptRanges, "bytes")
-                                            call.response.header(HttpHeaders.ContentLength, tempSize.toString())
-                                            Timber.tag(castHttpLogTag).d("HEAD /song FLAC songId=%s -> audio/aac size=%d (cached)", song.id, tempSize)
-                                        } else {
-                                            Timber.tag(castHttpLogTag).d("HEAD /song FLAC songId=%s -> audio/aac (no cache yet)", song.id)
-                                        }
-                                        call.respond(HttpStatusCode.OK)
+                                    if (isFlac && withContext(Dispatchers.IO) { isFlacTranscodeSupported(codecInfo) }) {
+                                        call.respondHeadForTranscoded("FLAC", song)
                                         return@head
                                     }
 
-                                    // AC3/EAC3: transcoded to AAC for Cast.
                                     val isAc3 = codecInfo?.codecMime == "audio/ac3" || codecInfo?.codecMime == "audio/eac3"
-                                    if (isAc3 && isAc3TranscodeSupported(codecInfo)) {
-                                        call.response.header(HttpHeaders.ContentType, "audio/aac")
-                                        val entry = transcodeCache[song.id]
-                                        if (entry != null && entry.done && entry.tempFile.exists()) {
-                                            val tempSize = entry.tempFile.length()
-                                            call.response.header(HttpHeaders.AcceptRanges, "bytes")
-                                            call.response.header(HttpHeaders.ContentLength, tempSize.toString())
-                                            Timber.tag(castHttpLogTag).d("HEAD /song AC3 songId=%s -> audio/aac size=%d (cached)", song.id, tempSize)
-                                        } else {
-                                            Timber.tag(castHttpLogTag).d("HEAD /song AC3 songId=%s -> audio/aac (no cache yet)", song.id)
-                                        }
-                                        call.respond(HttpStatusCode.OK)
+                                    if (isAc3 && withContext(Dispatchers.IO) { isAc3TranscodeSupported(codecInfo) }) {
+                                        call.respondHeadForTranscoded("AC3", song)
                                         return@head
                                     }
 
-                                    val contentType = resolveAudioContentType(resolvePreferredAudioMimeType(song, uri))
-                                    val source = resolveAudioStreamSource(song, uri)
+                                    val (contentType, source) = withContext(Dispatchers.IO) {
+                                        val resolvedType = resolveAudioContentType(resolvePreferredAudioMimeType(song, uri))
+                                        val resolvedSource = resolveAudioStreamSource(song, uri)
+                                        resolvedType to resolvedSource
+                                    }
 
                                     if (source == null) {
-                                    Timber.tag(castHttpLogTag).w(
-                                        "HEAD /song failed to resolve source. songId=%s uri=%s path=%s",
-                                        song.id,
-                                        song.contentUriString,
-                                        song.path
-                                    )
+                                        Timber.tag(castHttpLogTag).w(
+                                            "HEAD /song failed to resolve source. songId=%s uri=%s path=%s",
+                                            song.id,
+                                            song.contentUriString,
+                                            song.path
+                                        )
                                         Timber.tag("PX_CAST_HTTP")
                                             .w("HEAD /song no source songId=${song.id} uri=${song.contentUriString}")
-                                    call.respond(HttpStatusCode.NotFound)
-                                    return@head
-                                }
+                                        call.respond(HttpStatusCode.NotFound)
+                                        return@head
+                                    }
 
                                     call.response.header(HttpHeaders.ContentType, contentType.toString())
                                     if (source.fileSize > 0) {
@@ -703,7 +814,7 @@ class MediaFileHttpServerService : Service() {
                                 }
                                 if (!call.ensureAuthorizedCastMediaRequest(songId)) return@get
 
-                                val song = resolveSongForServing(songId)
+                                val song = withContext(Dispatchers.IO) { resolveSongForServing(songId) }
                                 if (song == null) {
                                     Timber.tag(castHttpLogTag).w(
                                         "GET /art unresolved songId=%s (repository+MediaStore fallback miss)",
@@ -716,7 +827,7 @@ class MediaFileHttpServerService : Service() {
                                 }
 
                                 try {
-                                    val artSource = resolveArtStreamSource(song)
+                                    val artSource = withContext(Dispatchers.IO) { resolveArtStreamSource(song) }
                                     Timber.tag(castHttpLogTag).i(
                                         "GET /art songId=%s source=%s length=%s type=%s",
                                         song.id,
@@ -730,8 +841,10 @@ class MediaFileHttpServerService : Service() {
                                         call.response.header(HttpHeaders.LastModified, formatHttpDate(lastModified))
                                     }
                                     call.respondOutputStream(artSource.contentType) {
-                                        artSource.inputStreamFactory().use { inputStream ->
-                                            inputStream.copyTo(this)
+                                        withContext(Dispatchers.IO) {
+                                            artSource.inputStreamFactory().use { inputStream ->
+                                                inputStream.copyTo(this@respondOutputStream)
+                                            }
                                         }
                                     }
                                 } catch (e: Exception) {
@@ -744,8 +857,10 @@ class MediaFileHttpServerService : Service() {
                                     Timber.tag("PX_CAST_HTTP").e(e, "GET /art exception songId=${song.id}")
                                     val fallbackSource = placeholderArtSource()
                                     call.respondOutputStream(fallbackSource.contentType) {
-                                        fallbackSource.inputStreamFactory().use { inputStream ->
-                                            inputStream.copyTo(this)
+                                        withContext(Dispatchers.IO) {
+                                            fallbackSource.inputStreamFactory().use { inputStream ->
+                                                inputStream.copyTo(this@respondOutputStream)
+                                            }
                                         }
                                     }
                                 }
@@ -758,7 +873,7 @@ class MediaFileHttpServerService : Service() {
                                 }
                                 if (!call.ensureAuthorizedCastMediaRequest(songId)) return@head
 
-                                val song = resolveSongForServing(songId)
+                                val song = withContext(Dispatchers.IO) { resolveSongForServing(songId) }
                                 if (song == null) {
                                     Timber.tag(castHttpLogTag).w(
                                         "HEAD /art unresolved songId=%s (repository+MediaStore fallback miss)",
@@ -770,7 +885,7 @@ class MediaFileHttpServerService : Service() {
                                 }
 
                                 try {
-                                    val artSource = resolveArtStreamSource(song)
+                                    val artSource = withContext(Dispatchers.IO) { resolveArtStreamSource(song) }
                                     call.response.header(HttpHeaders.ContentType, artSource.contentType.toString())
                                     if (artSource.contentLength != null && artSource.contentLength > 0L) {
                                         call.response.header(HttpHeaders.ContentLength, artSource.contentLength.toString())
@@ -1440,7 +1555,10 @@ class MediaFileHttpServerService : Service() {
     }
 
     private fun detectAudioMimeTypeBySignature(song: Song, uri: Uri): String? {
-        signatureMimeCache[song.id]?.let { return it }
+        when (val cached = signatureMimeCache.getCached(song.id)) {
+            is BoundedLruCache.LookupResult.Hit -> return cached.value
+            BoundedLruCache.LookupResult.Miss -> Unit
+        }
         val bytes = readAudioSignature(song = song, uri = uri) ?: run {
             signatureMimeCache[song.id] = null
             return null
@@ -1685,11 +1803,13 @@ class MediaFileHttpServerService : Service() {
             response.header(HttpHeaders.ContentLength, length.toString())
 
             respondOutputStream(contentType, HttpStatusCode.PartialContent) {
-                inputStreamFactory().use { inputStream ->
-                    if (!skipFully(inputStream, clampedStart)) {
-                        return@use
+                withContext(Dispatchers.IO) {
+                    inputStreamFactory().use { inputStream ->
+                        if (!skipFully(inputStream, clampedStart)) {
+                            return@withContext
+                        }
+                        copyLimited(inputStream, this@respondOutputStream, length)
                     }
-                    copyLimited(inputStream, this, length)
                 }
             }
             return
@@ -1701,8 +1821,10 @@ class MediaFileHttpServerService : Service() {
         }
 
         respondOutputStream(contentType) {
-            inputStreamFactory().use { inputStream ->
-                inputStream.copyTo(this)
+            withContext(Dispatchers.IO) {
+                inputStreamFactory().use { inputStream ->
+                    inputStream.copyTo(this@respondOutputStream)
+                }
             }
         }
     }
@@ -1785,7 +1907,10 @@ class MediaFileHttpServerService : Service() {
      * Results are cached to avoid repeated MediaExtractor operations per song.
      */
     private fun detectAudioCodecViaExtractor(song: Song, uri: Uri): AudioCodecInfo? {
-        if (codecInfoCache.contains(song.id)) return codecInfoCache[song.id]
+        when (val cached = codecInfoCache.getCached(song.id)) {
+            is BoundedLruCache.LookupResult.Hit -> return cached.value
+            BoundedLruCache.LookupResult.Miss -> Unit
+        }
         val extractor = MediaExtractor()
         val result = runCatching {
             val opened = runCatching {
@@ -1875,6 +2000,51 @@ class MediaFileHttpServerService : Service() {
     // Transcode cache helpers
     // -------------------------------------------------------------------------
 
+    private sealed class TranscodeSlot {
+        data class Completed(val entry: TranscodeEntry, val fileSize: Long) : TranscodeSlot()
+        data class InFlight(val entry: TranscodeEntry, val isLeader: Boolean) : TranscodeSlot()
+    }
+
+    private fun acquireTranscodeSlot(songId: String): TranscodeSlot = synchronized(transcodeStartLock) {
+        val existing = transcodeCache[songId]
+        if (existing != null) {
+            if (existing.done && !existing.failed && existing.tempFile.exists()) {
+                return@synchronized TranscodeSlot.Completed(existing, existing.tempFile.length())
+            }
+            if (!existing.done && !existing.failed) {
+                return@synchronized TranscodeSlot.InFlight(existing, isLeader = false)
+            }
+            transcodeCache.remove(songId, existing)
+            runCatching { if (existing.tempFile.exists()) existing.tempFile.delete() }
+        }
+
+        val tempFile = File(cacheDir, "cast_transcode_${songId}.aac")
+        runCatching { if (tempFile.exists()) tempFile.delete() }
+        val entry = TranscodeEntry(tempFile = tempFile)
+        transcodeCache[songId] = entry
+        TranscodeSlot.InFlight(entry, isLeader = true)
+    }
+
+    private suspend fun ApplicationCall.respondHeadForTranscoded(codecLabel: String, song: Song) {
+        response.header(HttpHeaders.ContentType, "audio/aac")
+        val cachedSize = withContext(Dispatchers.IO) {
+            val entry = transcodeCache[song.id]
+            if (entry != null && entry.done && !entry.failed && entry.tempFile.exists()) {
+                entry.tempFile.length()
+            } else {
+                null
+            }
+        }
+        if (cachedSize != null) {
+            response.header(HttpHeaders.AcceptRanges, "bytes")
+            response.header(HttpHeaders.ContentLength, cachedSize.toString())
+            Timber.tag(castHttpLogTag).d("HEAD /song %s songId=%s -> audio/aac size=%d (cached)", codecLabel, song.id, cachedSize)
+        } else {
+            Timber.tag(castHttpLogTag).d("HEAD /song %s songId=%s -> audio/aac (no cache yet)", codecLabel, song.id)
+        }
+        respond(HttpStatusCode.OK)
+    }
+
     /**
      * Responds to a GET request for a transcoded song (ALAC→AAC or FLAC→AAC).
      *
@@ -1883,9 +2053,8 @@ class MediaFileHttpServerService : Service() {
      *  - In-progress: stream bytes from the growing temp file as the encoder produces them
      *    (progressive read). Non-zero Range requests wait for the completed temp file so
      *    Cast never receives bytes from the wrong offset.
-     *  - Miss: start a background transcode coroutine writing to a temp file, then immediately
-     *    begin streaming progressively via [streamFromGrowingFile]. The encoder and the response
-     *    stream are fully decoupled — a Cast connection reset cannot fail the transcode.
+     *  - Miss: atomically acquire single-flight leadership and launch one background transcode
+     *    coroutine writing to a temp file, while requestors stream progressively on Dispatchers.IO.
      */
     private suspend fun ApplicationCall.respondTranscodedWithCache(
         song: Song,
@@ -1896,76 +2065,52 @@ class MediaFileHttpServerService : Service() {
         val songId = song.id
         val aacContentType = ContentType.parse("audio/aac")
 
-        // Fast path: temp file already complete → serve with Range support.
-        val existing = transcodeCache[songId]
-        if (existing != null && existing.done && !existing.failed && existing.tempFile.exists()) {
-            Timber.tag(castHttpLogTag).d(
-                "transcode-cache HIT songId=%s size=%d range=%s",
-                songId, existing.tempFile.length(), rangeHeader
-            )
-            respondWithAudioStream(
-                contentType = aacContentType,
-                fileSize = existing.tempFile.length(),
-                rangeHeader = rangeHeader
-            ) { FileInputStream(existing.tempFile) }
-            return
-        }
-
-        // If a transcode is already running, stream progressively from the growing temp file.
-        // Responding immediately (no latch wait) prevents Cast's loading timeout from firing
-        // while we're still transcoding. Non-zero Range requests wait for the completed file.
-        if (existing != null && !existing.done && !existing.failed) {
-            Timber.tag(castHttpLogTag).d(
-                "transcode-cache WAIT songId=%s range=%s, streaming progressively", songId, rangeHeader
-            )
-            if (isNonInitialRangeRequest(rangeHeader)) {
-                respondWhenTranscodeCompletes(
-                    entry = existing,
-                    contentType = aacContentType,
-                    rangeHeader = rangeHeader
+        val entry = when (val slot = withContext(Dispatchers.IO) { acquireTranscodeSlot(songId) }) {
+            is TranscodeSlot.Completed -> {
+                Timber.tag(castHttpLogTag).d(
+                    "transcode-cache HIT songId=%s size=%d range=%s",
+                    songId, slot.fileSize, rangeHeader
                 )
+                respondWithAudioStream(
+                    contentType = aacContentType,
+                    fileSize = slot.fileSize,
+                    rangeHeader = rangeHeader
+                ) { FileInputStream(slot.entry.tempFile) }
                 return
             }
-            respondOutputStream(aacContentType) {
-                streamFromGrowingFile(existing, this)
-            }
-            return
-        }
-        // Previous transcode failed — remove the stale entry so the miss-path below can retry.
-        if (existing != null && existing.failed) {
-            transcodeCache.remove(songId)
-        }
-
-        // No entry yet — we are the first request. Create the entry and start transcoding.
-        val tempFile = File(cacheDir, "cast_transcode_${songId}.aac")
-        // Remove stale failed temp file if present.
-        runCatching { if (tempFile.exists()) tempFile.delete() }
-
-        val entry = TranscodeEntry(tempFile = tempFile)
-        transcodeCache[songId] = entry
-
-        Timber.tag(castHttpLogTag).d("transcode-cache MISS songId=%s, starting progressive stream", songId)
-        Timber.tag("PX_CAST_HTTP").i("transcode_cache_start songId=$songId codec=${codecInfo.codecMime}")
-
-        // Transcode to the temp file in the background while we stream progressively to Cast.
-        // This decouples the encoder from the response stream: a Cast connection reset no longer
-        // marks the entry as failed and no longer deletes the temp file mid-transcode.
-        serviceScope.launch {
-            runCatching {
-                FileOutputStream(tempFile).use { fos ->
-                    transcodeToAacAdts(codecInfo, song, uri, fos)
+            is TranscodeSlot.InFlight -> {
+                if (!slot.isLeader) {
+                    Timber.tag(castHttpLogTag).d(
+                        "transcode-cache WAIT songId=%s range=%s, streaming progressively",
+                        songId, rangeHeader
+                    )
+                } else {
+                    Timber.tag(castHttpLogTag).d("transcode-cache MISS songId=%s, starting progressive stream", songId)
+                    Timber.tag("PX_CAST_HTTP").i("transcode_cache_start songId=$songId codec=${codecInfo.codecMime}")
+                    val leaderEntry = slot.entry
+                    serviceScope.launch {
+                        runCatching {
+                            FileOutputStream(leaderEntry.tempFile).use { fos ->
+                                transcodeToAacAdts(codecInfo, song, uri, fos)
+                            }
+                            leaderEntry.done = true
+                            Timber.tag("PX_CAST_HTTP").i("transcode_cache_done songId=$songId size=${leaderEntry.tempFile.length()}")
+                        }.onFailure { t ->
+                            leaderEntry.failed = true
+                            synchronized(transcodeStartLock) {
+                                transcodeCache.remove(songId, leaderEntry)
+                            }
+                            runCatching { leaderEntry.tempFile.delete() }
+                            if (!t.isClientAbortDuringResponse()) {
+                                Timber.tag(castHttpLogTag).e(t, "transcode-cache bg transcode failed songId=%s", songId)
+                                Timber.tag("PX_CAST_HTTP").e(t, "transcode_cache_error songId=$songId")
+                            }
+                        }.also {
+                            leaderEntry.latch.countDown()
+                        }
+                    }
                 }
-                entry.done = true
-                Timber.tag("PX_CAST_HTTP").i("transcode_cache_done songId=$songId size=${tempFile.length()}")
-            }.onFailure { t ->
-                entry.failed = true
-                runCatching { tempFile.delete() }
-                if (!t.isClientAbortDuringResponse()) {
-                    Timber.tag(castHttpLogTag).e(t, "transcode-cache bg transcode failed songId=%s", songId)
-                    Timber.tag("PX_CAST_HTTP").e(t, "transcode_cache_error songId=$songId")
-                }
-            }.also {
-                entry.latch.countDown()
+                slot.entry
             }
         }
 
@@ -1988,13 +2133,18 @@ class MediaFileHttpServerService : Service() {
         contentType: ContentType,
         rangeHeader: String?
     ) {
-        val completed = withContext(Dispatchers.IO) {
-            entry.latch.await(TRANSCODE_RANGE_WAIT_TIMEOUT_MINUTES, TimeUnit.MINUTES)
+        val completedFileSize = withContext(Dispatchers.IO) {
+            val completed = entry.latch.await(TRANSCODE_RANGE_WAIT_TIMEOUT_MINUTES, TimeUnit.MINUTES)
+            if (completed && entry.done && !entry.failed && entry.tempFile.exists()) {
+                entry.tempFile.length()
+            } else {
+                null
+            }
         }
-        if (completed && entry.done && !entry.failed && entry.tempFile.exists()) {
+        if (completedFileSize != null) {
             respondWithAudioStream(
                 contentType = contentType,
-                fileSize = entry.tempFile.length(),
+                fileSize = completedFileSize,
                 rangeHeader = rangeHeader
             ) { FileInputStream(entry.tempFile) }
         } else {
@@ -2005,27 +2155,26 @@ class MediaFileHttpServerService : Service() {
     /**
      * Reads bytes from [entry.tempFile] as the background transcode writes them, forwarding
      * each chunk to [out] until the transcode finishes, fails, or the writer stops producing
-     * bytes for [TRANSCODE_STREAM_IDLE_TIMEOUT_MS]. Once the encoder marks [TranscodeEntry.done],
-     * any remaining bytes are flushed and the function returns normally so Ktor can close the
-     * response.
+     * bytes for [TRANSCODE_STREAM_IDLE_TIMEOUT_MS]. Executed explicitly on [Dispatchers.IO].
      */
-    private suspend fun streamFromGrowingFile(entry: TranscodeEntry, out: OutputStream) {
+    private suspend fun streamFromGrowingFile(entry: TranscodeEntry, out: OutputStream) = withContext(Dispatchers.IO) {
         val buf = ByteArray(16384)
         var lastProgressAtMs = System.currentTimeMillis()
 
         // The background coroutine creates the file when it opens FileOutputStream.
         // Poll until it exists (usually within one scheduling quantum).
         while (
+            isActive &&
             !entry.tempFile.exists() &&
             !entry.failed &&
             System.currentTimeMillis() - lastProgressAtMs < TRANSCODE_STREAM_IDLE_TIMEOUT_MS
         ) {
             delay(50)
         }
-        if (!entry.tempFile.exists() || entry.failed) return
+        if (!isActive || !entry.tempFile.exists() || entry.failed) return@withContext
 
         FileInputStream(entry.tempFile).use { fis ->
-            while (true) {
+            while (isActive) {
                 val n = fis.read(buf)
                 when {
                     n > 0 -> {
@@ -2199,13 +2348,16 @@ class MediaFileHttpServerService : Service() {
 
 
             val encChannels = minOf(codecInfo.channelCount, 2)
+            val resamplePlan = resolveAdtsSampleRateAndDecimation(codecInfo.sampleRate)
+            val encSampleRate = resamplePlan.targetSampleRate
+            val decimationFactor = resamplePlan.decimationFactor
             val bitrate = when {
-                encChannels >= 2 && codecInfo.sampleRate >= 44100 -> 256_000
+                encChannels >= 2 && encSampleRate >= 44100 -> 256_000
                 encChannels >= 2 -> 192_000
                 else -> 128_000
             }
             val encFormat = MediaFormat.createAudioFormat(
-                "audio/mp4a-latm", codecInfo.sampleRate, encChannels
+                "audio/mp4a-latm", encSampleRate, encChannels
             ).apply {
                 setInteger(MediaFormat.KEY_BIT_RATE, bitrate)
                 setInteger(MediaFormat.KEY_AAC_PROFILE,
@@ -2276,10 +2428,7 @@ class MediaFileHttpServerService : Service() {
                         while (remaining > 0 || isEosEmpty) {
                             val encInIdx = encoder.dequeueInputBuffer(TIMEOUT_US)
                             if (encInIdx < 0) {
-                                // Encoder input full — wait for it to produce output before retrying.
-                                // Using TIMEOUT_US here (instead of 0) lets the encoder finish processing
-                                // queued PCM and release output buffers, preventing bufferpool saturation.
-                                if (drainEncoderToAdts(encoder, encoderInfo, codecInfo.sampleRate, encChannels, outputStream, TIMEOUT_US)) {
+                                if (drainEncoderToAdts(encoder, encoderInfo, encSampleRate, encChannels, outputStream, TIMEOUT_US)) {
                                     encDone = true
                                     break
                                 }
@@ -2293,61 +2442,44 @@ class MediaFileHttpServerService : Service() {
                             val frameBytesOut = encChannels * 2
                             val rawCapacityFrames = if (frameBytesOut > 0) encBuf.capacity() / frameBytesOut else 1024
                             val maxOutCapacityFrames = maxOf(rawCapacityFrames, 1)
-                            val maxInputBytes = maxOutCapacityFrames * frameBytesIn
+                            val groupBytesIn = frameBytesIn * decimationFactor
+                            val maxInputBytes = maxOutCapacityFrames * groupBytesIn
 
                             val rawToWrite = if (isEosEmpty) 0 else minOf(remaining, maxInputBytes)
-                            val toWrite = if (frameBytesIn > 0) (rawToWrite / frameBytesIn) * frameBytesIn else rawToWrite
-                            // Guard: if frame alignment rounds toWrite down to 0 on a non-empty remainder,
-                            // releasing the encoder slot and breaking prevents an infinite loop.
+                            val effectiveDecimation = if (decimationFactor > 1 && rawToWrite in frameBytesIn until groupBytesIn) {
+                                (rawToWrite / frameBytesIn).coerceAtLeast(1)
+                            } else {
+                                decimationFactor
+                            }
+                            val alignUnit = frameBytesIn * effectiveDecimation
+                            val toWrite = if (alignUnit > 0) (rawToWrite / alignUnit) * alignUnit else rawToWrite
                             if (toWrite == 0 && !isEosEmpty) {
                                 encoder.queueInputBuffer(encInIdx, 0, 0, pts, 0)
                                 break
                             }
                             var encoderBytesAssigned = toWrite
+                            var encodedFrames = if (frameBytesIn > 0) toWrite / (frameBytesIn * effectiveDecimation) else 0
                             if (toWrite > 0 && pcm != null) {
                                 if (pcmBuffer.size < toWrite) {
                                     pcmBuffer = ByteArray(toWrite)
                                 }
                                 pcm.get(pcmBuffer, 0, toWrite)
                                 
-                                if (actualDecoderChannels > 2) {
-                                    val inChannels = actualDecoderChannels
-                                    val outChannels = encChannels
-                                    val frameBytesIn = inChannels * 2
-                                    val frameBytesOut = outChannels * 2
-                                    val numFrames = toWrite / frameBytesIn
-                                    val outSize = numFrames * frameBytesOut
-                                    
-                                    if (downmixBuffer.size < outSize) {
-                                        downmixBuffer = ByteArray(outSize)
+                                if (actualDecoderChannels > encChannels || effectiveDecimation > 1) {
+                                    val neededOutBytes = encodedFrames * frameBytesOut
+                                    if (downmixBuffer.size < neededOutBytes) {
+                                        downmixBuffer = ByteArray(neededOutBytes)
                                     }
-                                    
-                                    val inBuf = ByteBuffer.wrap(pcmBuffer, 0, toWrite).order(
-                                        ByteOrder.nativeOrder()).asShortBuffer()
-                                    val outBuf = ByteBuffer.wrap(downmixBuffer, 0, outSize).order(ByteOrder.nativeOrder()).asShortBuffer()
-                                    
-                                    for (i in 0 until numFrames) {
-                                        if (inChannels == 6) {
-                                            val c0 = inBuf.get()
-                                            val c1 = inBuf.get()
-                                            val c2 = inBuf.get()
-                                            val lfe = inBuf.get()
-                                            val c4 = inBuf.get()
-                                            val c5 = inBuf.get()
-                                            val left = (c0 * 0.5f + c2 * 0.35f + c4 * 0.35f).toInt()
-                                            val right = (c1 * 0.5f + c2 * 0.35f + c5 * 0.35f).toInt()
-                                            outBuf.put(left.coerceIn(-32768, 32767).toShort())
-                                            outBuf.put(right.coerceIn(-32768, 32767).toShort())
-                                        } else {
-                                            outBuf.put(inBuf.get())
-                                            outBuf.put(inBuf.get())
-                                            for (c in 2 until inChannels) {
-                                                inBuf.get()
-                                            }
-                                        }
-                                    }
-                                    encBuf.put(downmixBuffer, 0, outSize)
-                                    encoderBytesAssigned = outSize
+                                    encoderBytesAssigned = downmixAndDecimatePcm16(
+                                        pcmBytes = pcmBuffer,
+                                        numInputBytes = toWrite,
+                                        inChannels = actualDecoderChannels,
+                                        outChannels = encChannels,
+                                        decimationFactor = effectiveDecimation,
+                                        outBytes = downmixBuffer
+                                    )
+                                    encBuf.put(downmixBuffer, 0, encoderBytesAssigned)
+                                    encodedFrames = if (frameBytesOut > 0) encoderBytesAssigned / frameBytesOut else 0
                                 } else {
                                     encBuf.put(pcmBuffer, 0, toWrite)
                                     encoderBytesAssigned = toWrite
@@ -2360,13 +2492,13 @@ class MediaFileHttpServerService : Service() {
                                 if (eos) MediaCodec.BUFFER_FLAG_END_OF_STREAM else 0
                             )
                             
-                            if (drainEncoderToAdts(encoder, encoderInfo, codecInfo.sampleRate, encChannels, outputStream)) {
+                            if (drainEncoderToAdts(encoder, encoderInfo, encSampleRate, encChannels, outputStream)) {
                                 encDone = true
                                 break
                             }
                             
-                            if (bytesPerSampleFrame > 0 && toWrite > 0) {
-                                pts += (toWrite.toLong() * 1_000_000L / (bytesPerSampleFrame * codecInfo.sampleRate))
+                            if (encSampleRate > 0 && encodedFrames > 0) {
+                                pts += encodedFrames.toLong() * 1_000_000L / encSampleRate
                             }
                             remaining -= toWrite
                             if (isEosEmpty) break
@@ -2379,7 +2511,7 @@ class MediaFileHttpServerService : Service() {
 
                 // Drain encoder output
                 if (!encDone) {
-                    if (drainEncoderToAdts(encoder, encoderInfo, codecInfo.sampleRate, encChannels, outputStream)) {
+                    if (drainEncoderToAdts(encoder, encoderInfo, encSampleRate, encChannels, outputStream)) {
                         encDone = true
                     }
                 }
@@ -2439,14 +2571,17 @@ class MediaFileHttpServerService : Service() {
             }
 
             val encChannels = minOf(codecInfo.channelCount, 2)
+            val resamplePlan = resolveAdtsSampleRateAndDecimation(codecInfo.sampleRate)
+            val encSampleRate = resamplePlan.targetSampleRate
+            val decimationFactor = resamplePlan.decimationFactor
             val bitrate = when {
-                encChannels >= 2 && codecInfo.sampleRate >= 44100 -> 256_000
+                encChannels >= 2 && encSampleRate >= 44100 -> 256_000
                 encChannels >= 2 -> 192_000
                 else -> 128_000
             }
             val encFormat = MediaFormat.createAudioFormat(
                 "audio/mp4a-latm",
-                codecInfo.sampleRate,
+                encSampleRate,
                 encChannels
             ).apply {
                 setInteger(MediaFormat.KEY_BIT_RATE, bitrate)
@@ -2520,8 +2655,7 @@ class MediaFileHttpServerService : Service() {
                             while (remaining > 0) {
                                 val encInIdx = encoder.dequeueInputBuffer(timeoutUs)
                                 if (encInIdx < 0) {
-                                    // Encoder input full — wait for output before retrying (same fix as MediaCodec path).
-                                    if (drainEncoderToAdts(encoder, encoderInfo, codecInfo.sampleRate, encChannels, outputStream, timeoutUs)) {
+                                    if (drainEncoderToAdts(encoder, encoderInfo, encSampleRate, encChannels, outputStream, timeoutUs)) {
                                         encDone = true
                                         break
                                     }
@@ -2530,58 +2664,48 @@ class MediaFileHttpServerService : Service() {
                                 
                                 val encBuf = encoder.getInputBuffer(encInIdx) ?: break
                                 encBuf.clear()
-                                val frameBytesInAlign = codecInfo.channelCount * 2
+                                val frameBytesInAlign = bytesPerSampleFrame
                                 val frameBytesOut = encChannels * 2
                                 val rawCapacityFrames = if (frameBytesOut > 0) encBuf.capacity() / frameBytesOut else 1024
                                 val maxOutCapacityFrames = maxOf(rawCapacityFrames, 1)
-                                val maxInputBytes = maxOutCapacityFrames * frameBytesInAlign
+                                val groupBytesIn = frameBytesInAlign * decimationFactor
+                                val maxInputBytes = maxOutCapacityFrames * groupBytesIn
                                 
                                 val rawToWrite = minOf(remaining, maxInputBytes)
-                                val toWrite = if (frameBytesInAlign > 0) (rawToWrite / frameBytesInAlign) * frameBytesInAlign else rawToWrite
+                                val effectiveDecimation = if (decimationFactor > 1 && rawToWrite in frameBytesInAlign until groupBytesIn) {
+                                    (rawToWrite / frameBytesInAlign).coerceAtLeast(1)
+                                } else {
+                                    decimationFactor
+                                }
+                                val alignUnit = frameBytesInAlign * effectiveDecimation
+                                val toWrite = if (alignUnit > 0) (rawToWrite / alignUnit) * alignUnit else rawToWrite
+                                if (toWrite == 0) {
+                                    encoder.queueInputBuffer(encInIdx, 0, 0, pts, 0)
+                                    break
+                                }
                                 var encoderBytesAssigned = toWrite
+                                var encodedFrames = if (frameBytesInAlign > 0) toWrite / (frameBytesInAlign * effectiveDecimation) else 0
                                 
                                 if (pcmBuffer.size < toWrite) {
                                     pcmBuffer = ByteArray(toWrite)
                                 }
                                 pcm.get(pcmBuffer, 0, toWrite)
                                 
-                                if (codecInfo.channelCount > 2) {
-                                    val inChannels = codecInfo.channelCount
-                                    val outChannels = encChannels
-                                    val frameBytesIn = inChannels * 2
-                                    val frameBytesOut = outChannels * 2
-                                    val numFrames = toWrite / frameBytesIn
-                                    val outSize = numFrames * frameBytesOut
-                                    
-                                    if (downmixBuffer.size < outSize) {
-                                        downmixBuffer = ByteArray(outSize)
+                                if (codecInfo.channelCount > encChannels || effectiveDecimation > 1) {
+                                    val neededOutBytes = encodedFrames * frameBytesOut
+                                    if (downmixBuffer.size < neededOutBytes) {
+                                        downmixBuffer = ByteArray(neededOutBytes)
                                     }
-                                    
-                                    val inBuf = ByteBuffer.wrap(pcmBuffer, 0, toWrite).order(ByteOrder.nativeOrder()).asShortBuffer()
-                                    val outBuf = ByteBuffer.wrap(downmixBuffer, 0, outSize).order(ByteOrder.nativeOrder()).asShortBuffer()
-                                    
-                                    for (i in 0 until numFrames) {
-                                        if (inChannels == 6) {
-                                            val c0 = inBuf.get()
-                                            val c1 = inBuf.get()
-                                            val c2 = inBuf.get()
-                                            val lfe = inBuf.get()
-                                            val c4 = inBuf.get()
-                                            val c5 = inBuf.get()
-                                            val left = (c0 * 0.5f + c2 * 0.35f + c4 * 0.35f).toInt()
-                                            val right = (c1 * 0.5f + c2 * 0.35f + c5 * 0.35f).toInt()
-                                            outBuf.put(left.coerceIn(-32768, 32767).toShort())
-                                            outBuf.put(right.coerceIn(-32768, 32767).toShort())
-                                        } else {
-                                            outBuf.put(inBuf.get())
-                                            outBuf.put(inBuf.get())
-                                            for (c in 2 until inChannels) {
-                                                inBuf.get()
-                                            }
-                                        }
-                                    }
-                                    encBuf.put(downmixBuffer, 0, outSize)
-                                    encoderBytesAssigned = outSize
+                                    encoderBytesAssigned = downmixAndDecimatePcm16(
+                                        pcmBytes = pcmBuffer,
+                                        numInputBytes = toWrite,
+                                        inChannels = codecInfo.channelCount,
+                                        outChannels = encChannels,
+                                        decimationFactor = effectiveDecimation,
+                                        outBytes = downmixBuffer
+                                    )
+                                    encBuf.put(downmixBuffer, 0, encoderBytesAssigned)
+                                    encodedFrames = if (frameBytesOut > 0) encoderBytesAssigned / frameBytesOut else 0
                                 } else {
                                     encBuf.put(pcmBuffer, 0, toWrite)
                                     encoderBytesAssigned = toWrite
@@ -2595,7 +2719,7 @@ class MediaFileHttpServerService : Service() {
                                     if (eos) MediaCodec.BUFFER_FLAG_END_OF_STREAM else 0
                                 )
                                 
-                                if (drainEncoderToAdts(encoder, encoderInfo, codecInfo.sampleRate, encChannels, outputStream)) {
+                                if (drainEncoderToAdts(encoder, encoderInfo, encSampleRate, encChannels, outputStream)) {
                                     encDone = true
                                     break
                                 }
@@ -2603,15 +2727,14 @@ class MediaFileHttpServerService : Service() {
                                 if (eos) {
                                     encoderEosQueued = true
                                 }
-                                if (bytesPerSampleFrame > 0) {
-                                    pts += toWrite.toLong() * 1_000_000L /
-                                        (bytesPerSampleFrame * codecInfo.sampleRate)
+                                if (encSampleRate > 0 && encodedFrames > 0) {
+                                    pts += encodedFrames.toLong() * 1_000_000L / encSampleRate
                                 }
                                 remaining -= toWrite
                                 if (drainEncoderToAdts(
                                         encoder,
                                         encoderInfo,
-                                        codecInfo.sampleRate,
+                                        encSampleRate,
                                         encChannels,
                                         outputStream
                                     )
@@ -2620,7 +2743,14 @@ class MediaFileHttpServerService : Service() {
                                 }
                             }
                         } else if (isEos && !encoderEosQueued) {
-                            queueEncoderEndOfStream(encoder, encoderInfo, decoderOutput.timeUs, outputStream, codecInfo)
+                            queueEncoderEndOfStream(
+                                encoder = encoder,
+                                encoderInfo = encoderInfo,
+                                ptsUs = decoderOutput.timeUs,
+                                outputStream = outputStream,
+                                sampleRate = encSampleRate,
+                                channels = encChannels
+                            )
                             encoderEosQueued = true
                         }
 
@@ -2636,7 +2766,14 @@ class MediaFileHttpServerService : Service() {
                 }
 
                 if (srcDone && decDone && !encoderEosQueued) {
-                    queueEncoderEndOfStream(encoder, encoderInfo, 0L, outputStream, codecInfo)
+                    queueEncoderEndOfStream(
+                        encoder = encoder,
+                        encoderInfo = encoderInfo,
+                        ptsUs = 0L,
+                        outputStream = outputStream,
+                        sampleRate = encSampleRate,
+                        channels = encChannels
+                    )
                     encoderEosQueued = true
                 }
 
@@ -2644,8 +2781,8 @@ class MediaFileHttpServerService : Service() {
                     if (drainEncoderToAdts(
                             encoder,
                             encoderInfo,
-                            codecInfo.sampleRate,
-                            codecInfo.channelCount,
+                            encSampleRate,
+                            encChannels,
                             outputStream
                         )
                     ) {
@@ -2763,7 +2900,8 @@ class MediaFileHttpServerService : Service() {
         encoderInfo: MediaCodec.BufferInfo,
         ptsUs: Long,
         outputStream: OutputStream,
-        codecInfo: AudioCodecInfo
+        sampleRate: Int,
+        channels: Int
     ) {
         repeat(4) {
             val encInIdx = encoder.dequeueInputBuffer(20_000L)
@@ -2780,8 +2918,8 @@ class MediaFileHttpServerService : Service() {
             drainEncoderToAdts(
                 encoder,
                 encoderInfo,
-                codecInfo.sampleRate,
-                codecInfo.channelCount,
+                sampleRate,
+                channels,
                 outputStream,
                 firstTimeoutUs = 20_000L
             )
@@ -2859,29 +2997,7 @@ class MediaFileHttpServerService : Service() {
      * ADTS = Audio Data Transport Stream — allows AAC frames to be streamed without MP4 container.
      */
     private fun writeAdtsHeader(out: OutputStream, sampleRate: Int, channels: Int, aacFrameSize: Int) {
-        val freqIdx = when (sampleRate) {
-            96000 -> 0; 88200 -> 1; 64000 -> 2; 48000 -> 3
-            44100 -> 4; 32000 -> 5; 24000 -> 6; 22050 -> 7
-            16000 -> 8; 12000 -> 9; 11025 -> 10; 8000 -> 11
-            7350 -> 12; else -> 4
-        }
-        val frameLen = aacFrameSize + 7 // total = payload + 7-byte header
-        // Profile = AAC-LC (object type 2 → stored as 2-1 = 1 → bits 01)
-        // Byte layout per ADTS spec (ISO 13818-7):
-        //  [sync:12][id:1][layer:2][protection_absent:1]
-        //  [profile_obj_type:2][samp_freq_idx:4][private:1][channel_cfg:3][orig:1][copy:1][home:1]
-        //  [copyright_id_bit:1][copyright_id_start:1][frame_length:13][buffer_fullness:11][num_raw_blocks:2]
-        out.write(
-            byteArrayOf(
-                0xFF.toByte(),
-                0xF1.toByte(),  // MPEG-4, layer=0, no CRC
-                (0x40 or (freqIdx shl 2) or (channels shr 2)).toByte(),
-                ((channels and 0x3) shl 6 or (frameLen shr 11)).toByte(),
-                (frameLen shr 3 and 0xFF).toByte(),
-                ((frameLen and 0x7) shl 5 or 0x1F).toByte(),    // buf_fullness bits 10..6 = 0x1F
-                0xFC.toByte()   // buf_fullness bits 5..0 = 0x3F, num_raw_blocks = 0
-            )
-        )
+        out.write(buildAdtsHeader(sampleRate, channels, aacFrameSize))
     }
 
     private fun Throwable.isClientAbortDuringResponse(): Boolean {

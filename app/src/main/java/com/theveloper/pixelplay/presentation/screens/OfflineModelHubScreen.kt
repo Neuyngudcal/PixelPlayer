@@ -27,6 +27,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AddCircleOutline
+import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.CleaningServices
 import androidx.compose.material.icons.rounded.CloudDownload
@@ -45,11 +46,14 @@ import androidx.compose.material.icons.rounded.Verified
 import androidx.compose.material.icons.rounded.WarningAmber
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.LinearWavyProgressIndicator
+import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Slider
@@ -76,14 +80,18 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavController
+import com.theveloper.pixelplay.data.ai.offline.AiCoreAvailabilityStatus
+import com.theveloper.pixelplay.data.ai.offline.AiCoreModelInfo
 import com.theveloper.pixelplay.data.ai.offline.CustomImportState
 import com.theveloper.pixelplay.data.ai.offline.DeviceHardwareSnapshot
 import com.theveloper.pixelplay.data.ai.offline.ModelDownloadState
 import com.theveloper.pixelplay.data.ai.offline.OfflineModelCatalog
 import com.theveloper.pixelplay.data.ai.offline.OfflineModelInfo
 import com.theveloper.pixelplay.data.ai.offline.StaticHardwareEvalResult
+import com.theveloper.pixelplay.data.ai.provider.AiProvider
 import com.theveloper.pixelplay.presentation.components.CollapsibleCommonTopBar
 import com.theveloper.pixelplay.presentation.components.HardwareCheckDialog
+import com.theveloper.pixelplay.presentation.components.LocalInsideFloatingPane
 import com.theveloper.pixelplay.presentation.components.MiniPlayerHeight
 import com.theveloper.pixelplay.presentation.viewmodel.OfflineModelHubViewModel
 import kotlinx.coroutines.launch
@@ -94,9 +102,14 @@ import kotlin.math.roundToInt
 @Composable
 fun OfflineModelHubScreen(
     navController: NavController,
-    viewModel: OfflineModelHubViewModel = hiltViewModel()
+    viewModel: OfflineModelHubViewModel = hiltViewModel(),
+    embeddedInPane: Boolean = false
 ) {
     val hardwareSnapshot by viewModel.hardwareSnapshot.collectAsStateWithLifecycle()
+    val aiCoreModelInfo by viewModel.aiCoreModelInfo.collectAsStateWithLifecycle()
+    val isCheckingAiCore by viewModel.isCheckingAiCore.collectAsStateWithLifecycle()
+    val aiCoreActionError by viewModel.aiCoreActionError.collectAsStateWithLifecycle()
+    val currentAiProvider by viewModel.currentAiProvider.collectAsStateWithLifecycle()
     val recommendedModels by viewModel.recommendedModels.collectAsStateWithLifecycle()
     val customModels by viewModel.customModels.collectAsStateWithLifecycle()
     val downloadStates by viewModel.downloadStates.collectAsStateWithLifecycle()
@@ -123,7 +136,12 @@ fun OfflineModelHubScreen(
     val coroutineScope = rememberCoroutineScope()
     val lazyListState = rememberLazyListState()
 
-    val statusBarHeight = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+    val insideFloatingPane = LocalInsideFloatingPane.current
+    val statusBarHeight = if (embeddedInPane || insideFloatingPane) {
+        0.dp
+    } else {
+        WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+    }
     val minTopBarHeight = 64.dp + statusBarHeight
     val maxTopBarHeight = 180.dp
     val minTopBarHeightPx = with(density) { minTopBarHeight.toPx() }
@@ -180,16 +198,20 @@ fun OfflineModelHubScreen(
     }
 
     Box(
-        modifier = Modifier
-            .nestedScroll(nestedScrollConnection)
-            .fillMaxSize()
+        modifier = if (embeddedInPane) {
+            Modifier.fillMaxSize()
+        } else {
+            Modifier
+                .nestedScroll(nestedScrollConnection)
+                .fillMaxSize()
+        }
     ) {
         val currentTopBarHeightDp = with(density) { topBarHeight.value.toDp() }
 
         LazyColumn(
             state = lazyListState,
             contentPadding = PaddingValues(
-                top = currentTopBarHeightDp + 8.dp,
+                top = if (embeddedInPane) 8.dp else currentTopBarHeightDp + 8.dp,
                 start = 16.dp,
                 end = 16.dp,
                 bottom = MiniPlayerHeight + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 24.dp
@@ -197,6 +219,20 @@ fun OfflineModelHubScreen(
             verticalArrangement = Arrangement.spacedBy(14.dp),
             modifier = Modifier.fillMaxSize()
         ) {
+            // 0. [ANDROID AICORE - GEMINI NANO NPU]
+            item(key = "android_aicore_card") {
+                AndroidAiCoreStatusCard(
+                    info = aiCoreModelInfo,
+                    isChecking = isCheckingAiCore,
+                    actionError = aiCoreActionError,
+                    isActiveProvider = currentAiProvider == AiProvider.ANDROID_AICORE.name,
+                    onCheckSupport = { viewModel.checkAiCoreSupport() },
+                    onWarmupAndInspect = { viewModel.warmupAndInspectAiCore() },
+                    onDownloadSystemModel = { viewModel.downloadAiCoreModel() },
+                    onActivateAiCore = { viewModel.activateAndroidAiCore() }
+                )
+            }
+
             // 1. [THIẾT BỊ CỦA BẠN]
             item(key = "device_hardware_card") {
                 DeviceHardwareSummaryCard(
@@ -287,14 +323,319 @@ fun OfflineModelHubScreen(
             }
         }
 
-        CollapsibleCommonTopBar(
-            title = "Quản lý Mô hình AI Offline",
-            collapseFraction = collapseFraction,
-            headerHeight = currentTopBarHeightDp,
-            onBackClick = { navController.popBackStack() },
-            expandedTitleStartPadding = 20.dp,
-            collapsedTitleStartPadding = 68.dp,
-            maxLines = 2
+        if (!embeddedInPane) {
+            CollapsibleCommonTopBar(
+                title = "Quản lý Mô hình AI Offline",
+                collapseFraction = collapseFraction,
+                headerHeight = currentTopBarHeightDp,
+                onBackClick = { navController.popBackStack() },
+                expandedTitleStartPadding = 20.dp,
+                collapsedTitleStartPadding = 68.dp,
+                maxLines = 2
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun AndroidAiCoreStatusCard(
+    info: AiCoreModelInfo,
+    isChecking: Boolean,
+    actionError: String?,
+    isActiveProvider: Boolean,
+    onCheckSupport: () -> Unit,
+    onWarmupAndInspect: () -> Unit,
+    onDownloadSystemModel: () -> Unit,
+    onActivateAiCore: () -> Unit
+) {
+    val containerColor = when (info.availability) {
+        AiCoreAvailabilityStatus.AVAILABLE -> if (isActiveProvider) {
+            MaterialTheme.colorScheme.primaryContainer
+        } else {
+            MaterialTheme.colorScheme.secondaryContainer
+        }
+        AiCoreAvailabilityStatus.DOWNLOADABLE,
+        AiCoreAvailabilityStatus.DOWNLOADING -> MaterialTheme.colorScheme.secondaryContainer
+        AiCoreAvailabilityStatus.CHECKING -> MaterialTheme.colorScheme.surfaceContainerHigh
+        AiCoreAvailabilityStatus.UNAVAILABLE,
+        AiCoreAvailabilityStatus.ERROR -> MaterialTheme.colorScheme.errorContainer
+    }
+    val contentColor = when (info.availability) {
+        AiCoreAvailabilityStatus.AVAILABLE -> if (isActiveProvider) {
+            MaterialTheme.colorScheme.onPrimaryContainer
+        } else {
+            MaterialTheme.colorScheme.onSecondaryContainer
+        }
+        AiCoreAvailabilityStatus.DOWNLOADABLE,
+        AiCoreAvailabilityStatus.DOWNLOADING -> MaterialTheme.colorScheme.onSecondaryContainer
+        AiCoreAvailabilityStatus.CHECKING -> MaterialTheme.colorScheme.onSurface
+        AiCoreAvailabilityStatus.UNAVAILABLE,
+        AiCoreAvailabilityStatus.ERROR -> MaterialTheme.colorScheme.onErrorContainer
+    }
+    val badgeLabel = when (info.availability) {
+        AiCoreAvailabilityStatus.AVAILABLE -> if (isActiveProvider) "Đang kích hoạt (NPU)" else "Hỗ trợ AICore (Sẵn sàng)"
+        AiCoreAvailabilityStatus.DOWNLOADABLE -> "Hỗ trợ NPU • Chưa tải"
+        AiCoreAvailabilityStatus.DOWNLOADING -> "Đang tải Gemini Nano"
+        AiCoreAvailabilityStatus.CHECKING -> "Đang kiểm tra..."
+        AiCoreAvailabilityStatus.UNAVAILABLE -> "Không hỗ trợ"
+        AiCoreAvailabilityStatus.ERROR -> "Lỗi kiểm tra"
+    }
+
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = AbsoluteSmoothCornerShape(28.dp, 60),
+        color = containerColor
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    modifier = Modifier.weight(1f),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.AutoAwesome,
+                        contentDescription = null,
+                        tint = contentColor
+                    )
+                    Column {
+                        Text(
+                            text = "ANDROID AICORE (GEMINI NANO NPU)",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = contentColor
+                        )
+                        Text(
+                            text = badgeLabel,
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = contentColor.copy(alpha = 0.85f)
+                        )
+                    }
+                }
+                if (isChecking) {
+                    LoadingIndicator(
+                        modifier = Modifier.size(28.dp),
+                        color = contentColor
+                    )
+                } else {
+                    IconButton(onClick = onCheckSupport, modifier = Modifier.size(32.dp)) {
+                        Icon(
+                            imageVector = Icons.Rounded.Refresh,
+                            contentDescription = "Kiểm tra lại hỗ trợ AICore",
+                            tint = contentColor
+                        )
+                    }
+                }
+            }
+
+            Text(
+                text = info.statusMessageVi,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium,
+                color = contentColor
+            )
+
+            if (!actionError.isNullOrBlank()) {
+                Surface(
+                    color = MaterialTheme.colorScheme.errorContainer,
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = actionError,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                        modifier = Modifier.padding(10.dp)
+                    )
+                }
+            }
+
+            if (info.availability == AiCoreAvailabilityStatus.DOWNLOADING) {
+                if (info.downloadTotalBytes > 0L) {
+                    val fraction = (info.downloadBytesTransferred.toFloat() / info.downloadTotalBytes.toFloat())
+                        .coerceIn(0f, 1f)
+                    LinearWavyProgressIndicator(
+                        progress = { fraction },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                } else {
+                    LinearWavyProgressIndicator(modifier = Modifier.fillMaxWidth())
+                }
+            }
+
+            // Running AICore Model Info Panel
+            Surface(
+                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.65f),
+                shape = AbsoluteSmoothCornerShape(18.dp, 60),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier.padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(
+                        text = "THÔNG TIN MODEL AICORE ĐANG CHẠY",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    AiCoreInfoRow(
+                        label = "Model Base (AICore)",
+                        value = info.baseModelName.ifBlank {
+                            if (info.isSupportedOnDevice) "Chưa đọc (Bấm 'Nạp NPU & Xem Model')" else "Không có trên thiết bị"
+                        }
+                    )
+                    AiCoreInfoRow(
+                        label = "Dịch vụ hệ thống",
+                        value = if (info.isSystemServiceInstalled) {
+                            "${info.aicorePackageVersion} (com.google.android.aicore)"
+                        } else {
+                            "Chưa cài com.google.android.aicore"
+                        }
+                    )
+                    AiCoreInfoRow(
+                        label = "Trạng thái NPU Runtime",
+                        value = when {
+                            info.isWarmedUpInNpu -> "Đã nạp sẵn trong NPU (Warmup • 0 MB RAM app)"
+                            info.availability == AiCoreAvailabilityStatus.AVAILABLE -> "Sẵn sàng (Tự nạp NPU khi chạy • 0 MB RAM app)"
+                            else -> "Không khả dụng"
+                        }
+                    )
+                    if (info.tokenLimit > 0) {
+                        AiCoreInfoRow(
+                            label = "Context & System Prompt",
+                            value = "${info.tokenLimit} tokens • System Prompt: ${if (info.supportsSystemPrompt) "Hỗ trợ" else "Ghép chuỗi"}"
+                        )
+                    }
+                    if (info.supportedFeatures.isNotEmpty()) {
+                        AiCoreInfoRow(
+                            label = "Tính năng NPU hỗ trợ",
+                            value = info.supportedFeatures.joinToString(", ")
+                        )
+                    }
+                    if (info.lastInferenceDurationMs > 0L) {
+                        AiCoreInfoRow(
+                            label = "Lần chạy NPU gần nhất",
+                            value = "${info.lastInferenceDurationMs} ms"
+                        )
+                    }
+                    AiCoreInfoRow(
+                        label = "Thiết bị / SoC",
+                        value = "${info.deviceModel} • ${info.socHardware} • ${info.androidVersion}"
+                    )
+                }
+            }
+
+            // Action Buttons
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedButton(
+                    onClick = onCheckSupport,
+                    enabled = !isChecking,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Refresh,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text("Kiểm tra NPU")
+                }
+
+                when (info.availability) {
+                    AiCoreAvailabilityStatus.AVAILABLE -> {
+                        FilledTonalButton(
+                            onClick = onWarmupAndInspect,
+                            enabled = !isChecking,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Speed,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(Modifier.width(4.dp))
+                            Text("Nạp & Xem Model")
+                        }
+                    }
+                    AiCoreAvailabilityStatus.DOWNLOADABLE -> {
+                        Button(
+                            onClick = onDownloadSystemModel,
+                            enabled = !isChecking,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.CloudDownload,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(Modifier.width(4.dp))
+                            Text("Tải Gemini Nano")
+                        }
+                    }
+                    else -> Unit
+                }
+            }
+
+            if (info.availability == AiCoreAvailabilityStatus.AVAILABLE) {
+                Button(
+                    onClick = onActivateAiCore,
+                    enabled = !isActiveProvider && !isChecking,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.CheckCircle,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        if (isActiveProvider) {
+                            "Đang kích hoạt Android AICore (NPU)"
+                        } else {
+                            "Chuyển sang dùng Android AICore (NPU)"
+                        }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AiCoreInfoRow(
+    label: String,
+    value: String
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.Top
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(0.42f)
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodySmall,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.weight(0.58f)
         )
     }
 }

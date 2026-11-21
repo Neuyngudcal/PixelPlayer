@@ -2,10 +2,8 @@ package com.theveloper.pixelplay.presentation.components
 
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -25,10 +23,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowForward
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.MotionScheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -37,6 +37,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.font.FontWeight
@@ -49,6 +50,7 @@ import com.theveloper.pixelplay.R
 import com.theveloper.pixelplay.data.model.Song
 import com.theveloper.pixelplay.presentation.model.RecentlyPlayedSongUiModel
 import com.theveloper.pixelplay.presentation.viewmodel.ThemeStateHolder
+import com.theveloper.pixelplay.ui.theme.LocalPixelPlayDarkTheme
 
 private val HomeRecentlyPlayedPillHeight = 58.dp
 private val HomeRecentlyPlayedPillSpacing = 8.dp
@@ -240,6 +242,7 @@ private fun resolveRecentlyPlayedRowTargets(totalItems: Int): IntArray {
     )
 }
 
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun RecentlyPlayedPill(
     item: RecentlyPlayedSongUiModel,
@@ -248,7 +251,7 @@ private fun RecentlyPlayedPill(
     modifier: Modifier = Modifier,
     onClick: () -> Unit
 ) {
-    val isDark = isSystemInDarkTheme()
+    val isDark = LocalPixelPlayDarkTheme.current
     val albumColorSchemeState by remember(item.song.albumArtUriString, themeStateHolder) {
         themeStateHolder.getAlbumColorSchemeFlow(item.song.albumArtUriString.orEmpty())
     }.collectAsStateWithLifecycle()
@@ -261,24 +264,27 @@ private fun RecentlyPlayedPill(
     val targetTitleColor = albumColorScheme?.onPrimaryContainer ?: MaterialTheme.colorScheme.onPrimaryContainer
     val targetArtistColor = targetTitleColor.copy(alpha = 0.80f)
 
+    val spatialSpec = remember { MotionScheme.expressive().fastSpatialSpec<Dp>() }
+    val effectsSpec = remember { MotionScheme.expressive().defaultEffectsSpec<Color>() }
+
     val animatedCorner by animateDpAsState(
         targetValue = if (isCurrentSong) 14.dp else (HomeRecentlyPlayedPillHeight / 2),
-        animationSpec = tween(durationMillis = 280),
+        animationSpec = spatialSpec,
         label = "pillCorner"
     )
     val animatedContainer by animateColorAsState(
         targetValue = targetContainerColor,
-        animationSpec = tween(durationMillis = 280),
+        animationSpec = effectsSpec,
         label = "pillContainer"
     )
     val titleColor by animateColorAsState(
         targetValue = targetTitleColor,
-        animationSpec = tween(durationMillis = 280),
+        animationSpec = effectsSpec,
         label = "pillTitleColor"
     )
     val artistColor by animateColorAsState(
         targetValue = targetArtistColor,
-        animationSpec = tween(durationMillis = 280),
+        animationSpec = effectsSpec,
         label = "pillArtistColor"
     )
     val shape = RoundedCornerShape(animatedCorner)

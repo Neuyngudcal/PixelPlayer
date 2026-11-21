@@ -244,14 +244,6 @@
     <string name="settings_palette_style_expressive_desc">Cambiamenti di tonalità audaci e contrasto.</string>
     <string name="settings_palette_style_fruit_salad">Fruit Salad</string>
     <string name="settings_palette_style_fruit_salad_desc">Accenti ruotati giocosi.</string>
-    <string name="settings_palette_style_color_accuracy_title">Accuratezza del colore</string>
-    <string name="settings_palette_style_color_accuracy_subtitle">0 mantiene la sintonizzazione corrente. Valori più alti rimangono più vicini alla tonalità dominante della copertina dell\'album.</string>
-    <string name="settings_palette_style_accuracy_current">Corrente</string>
-    <string name="settings_palette_style_accuracy_more_accurate">Più accurato</string>
-    <string name="settings_palette_style_accuracy_summary_current">0 • Corrente</string>
-    <string name="settings_palette_style_accuracy_summary_subtle">%1$d • Sottile</string>
-    <string name="settings_palette_style_accuracy_summary_balanced">%1$d • Bilanciato</string>
-    <string name="settings_palette_style_accuracy_summary_precise">%1$d • Preciso</string>
 
     <!-- NavBarCornerRadiusScreen -->
     <string name="navbar_adjust_title">Regola raggio angoli</string>

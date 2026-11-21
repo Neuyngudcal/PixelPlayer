@@ -244,14 +244,6 @@
     <string name="settings_palette_style_expressive_desc">Dristige fargeforskyvninger og kontrast.</string>
     <string name="settings_palette_style_fruit_salad">Fruit Salad</string>
     <string name="settings_palette_style_fruit_salad_desc">Lekne roterte aksenter.</string>
-    <string name="settings_palette_style_color_accuracy_title">Fargenøyaktighet</string>
-    <string name="settings_palette_style_color_accuracy_subtitle">0 beholder gjeldende innstilling. Høyere verdier holder seg nærmere albumkunstens dominerende fargetone.</string>
-    <string name="settings_palette_style_accuracy_current">Gjeldende</string>
-    <string name="settings_palette_style_accuracy_more_accurate">Mer nøyaktig</string>
-    <string name="settings_palette_style_accuracy_summary_current">0 • Gjeldende</string>
-    <string name="settings_palette_style_accuracy_summary_subtle">%1$d • Subtil</string>
-    <string name="settings_palette_style_accuracy_summary_balanced">%1$d • Balansert</string>
-    <string name="settings_palette_style_accuracy_summary_precise">%1$d • Presis</string>
 
     <!-- NavBarCornerRadiusScreen -->
     <string name="navbar_adjust_title">Juster hjørneradius</string>

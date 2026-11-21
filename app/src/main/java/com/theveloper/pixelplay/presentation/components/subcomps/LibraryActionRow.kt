@@ -33,6 +33,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.PlaylistAdd
 import androidx.compose.material.icons.automirrored.rounded.Sort
+import androidx.compose.material.icons.automirrored.rounded.ViewList
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.MyLocation
 import androidx.compose.material.icons.rounded.Shuffle
@@ -41,8 +42,10 @@ import androidx.compose.material.icons.rounded.Cloud
 import androidx.compose.material.icons.rounded.Dataset
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.PhoneAndroid
+import androidx.compose.material.icons.rounded.ViewModule
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.IconButtonDefaults
@@ -82,6 +85,7 @@ import androidx.compose.ui.res.stringResource
 val defaultShape = RoundedCornerShape(26.dp) // Fallback shape
 val genHeight = 42.dp
 
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun LibraryActionRow(
     onMainActionClick: () -> Unit,
@@ -105,7 +109,12 @@ fun LibraryActionRow(
     // Storage Filter
     showStorageFilterButton: Boolean = false,
     currentStorageFilter: com.theveloper.pixelplay.data.model.StorageFilter = com.theveloper.pixelplay.data.model.StorageFilter.ALL,
-    onStorageFilterClick: () -> Unit = {}
+    onStorageFilterClick: () -> Unit = {},
+    // View Mode Toggle
+    showViewModeButton: Boolean = false,
+    isGridViewActive: Boolean = false,
+    viewModeTooltipText: String = "",
+    onViewModeToggleClick: () -> Unit = {}
 ) {
     val shouldShowImport = isPlaylistTab && showImportButton
 
@@ -273,40 +282,49 @@ fun LibraryActionRow(
 
         if (showSortButton) {
             val outerCorner = 26.dp
-            
+            val innerCorner = 8.dp
+            val cornerMotionSpec = MaterialTheme.motionScheme.fastSpatialSpec<androidx.compose.ui.unit.Dp>()
+
             // Logic for Sort Button (Rightmost)
             val sortStartCorner by animateDpAsState(
-                targetValue = if (showLocateButton || showStorageFilterButton) 8.dp else outerCorner,
+                targetValue = if (showLocateButton || showStorageFilterButton || showViewModeButton) innerCorner else outerCorner,
+                animationSpec = cornerMotionSpec,
                 label = "SortStartCorner"
             )
 
+            // Logic for View Mode Button (Left of Sort)
+            val viewModeStartCorner by animateDpAsState(
+                targetValue = if (showLocateButton || showStorageFilterButton) innerCorner else outerCorner,
+                animationSpec = cornerMotionSpec,
+                label = "ViewModeStartCorner"
+            )
+
             // Logic for Filter Button (Middle or Left if Locate hidden)
-            // Filter is visible if showStorageFilterButton is true
-            val filterEndCorner = 8.dp // Connected to Sort
+            val filterEndCorner = innerCorner
             val filterStartCorner by animateDpAsState(
-                targetValue = if (showLocateButton) 8.dp else outerCorner,
+                targetValue = if (showLocateButton) innerCorner else outerCorner,
+                animationSpec = cornerMotionSpec,
                 label = "FilterStartCorner"
             )
-            
-            // Logic for Locate Button (Leftmost)
-            val locateEndCorner = 8.dp // Connected to Filer or Sort
 
-            // Gaps
-            // If Filter is shown, gap is between Filter and Sort? OR if we use connected buttons, gap is 4dp between groups or 0dp between connected?
-            // Existing code used 4dp gap and 8dp corner. 
-            // "SortButtonsGap" was 4dp if showLocateButton else 0dp.
-            // If we want "connected" look (segmented), gap should be small (1dp or 2dp) or 0.
-            // But existing code uses `4.dp`.
-            
+            // Logic for Locate Button (Leftmost)
+            val locateEndCorner = innerCorner
+
             val gapBetweenLocateAndNext by animateDpAsState(
                 targetValue = if (showLocateButton) 4.dp else 0.dp,
+                animationSpec = cornerMotionSpec,
                 label = "GapLocate"
             )
-            val gapBetweenFilterAndSort by animateDpAsState(
+            val gapBetweenFilterAndNext by animateDpAsState(
                 targetValue = if (showStorageFilterButton) 4.dp else 0.dp,
+                animationSpec = cornerMotionSpec,
                 label = "GapFilter"
             )
-
+            val gapBetweenViewModeAndSort by animateDpAsState(
+                targetValue = if (showViewModeButton) 4.dp else 0.dp,
+                animationSpec = cornerMotionSpec,
+                label = "GapViewMode"
+            )
 
             Row(verticalAlignment = Alignment.CenterVertically) {
                 // Locate Button
@@ -331,7 +349,7 @@ fun LibraryActionRow(
                         )
                     }
                 }
-                
+
                 Spacer(modifier = Modifier.width(gapBetweenLocateAndNext))
 
                 // Storage Filter Button
@@ -340,19 +358,18 @@ fun LibraryActionRow(
                     enter = slideInHorizontally(initialOffsetX = { it / 2 }) + fadeIn(),
                     exit = slideOutHorizontally(targetOffsetX = { it / 2 }) + fadeOut()
                 ) {
-                     val finalIcon = when(currentStorageFilter) {
-                         com.theveloper.pixelplay.data.model.StorageFilter.ALL -> Icons.Rounded.Dataset
-                         com.theveloper.pixelplay.data.model.StorageFilter.ONLINE -> Icons.Rounded.Cloud
-                         com.theveloper.pixelplay.data.model.StorageFilter.OFFLINE -> Icons.Rounded.PhoneAndroid
-                     }
-                     val tooltipText = when(currentStorageFilter) {
-                         com.theveloper.pixelplay.data.model.StorageFilter.ALL -> stringResource(R.string.library_storage_filter_all_songs)
-                         com.theveloper.pixelplay.data.model.StorageFilter.ONLINE -> stringResource(R.string.library_storage_filter_online)
-                         com.theveloper.pixelplay.data.model.StorageFilter.OFFLINE -> stringResource(R.string.library_storage_filter_offline)
-                     }
-                     val tooltipState = rememberTooltipState()
+                    val finalIcon = when (currentStorageFilter) {
+                        com.theveloper.pixelplay.data.model.StorageFilter.ALL -> Icons.Rounded.Dataset
+                        com.theveloper.pixelplay.data.model.StorageFilter.ONLINE -> Icons.Rounded.Cloud
+                        com.theveloper.pixelplay.data.model.StorageFilter.OFFLINE -> Icons.Rounded.PhoneAndroid
+                    }
+                    val tooltipText = when (currentStorageFilter) {
+                        com.theveloper.pixelplay.data.model.StorageFilter.ALL -> stringResource(R.string.library_storage_filter_all_songs)
+                        com.theveloper.pixelplay.data.model.StorageFilter.ONLINE -> stringResource(R.string.library_storage_filter_online)
+                        com.theveloper.pixelplay.data.model.StorageFilter.OFFLINE -> stringResource(R.string.library_storage_filter_offline)
+                    }
+                    val tooltipState = rememberTooltipState()
 
-                    @OptIn(ExperimentalMaterial3Api::class)
                     TooltipBox(
                         positionProvider = TooltipDefaults.rememberTooltipPositionProvider(TooltipAnchorPosition.Above),
                         tooltip = {
@@ -372,7 +389,7 @@ fun LibraryActionRow(
                             ),
                             modifier = Modifier.size(genHeight)
                         ) {
-                             Icon(
+                            Icon(
                                 imageVector = finalIcon,
                                 contentDescription = tooltipText
                             )
@@ -380,7 +397,62 @@ fun LibraryActionRow(
                     }
                 }
 
-                Spacer(modifier = Modifier.width(gapBetweenFilterAndSort))
+                Spacer(modifier = Modifier.width(gapBetweenFilterAndNext))
+
+                // View Mode Toggle Button (1-tap List <-> Grid/Album View)
+                AnimatedVisibility(
+                    visible = showViewModeButton,
+                    enter = slideInHorizontally(initialOffsetX = { it / 2 }) + fadeIn(),
+                    exit = slideOutHorizontally(targetOffsetX = { it / 2 }) + fadeOut()
+                ) {
+                    val viewModeIcon = if (isGridViewActive) {
+                        Icons.AutoMirrored.Rounded.ViewList
+                    } else {
+                        Icons.Rounded.ViewModule
+                    }
+                    val viewModeShape = RoundedCornerShape(
+                        topStart = viewModeStartCorner,
+                        bottomStart = viewModeStartCorner,
+                        topEnd = innerCorner,
+                        bottomEnd = innerCorner
+                    )
+                    if (viewModeTooltipText.isNotBlank()) {
+                        val viewTooltipState = rememberTooltipState()
+                        TooltipBox(
+                            positionProvider = TooltipDefaults.rememberTooltipPositionProvider(TooltipAnchorPosition.Above),
+                            tooltip = {
+                                PlainTooltip {
+                                    Text(viewModeTooltipText)
+                                }
+                            },
+                            state = viewTooltipState
+                        ) {
+                            FilledTonalIconButton(
+                                onClick = onViewModeToggleClick,
+                                shape = viewModeShape,
+                                modifier = Modifier.size(genHeight)
+                            ) {
+                                Icon(
+                                    imageVector = viewModeIcon,
+                                    contentDescription = viewModeTooltipText
+                                )
+                            }
+                        }
+                    } else {
+                        FilledTonalIconButton(
+                            onClick = onViewModeToggleClick,
+                            shape = viewModeShape,
+                            modifier = Modifier.size(genHeight)
+                        ) {
+                            Icon(
+                                imageVector = viewModeIcon,
+                                contentDescription = null
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.width(gapBetweenViewModeAndSort))
 
                 // Sort Button
                 FilledTonalIconButton(

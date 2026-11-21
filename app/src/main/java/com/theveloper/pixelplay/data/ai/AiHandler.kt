@@ -1,6 +1,8 @@
 package com.theveloper.pixelplay.data.ai
 
 
+import com.theveloper.pixelplay.data.ai.offline.AiCoreAvailabilityStatus
+import com.theveloper.pixelplay.data.ai.offline.AndroidAiCoreEngine
 import com.theveloper.pixelplay.data.ai.provider.AiClientFactory
 import com.theveloper.pixelplay.data.ai.provider.AiProvider
 import com.theveloper.pixelplay.data.database.AiCacheDao
@@ -22,6 +24,7 @@ import javax.inject.Singleton
 class AiHandler @Inject constructor(
     private val preferencesRepo: AiPreferencesRepository,
     private val clientFactory: dagger.Lazy<AiClientFactory>,
+    private val androidAiCoreEngine: dagger.Lazy<AndroidAiCoreEngine>,
     private val cacheDao: dagger.Lazy<AiCacheDao>,
     private val usageDao: dagger.Lazy<AiUsageDao>,
     private val promptEngine: AiSystemPromptEngine,
@@ -101,7 +104,11 @@ class AiHandler @Inject constructor(
         val requestedModel = getModel(provider).ifBlank { client.getDefaultModel() }
 
         suspend fun callWithModel(model: String): String {
-            val timeoutMs = if (provider == AiProvider.OFFLINE_GGUF) 120_000L else REQUEST_TIMEOUT_MS
+            val timeoutMs = if (provider == AiProvider.OFFLINE_GGUF || provider == AiProvider.ANDROID_AICORE) {
+                120_000L
+            } else {
+                REQUEST_TIMEOUT_MS
+            }
             return try {
                 withTimeout(timeoutMs) {
                     client.generateContent(
@@ -211,6 +218,15 @@ class AiHandler @Inject constructor(
                         continue
                     }
                     key
+                } else if (provider == AiProvider.ANDROID_AICORE) {
+                    val aiCoreInfo = androidAiCoreEngine.get().checkDeviceSupportAndModelInfo()
+                    if (aiCoreInfo.availability != AiCoreAvailabilityStatus.AVAILABLE) {
+                        if (provider == userProvider) {
+                            failedProviders.add("${provider.displayName}: ${aiCoreInfo.statusMessageVi}")
+                        }
+                        continue
+                    }
+                    "android_aicore"
                 } else {
                     val offlinePath = preferencesRepo.activeOfflineModelPath.first()
                     val hardwarePassed = preferencesRepo.offlineHardwarePassed.first()

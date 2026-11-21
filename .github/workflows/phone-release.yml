@@ -3,9 +3,6 @@ name: Build Phone APK (Release)
 on:
   push:
     branches: [ master ]
-  pull_request:
-    types: [opened, synchronize, reopened]
-    branches: [ master ]
   workflow_dispatch:
 
 permissions:
@@ -52,6 +49,9 @@ jobs:
           echo "keyPassword=994273" >> keystore.properties
 
       - name: Build Phone release APK
+        env:
+          TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
+          TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
         run: gradle :app:assembleRelease -Ppixelplay.enableAbiSplits=true
 
       - name: Verify Phone split APKs

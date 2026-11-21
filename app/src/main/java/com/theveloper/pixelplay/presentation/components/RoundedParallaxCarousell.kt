@@ -17,6 +17,8 @@ import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.foundation.pager.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.listSaver
@@ -117,7 +119,7 @@ fun rememberCarouselState(initialItem: Int = 0, itemCount: () -> Int): CarouselS
 }
 
 /** API pública del carrusel tipo Multi-Browse con clip redondeado real. */
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun RoundedHorizontalMultiBrowseCarousel(
     state: CarouselState,
@@ -125,7 +127,8 @@ fun RoundedHorizontalMultiBrowseCarousel(
     itemSpacing: Dp = 0.dp,
     flingBehavior: TargetedFlingBehavior = PagerDefaults.flingBehavior(
         state = state.pagerState,
-        pagerSnapDistance = PagerSnapDistance.atMost(1)
+        pagerSnapDistance = PagerSnapDistance.atMost(1),
+        snapAnimationSpec = MaterialTheme.motionScheme.defaultSpatialSpec()
     ),
     userScrollEnabled: Boolean = true,
     itemCornerRadius: Dp = 16.dp,
@@ -233,7 +236,7 @@ fun RoundedHorizontalMultiBrowseCarousel(
    CORE (Carousel + PageSize + ItemScope con clip redondeado)
    ================================================================================================ */
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun RoundedCarousel(
     state: CarouselState,
@@ -255,6 +258,7 @@ private fun RoundedCarousel(
     val pageSize = remember(keylineList) {
         CarouselPageSize(keylineList, beforeContentPadding, afterContentPadding)
     }
+    val strategyProvider = remember(pageSize) { { pageSize.strategy } }
     val snapPosition = KeylineSnapPosition(pageSize)
 
     HorizontalPager(
@@ -265,7 +269,9 @@ private fun RoundedCarousel(
         ),
         pageSize = pageSize,
         pageSpacing = itemSpacing,
-        beyondViewportPageCount = maxNonFocalVisibleItemCount,
+        // Keep at least 1 neighbor page composed on each side (even in NO_PEEK) so Frame 1 of a skip
+        // slides in an already-composed, bitmap-bound cover without composition/placeholder pop-in.
+        beyondViewportPageCount = maxOf(maxNonFocalVisibleItemCount, 1),
         snapPosition = snapPosition,
         flingBehavior = flingBehavior,
         userScrollEnabled = userScrollEnabled,
@@ -274,62 +280,63 @@ private fun RoundedCarousel(
     ) { page ->
         val carouselItemInfo = remember { CarouselItemDrawInfoImpl() }
         val scope = remember { CarouselItemScopeImpl(itemInfo = carouselItemInfo) }
+        val isNoPeek = carouselStyle == CarouselStyle.NO_PEEK
 
-        val cachedShape = remember(itemCornerRadius) {
-            RoundedCornerShape(itemCornerRadius)
-        }
-
-        val clipShape = remember(cachedShape) {
-            object : Shape {
-                override fun createOutline(
-                    size: Size,
-                    layoutDirection: LayoutDirection,
-                    density: Density
-                ): Outline {
-                    // 1) Limitar la máscara al tamaño del layer (item)
-                    val layerBounds = Rect(0f, 0f, size.width, size.height)
-                    // intersecta con bounds y da un respiro sub-px para que no se vea 「cortado」
-                    val rect = carouselItemInfo.maskRect.intersect(layerBounds).inflate(0.5f)
-
-                    // 2) Creamos un outline redondeado del tamaño del rect ya intersectado
-                    val localSize = Size(rect.width, rect.height)
-                    val baseOutline = cachedShape.createOutline(localSize, layoutDirection, density)
-
-                    // 3) Lo pasamos a Path y lo trasladamos a (left,top) del maskRect
-                    val path = Path().apply {
-                        addOutline(baseOutline)
-                        translate(Offset(rect.left, rect.top))
+        val density = LocalDensity.current
+        val clipShape = remember(carouselItemInfo, itemCornerRadius, density, isNoPeek) {
+            if (isNoPeek) {
+                RoundedCornerShape(itemCornerRadius)
+            } else {
+                object : Shape {
+                    override fun createOutline(
+                        size: Size,
+                        layoutDirection: LayoutDirection,
+                        density: Density
+                    ): Outline {
+                        val layerBounds = Rect(0f, 0f, size.width, size.height)
+                        val rect = carouselItemInfo.maskRect.intersect(layerBounds).inflate(0.5f)
+                        val r = with(density) { itemCornerRadius.toPx() }
+                        return Outline.Rounded(
+                            androidx.compose.ui.geometry.RoundRect(
+                                rect = rect,
+                                cornerRadius = CornerRadius(r, r)
+                            )
+                        )
                     }
-                    return Outline.Generic(path)
                 }
             }
         }
 
-//        val clipShape = remember {
-//            object : Shape {
-//                override fun createOutline(size: Size, layoutDirection: LayoutDirection, density: Density): Outline {
-//                    return Outline.Rectangle(carouselItemInfo.maskRect) // <-- RECTÁNGULO: causa el corte plano
-//                }
-//            }
-//        }
-
-        //val clipShape = rememberRoundedClipShape(carouselItemInfo, itemCornerRadius)
-
-        val animatedAlpha by animateFloatAsState(
-            targetValue = if (carouselStyle == CarouselStyle.ONE_PEEK && page > state.pagerState.currentPage + 1) 0f else 1f,
-            animationSpec = tween(durationMillis = 200),
+        val isPageVisible by remember(state.pagerState, page, carouselStyle) {
+            derivedStateOf {
+                if (carouselStyle != CarouselStyle.ONE_PEEK) {
+                    true
+                } else {
+                    val maxVisiblePage = if (state.pagerState.currentPageOffsetFraction > 0.01f) {
+                        state.pagerState.currentPage + 2
+                    } else {
+                        state.pagerState.currentPage + 1
+                    }
+                    page <= maxVisiblePage
+                }
+            }
+        }
+        val animatedAlphaState = animateFloatAsState(
+            targetValue = if (isPageVisible) 1f else 0f,
+            animationSpec = MaterialTheme.motionScheme.fastEffectsSpec(),
             label = "CarouselItemAlpha"
         )
 
         Box(
             modifier = Modifier
-                .graphicsLayer { alpha = animatedAlpha }
+                .graphicsLayer { alpha = animatedAlphaState.value }
                 .carouselItem(
                     index = page,
                     state = state,
-                    strategy = { pageSize.strategy },
+                    strategy = strategyProvider,
                     carouselItemDrawInfo = carouselItemInfo,
-                    clipShape = clipShape
+                    clipShape = clipShape,
+                    isNoPeek = isNoPeek
                 )
         ) {
             scope.content(page)
@@ -446,12 +453,14 @@ private fun Modifier.carouselItem(
     strategy: () -> Strategy,
     carouselItemDrawInfo: CarouselItemDrawInfoImpl,
     clipShape: Shape,
+    isNoPeek: Boolean,
 ): Modifier = this then CarouselItemModifierNodeElement(
     index = index,
     state = state,
     strategy = strategy,
     carouselItemDrawInfo = carouselItemDrawInfo,
-    clipShape = clipShape
+    clipShape = clipShape,
+    isNoPeek = isNoPeek
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -461,6 +470,7 @@ private data class CarouselItemModifierNodeElement(
     val strategy: () -> Strategy,
     val carouselItemDrawInfo: CarouselItemDrawInfoImpl,
     val clipShape: Shape,
+    val isNoPeek: Boolean,
 ) : ModifierNodeElement<CarouselItemModifierNode>() {
     override fun create(): CarouselItemModifierNode {
         return CarouselItemModifierNode(
@@ -468,17 +478,25 @@ private data class CarouselItemModifierNodeElement(
             state = state,
             strategy = strategy,
             carouselItemDrawInfo = carouselItemDrawInfo,
-            clipShape = clipShape
+            clipShape = clipShape,
+            isNoPeek = isNoPeek
         )
     }
 
     override fun update(node: CarouselItemModifierNode) {
+        val needsRelayout = node.index != index ||
+            node.state !== state ||
+            node.strategy !== strategy ||
+            node.isNoPeek != isNoPeek
         node.index = index
         node.state = state
         node.strategy = strategy
         node.carouselItemDrawInfo = carouselItemDrawInfo
         node.clipShape = clipShape
-        node.invalidateMeasurement()
+        node.isNoPeek = isNoPeek
+        if (needsRelayout) {
+            node.invalidateMeasurement()
+        }
     }
 }
 
@@ -489,6 +507,7 @@ private class CarouselItemModifierNode(
     var strategy: () -> Strategy,
     var carouselItemDrawInfo: CarouselItemDrawInfoImpl,
     var clipShape: Shape,
+    var isNoPeek: Boolean,
 ) : Modifier.Node(), LayoutModifierNode {
     override fun MeasureScope.measure(measurable: Measurable, constraints: Constraints): MeasureResult {
         val strategyResult = strategy()
@@ -512,13 +531,18 @@ private class CarouselItemModifierNode(
             }
 
         val placeable = measurable.measure(itemConstraints)
-        val itemZIndex =
-            if (index == state.pagerState.currentPage) 1f
-            else if (index == 0) 0f
-            else 1f / index.toFloat()
+        val distanceFromCurrent = abs(index - state.pagerState.currentPage)
+        val itemZIndex = 1f / (1f + distanceFromCurrent.toFloat())
 
         return layout(placeable.width, placeable.height) {
             placeable.placeWithLayer(0, 0, zIndex = itemZIndex) {
+                if (isNoPeek) {
+                    // NO_PEEK items fill available space edge-to-edge without keyline masking or translation.
+                    clip = true
+                    shape = clipShape
+                    return@placeWithLayer
+                }
+
                 // --- keylines e interpolación
                 val scrollOffset = calculateCurrentScrollOffset(state, strategyResult)
                 val maxScrollOffset = calculateMaxScrollOffset(state, strategyResult)

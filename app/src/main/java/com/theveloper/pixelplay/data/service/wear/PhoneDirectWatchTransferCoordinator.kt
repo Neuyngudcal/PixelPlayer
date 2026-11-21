@@ -3,11 +3,9 @@ package com.theveloper.pixelplay.data.service.wear
 import android.app.Application
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import android.graphics.Color
 import android.media.MediaMetadataRetriever
 import android.os.Build
 import androidx.compose.material3.dynamicDarkColorScheme
-import androidx.core.graphics.get
 import androidx.core.net.toUri
 import com.theveloper.pixelplay.data.gdrive.GDriveStreamProxy
 import com.google.android.gms.wearable.Wearable
@@ -15,7 +13,6 @@ import com.theveloper.pixelplay.data.model.Song
 import com.theveloper.pixelplay.data.navidrome.NavidromeStreamProxy
 import com.theveloper.pixelplay.data.netease.NeteaseStreamProxy
 import com.theveloper.pixelplay.data.preferences.AlbumArtPaletteStyle
-import com.theveloper.pixelplay.data.preferences.AlbumArtColorAccuracy
 import com.theveloper.pixelplay.data.preferences.ThemePreferencesRepository
 import com.theveloper.pixelplay.data.preferences.ThemePreference
 import com.theveloper.pixelplay.data.qqmusic.QqMusicStreamProxy
@@ -28,6 +25,8 @@ import com.theveloper.pixelplay.shared.WearThemePalette
 import com.theveloper.pixelplay.shared.WearTransferMetadata
 import com.theveloper.pixelplay.shared.WearTransferProgress
 import com.theveloper.pixelplay.shared.WearTransferRequest
+import com.theveloper.pixelplay.ui.theme.SystemContrastObserver
+import com.theveloper.pixelplay.ui.theme.extractSeedColorArgb
 import com.theveloper.pixelplay.utils.AlbumArtUtils
 import javax.inject.Singleton
 import java.io.ByteArrayOutputStream
@@ -58,6 +57,7 @@ class PhoneDirectWatchTransferCoordinator @Inject constructor(
     private val musicRepository: MusicRepository,
     private val themePreferencesRepository: ThemePreferencesRepository,
     private val colorSchemeProcessor: ColorSchemeProcessor,
+    private val systemContrastObserver: SystemContrastObserver,
     private val transferStateStore: PhoneWatchTransferStateStore,
     private val transferCancellationStore: PhoneWatchTransferCancellationStore,
     private val telegramRepository: TelegramRepository,
@@ -492,14 +492,24 @@ class PhoneDirectWatchTransferCoordinator @Inject constructor(
         )
     }
 
-    private fun resolvePaletteSeedArgb(song: Song): Int? {
+    private suspend fun resolvePaletteSeedArgb(song: Song): Int? {
         if (song.albumId > 0L) {
             albumPaletteSeedCache[song.albumId]?.let { return it }
         }
 
+        val artUriString = song.albumArtUriString?.takeIf { it.isNotBlank() }
+        if (artUriString != null) {
+            colorSchemeProcessor.getOrExtractSeedColor(artUriString)?.also { seed ->
+                if (song.albumId > 0L) {
+                    albumPaletteSeedCache[song.albumId] = seed
+                }
+                return seed
+            }
+        }
+
         val bitmap = loadSongAlbumArtBitmap(song) ?: return null
         return try {
-            extractSeedColorArgb(bitmap)?.also { seed ->
+            extractSeedColorArgb(bitmap).also { seed ->
                 if (song.albumId > 0L) {
                     albumPaletteSeedCache[song.albumId] = seed
                 }
@@ -541,18 +551,16 @@ class PhoneDirectWatchTransferCoordinator @Inject constructor(
             return buildWearThemePalette(dynamicDarkColorScheme(application))
         }
 
+        val paletteStyle = themePreferencesRepository.albumArtPaletteStyleFlow.first()
+        val effectiveContrast = themePreferencesRepository.themeContrastLevelFlow.first()
+            .resolve(systemContrastObserver.currentContrast())
+
         val artUriString = song.albumArtUriString?.takeIf { it.isNotBlank() }
         if (artUriString != null) {
-            val paletteStyle = AlbumArtPaletteStyle.fromStorageKey(
-                themePreferencesRepository.albumArtPaletteStyleFlow.first().storageKey
-            )
-            val colorAccuracyLevel = AlbumArtColorAccuracy.clamp(
-                themePreferencesRepository.albumArtColorAccuracyFlow.first()
-            )
             val schemePair = colorSchemeProcessor.getOrGenerateColorScheme(
                 albumArtUri = artUriString,
                 paletteStyle = paletteStyle,
-                colorAccuracyLevel = colorAccuracyLevel
+                contrastLevel = effectiveContrast
             )
             if (schemePair != null) {
                 return buildWearThemePalette(schemePair.dark)
@@ -561,7 +569,11 @@ class PhoneDirectWatchTransferCoordinator @Inject constructor(
 
         val fallbackBitmap = loadSongAlbumArtBitmapForTransfer(song) ?: return null
         return try {
-            buildWearThemePalette(fallbackBitmap)
+            buildWearThemePalette(
+                bitmap = fallbackBitmap,
+                paletteStyle = paletteStyle,
+                contrastLevel = effectiveContrast
+            )
         } finally {
             fallbackBitmap.recycle()
         }
@@ -693,44 +705,6 @@ class PhoneDirectWatchTransferCoordinator @Inject constructor(
         } finally {
             runCatching { retriever.release() }
         }
-    }
-
-    private fun extractSeedColorArgb(bitmap: Bitmap): Int? {
-        if (bitmap.width <= 0 || bitmap.height <= 0) return null
-
-        val step = (minOf(bitmap.width, bitmap.height) / 24).coerceAtLeast(1)
-        var redSum = 0L
-        var greenSum = 0L
-        var blueSum = 0L
-        var count = 0L
-
-        var y = 0
-        while (y < bitmap.height) {
-            var x = 0
-            while (x < bitmap.width) {
-                val pixel = bitmap[x, y]
-                if (Color.alpha(pixel) >= 28) {
-                    val red = Color.red(pixel)
-                    val green = Color.green(pixel)
-                    val blue = Color.blue(pixel)
-                    if (red + green + blue > 36) {
-                        redSum += red
-                        greenSum += green
-                        blueSum += blue
-                        count++
-                    }
-                }
-                x += step
-            }
-            y += step
-        }
-
-        if (count == 0L) return null
-        return Color.rgb(
-            (redSum / count).toInt(),
-            (greenSum / count).toInt(),
-            (blueSum / count).toInt(),
-        )
     }
 
     private suspend fun streamFileToWatch(

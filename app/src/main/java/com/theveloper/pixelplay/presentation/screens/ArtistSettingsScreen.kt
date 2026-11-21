@@ -92,6 +92,7 @@ import androidx.navigation.NavController
 import com.theveloper.pixelplay.R
 import com.theveloper.pixelplay.presentation.components.CollapsibleCommonTopBar
 import com.theveloper.pixelplay.presentation.components.ExpressiveTopBarContent
+import com.theveloper.pixelplay.presentation.components.LocalInsideFloatingPane
 import com.theveloper.pixelplay.presentation.viewmodel.ArtistSettingsViewModel
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
@@ -100,14 +101,22 @@ import kotlin.math.roundToInt
 @Composable
 fun ArtistSettingsScreen(
     navController: NavController,
-    viewModel: ArtistSettingsViewModel = hiltViewModel()
+    viewModel: ArtistSettingsViewModel = hiltViewModel(),
+    embeddedInPane: Boolean = false,
+    onOpenDelimiterConfig: (() -> Unit)? = null,
+    onOpenWordDelimiterConfig: (() -> Unit)? = null
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val density = LocalDensity.current
     val coroutineScope = rememberCoroutineScope()
     val lazyListState = rememberLazyListState()
 
-    val statusBarHeight = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+    val insideFloatingPane = LocalInsideFloatingPane.current
+    val statusBarHeight = if (embeddedInPane || insideFloatingPane) {
+        0.dp
+    } else {
+        WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+    }
     val minTopBarHeight = 64.dp + statusBarHeight
     val maxTopBarHeight = 180.dp // Adjusted for a less intrusive header
 
@@ -163,16 +172,23 @@ fun ArtistSettingsScreen(
     }
 
     Box(
-        modifier = Modifier
-            .nestedScroll(nestedScrollConnection)
-            .fillMaxSize()
+        modifier = if (embeddedInPane) {
+            Modifier.fillMaxSize()
+        } else {
+            Modifier
+                .nestedScroll(nestedScrollConnection)
+                .fillMaxSize()
+        }
     ) {
         val currentTopBarHeightDp = with(density) { topBarHeight.value.toDp() }
 
         LazyColumn(
             state = lazyListState,
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(top = currentTopBarHeightDp + 8.dp, bottom = 100.dp)
+            contentPadding = PaddingValues(
+                top = if (embeddedInPane) 8.dp else currentTopBarHeightDp + 8.dp,
+                bottom = 100.dp
+            )
         ) {
             // Rescan Required Warning
             item {
@@ -226,7 +242,7 @@ fun ArtistSettingsScreen(
                                 )
                             },
                             onClick = {
-                                navController.navigateSafely("delimiter_config")
+                                onOpenDelimiterConfig?.invoke() ?: navController.navigateSafely("delimiter_config")
                             }
                         )
 
@@ -258,7 +274,7 @@ fun ArtistSettingsScreen(
                                 )
                             },
                             onClick = {
-                                navController.navigateSafely("word_delimiter_config")
+                                onOpenWordDelimiterConfig?.invoke() ?: navController.navigateSafely("word_delimiter_config")
                             }
                         )
 
@@ -331,13 +347,15 @@ fun ArtistSettingsScreen(
                 )
             }
         }
-        CollapsibleCommonTopBar(
-            title = stringResource(R.string.settings_artists_title),
-            collapseFraction = collapseFraction,
-            headerHeight = currentTopBarHeightDp,
-            onBackClick = { navController.popBackStack() },
-            expandedTitleStartPadding = 20.dp
-        )
+        if (!embeddedInPane) {
+            CollapsibleCommonTopBar(
+                title = stringResource(R.string.settings_artists_title),
+                collapseFraction = collapseFraction,
+                headerHeight = currentTopBarHeightDp,
+                onBackClick = { navController.popBackStack() },
+                expandedTitleStartPadding = 20.dp
+            )
+        }
     }
 }
 

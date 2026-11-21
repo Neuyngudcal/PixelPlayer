@@ -31,7 +31,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.AudioFile
-import androidx.compose.material.icons.rounded.Cloud
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.Button
@@ -41,15 +40,12 @@ import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
-import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.LargeExtendedFloatingActionButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -68,7 +64,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -87,7 +82,6 @@ import coil.size.Size
 import com.theveloper.pixelplay.R
 import com.theveloper.pixelplay.data.model.LibraryTabId
 import com.theveloper.pixelplay.data.model.Song
-import com.theveloper.pixelplay.presentation.screens.TabAnimation
 import com.theveloper.pixelplay.presentation.viewmodel.PlayerViewModel
 import com.theveloper.pixelplay.ui.theme.GoogleSansRounded
 import com.theveloper.pixelplay.ui.theme.LocalShowScrollbar
@@ -133,11 +127,9 @@ fun SongPickerContent(
     playerViewModel: PlayerViewModel = hiltViewModel()
 ) {
     val storageFilter by playerViewModel.playlistPickerStorageFilter.collectAsStateWithLifecycle()
-    val hasCloudSongs by playerViewModel.hasCloudSongsFlow.collectAsStateWithLifecycle()
-    val showCloudFilter = hasCloudSongs != false
 
-    LaunchedEffect(hasCloudSongs, storageFilter) {
-        if (hasCloudSongs == false && storageFilter != StorageFilter.OFFLINE) {
+    LaunchedEffect(storageFilter) {
+        if (storageFilter != StorageFilter.OFFLINE) {
             playerViewModel.setPlaylistPickerStorageFilter(StorageFilter.OFFLINE)
         }
     }
@@ -160,112 +152,31 @@ fun SongPickerContent(
             }
         },
         bottomBar = {
-            if (showCloudFilter) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .navigationBarsPadding()
-                        .padding(horizontal = 16.dp, vertical = 16.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+                    .padding(horizontal = 16.dp, vertical = 16.dp)
+            ) {
+                LargeExtendedFloatingActionButton(
+                    onClick = { onConfirm(selectedSongIds.filterValues { it }.keys) },
+                    modifier = Modifier.align(Alignment.CenterEnd),
+                    shape = RoundedCornerShape(20.dp),
+                    containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onTertiaryContainer
                 ) {
-                    val tabs = listOf(
-                        StorageFilter.OFFLINE to R.string.library_storage_filter_offline,
-                        StorageFilter.ONLINE to R.string.library_storage_filter_online
+                    Icon(
+                        Icons.Rounded.Check,
+                        contentDescription = null,
+                        modifier = Modifier.size(28.dp)
                     )
-                    val selectedTabIndex = tabs.indexOfFirst { it.first == storageFilter }.coerceAtLeast(0)
-
-                    PrimaryTabRow(
-                        selectedTabIndex = selectedTabIndex,
-                        modifier = Modifier
-                            .weight(1f)
-                            .clip(CircleShape)
-                            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-                            .padding(5.dp),
-                        containerColor = Color.Transparent,
-                        divider = {},
-                        indicator = {}
-                    ) {
-                        tabs.forEachIndexed { index, (filter, labelRes) ->
-                            TabAnimation(
-                                index = index,
-                                title = stringResource(labelRes),
-                                selectedIndex = selectedTabIndex,
-                                onClick = { playerViewModel.setPlaylistPickerStorageFilter(filter) },
-                                transformOrigin = if (index == 0) TransformOrigin(0f, 0.5f) else TransformOrigin(1f, 0.5f)
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.Center
-                                ) {
-                                    if (filter == StorageFilter.OFFLINE) {
-                                        Icon(
-                                            painter = painterResource(R.drawable.ic_phonef),
-                                            contentDescription = null,
-                                            modifier = Modifier.size(18.dp)
-                                        )
-                                    } else {
-                                        Icon(
-                                            imageVector = Icons.Rounded.Cloud,
-                                            contentDescription = null,
-                                            modifier = Modifier.size(18.dp)
-                                        )
-                                    }
-                                    Spacer(Modifier.width(8.dp))
-                                    Text(
-                                        text = stringResource(labelRes),
-                                        fontFamily = GoogleSansRounded,
-                                        fontWeight = FontWeight.Bold,
-                                        modifier = Modifier.padding(end = 4.dp)
-                                    )
-                                }
-                            }
-                        }
-                    }
-
-                    FilledIconButton(
-                        onClick = { onConfirm(selectedSongIds.filterValues { it }.keys) },
-                        modifier = Modifier.size(56.dp),
-                        shape = RoundedCornerShape(16.dp),
-                        colors = IconButtonDefaults.filledIconButtonColors(
-                            containerColor = MaterialTheme.colorScheme.tertiaryContainer,
-                            contentColor = MaterialTheme.colorScheme.onTertiaryContainer
-                        )
-                    ) {
-                        Icon(
-                            Icons.Rounded.Check,
-                            contentDescription = stringResource(R.string.song_picker_cd_confirm_add_songs),
-                            modifier = Modifier.size(28.dp)
-                        )
-                    }
-                }
-            } else {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .navigationBarsPadding()
-                        .padding(horizontal = 16.dp, vertical = 16.dp)
-                ) {
-                    LargeExtendedFloatingActionButton(
-                        onClick = { onConfirm(selectedSongIds.filterValues { it }.keys) },
-                        modifier = Modifier.align(Alignment.CenterEnd),
-                        shape = RoundedCornerShape(20.dp),
-                        containerColor = MaterialTheme.colorScheme.tertiaryContainer,
-                        contentColor = MaterialTheme.colorScheme.onTertiaryContainer
-                    ) {
-                        Icon(
-                            Icons.Rounded.Check,
-                            contentDescription = null,
-                            modifier = Modifier.size(28.dp)
-                        )
-                        Spacer(Modifier.width(10.dp))
-                        Text(
-                            text = stringResource(R.string.song_picker_action_add),
-                            fontFamily = GoogleSansRounded,
-                            fontWeight = FontWeight.Bold,
-                            style = MaterialTheme.typography.titleMedium
-                        )
-                    }
+                    Spacer(Modifier.width(10.dp))
+                    Text(
+                        text = stringResource(R.string.song_picker_action_add),
+                        fontFamily = GoogleSansRounded,
+                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.titleMedium
+                    )
                 }
             }
         }
@@ -274,7 +185,7 @@ fun SongPickerContent(
             selectedSongIds = selectedSongIds,
             modifier = Modifier.fillMaxSize().padding(top = innerPadding.calculateTopPadding()),
             contentPadding = PaddingValues(
-                bottom = if (showCloudFilter) 120.dp else 128.dp,
+                bottom = 128.dp,
                 top = 8.dp
             ),
             playerViewModel = playerViewModel

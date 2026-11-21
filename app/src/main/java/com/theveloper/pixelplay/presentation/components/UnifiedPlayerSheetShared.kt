@@ -2,6 +2,8 @@
 
 package com.theveloper.pixelplay.presentation.components
 
+import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -51,8 +53,20 @@ import com.theveloper.pixelplay.ui.theme.GoogleSansRounded
 internal val LocalMaterialTheme = compositionLocalOf<ColorScheme> { error("No ColorScheme provided") }
 
 val MiniPlayerHeight = 64.dp
-const val ANIMATION_DURATION_MS = 255
+const val ANIMATION_DURATION_MS = 400 // MotionTokens.DurationMedium4
 val MiniPlayerBottomSpacer = 8.dp
+
+/** Official Material 3 Expressive Easing Tokens (MotionTokens) */
+val M3ExpressiveEmphasizedEasing = androidx.compose.animation.core.CubicBezierEasing(0.2f, 0.0f, 0.0f, 1.0f)
+val M3ExpressiveDecelerateEasing = androidx.compose.animation.core.CubicBezierEasing(0.05f, 0.7f, 0.1f, 1.0f)
+val M3ExpressiveAccelerateEasing = androidx.compose.animation.core.CubicBezierEasing(0.3f, 0.0f, 0.8f, 0.15f)
+
+fun <T> m3ExpressiveSpatialSpec(
+    durationMillis: Int = ANIMATION_DURATION_MS
+): androidx.compose.animation.core.TweenSpec<T> = androidx.compose.animation.core.tween(
+    durationMillis = durationMillis,
+    easing = M3ExpressiveEmphasizedEasing
+)
 
 @Composable
 fun getNavigationBarHeight(): Dp {

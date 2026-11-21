@@ -244,14 +244,6 @@
     <string name="settings_palette_style_expressive_desc">Cambios de tono y contraste marcados.</string>
     <string name="settings_palette_style_fruit_salad">Ensalada de frutas</string>
     <string name="settings_palette_style_fruit_salad_desc">Acentos juguetones y rotados.</string>
-    <string name="settings_palette_style_color_accuracy_title">Precisión del color</string>
-    <string name="settings_palette_style_color_accuracy_subtitle">0 mantiene el ajuste actual. Valores más altos se acercan más al tono dominante de la carátula.</string>
-    <string name="settings_palette_style_accuracy_current">Actual</string>
-    <string name="settings_palette_style_accuracy_more_accurate">Más preciso</string>
-    <string name="settings_palette_style_accuracy_summary_current">0 • Actual</string>
-    <string name="settings_palette_style_accuracy_summary_subtle">%1$d • Sutil</string>
-    <string name="settings_palette_style_accuracy_summary_balanced">%1$d • Equilibrado</string>
-    <string name="settings_palette_style_accuracy_summary_precise">%1$d • Preciso</string>
 
     <!-- NavBarCornerRadiusScreen -->
     <string name="navbar_adjust_title">Ajustar radio de esquinas</string>

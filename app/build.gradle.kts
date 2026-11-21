@@ -2,6 +2,7 @@ import java.io.File
 import java.util.Properties
 import javax.inject.Inject
 import org.gradle.api.DefaultTask
+import org.gradle.api.GradleException
 import org.gradle.api.file.DirectoryProperty
 import org.gradle.api.file.FileSystemOperations
 import org.gradle.api.file.RegularFileProperty
@@ -110,20 +111,52 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-        val telegramApiId = localProperties.getProperty("TELEGRAM_API_ID")?.ifEmpty { null }
-            ?: "2040"
-        val telegramApiHash = localProperties.getProperty("TELEGRAM_API_HASH")?.ifEmpty { null }
-            ?: "b18441a1ff607e10a989891a5462e627"
-        buildConfigField("int", "TELEGRAM_API_ID", telegramApiId)
-        buildConfigField("String", "TELEGRAM_API_HASH", "\"$telegramApiHash\"")
+        val telegramApiIdRaw = localProperties.getProperty("TELEGRAM_API_ID")?.trim()?.takeIf { it.isNotEmpty() }
+            ?: providers.gradleProperty("TELEGRAM_API_ID").orNull?.trim()?.takeIf { it.isNotEmpty() }
+            ?: providers.environmentVariable("TELEGRAM_API_ID").orNull?.trim()?.takeIf { it.isNotEmpty() }
+        val telegramApiId = telegramApiIdRaw?.toIntOrNull() ?: 0
+        val telegramApiHash = localProperties.getProperty("TELEGRAM_API_HASH")?.trim()?.takeIf { it.isNotEmpty() }
+            ?: providers.gradleProperty("TELEGRAM_API_HASH").orNull?.trim()?.takeIf { it.isNotEmpty() }
+            ?: providers.environmentVariable("TELEGRAM_API_HASH").orNull?.trim()?.takeIf { it.isNotEmpty() }
+            ?: ""
+        val escapedTelegramApiHash = telegramApiHash.replace("\\", "\\\\").replace("\"", "\\\"")
+        buildConfigField("int", "TELEGRAM_API_ID", telegramApiId.toString())
+        buildConfigField("String", "TELEGRAM_API_HASH", "\"$escapedTelegramApiHash\"")
     }
 
-    signingConfigs {
-        create("release") {
-            storeFile = file("$rootDir/vz-pixelplay.jks")
-            storePassword = keystoreProperties.getProperty("storePassword") ?: "dummyPassword"
-            keyAlias = keystoreProperties.getProperty("keyAlias") ?: "dummyAlias"
-            keyPassword = keystoreProperties.getProperty("keyPassword") ?: "dummyPassword"
+    val releaseStorePath = keystoreProperties.getProperty("storeFile")?.trim()?.takeIf { it.isNotEmpty() }
+        ?: providers.gradleProperty("KEYSTORE_FILE").orNull?.trim()?.takeIf { it.isNotEmpty() }
+        ?: providers.environmentVariable("KEYSTORE_FILE").orNull?.trim()?.takeIf { it.isNotEmpty() }
+        ?: "$rootDir/vz-pixelplay.jks"
+    val releaseKeystoreFile = file(releaseStorePath)
+    val releaseStorePassword = keystoreProperties.getProperty("storePassword")?.trim()?.takeIf { it.isNotEmpty() }
+        ?: providers.gradleProperty("KEYSTORE_PASSWORD").orNull?.trim()?.takeIf { it.isNotEmpty() }
+        ?: providers.gradleProperty("KEYSTORE_STORE_PASSWORD").orNull?.trim()?.takeIf { it.isNotEmpty() }
+        ?: providers.environmentVariable("KEYSTORE_PASSWORD").orNull?.trim()?.takeIf { it.isNotEmpty() }
+        ?: providers.environmentVariable("KEYSTORE_STORE_PASSWORD").orNull?.trim()?.takeIf { it.isNotEmpty() }
+    val releaseKeyAlias = keystoreProperties.getProperty("keyAlias")?.trim()?.takeIf { it.isNotEmpty() }
+        ?: providers.gradleProperty("KEY_ALIAS").orNull?.trim()?.takeIf { it.isNotEmpty() }
+        ?: providers.gradleProperty("KEYSTORE_KEY_ALIAS").orNull?.trim()?.takeIf { it.isNotEmpty() }
+        ?: providers.environmentVariable("KEY_ALIAS").orNull?.trim()?.takeIf { it.isNotEmpty() }
+        ?: providers.environmentVariable("KEYSTORE_KEY_ALIAS").orNull?.trim()?.takeIf { it.isNotEmpty() }
+    val releaseKeyPassword = keystoreProperties.getProperty("keyPassword")?.trim()?.takeIf { it.isNotEmpty() }
+        ?: providers.gradleProperty("KEY_PASSWORD").orNull?.trim()?.takeIf { it.isNotEmpty() }
+        ?: providers.gradleProperty("KEYSTORE_KEY_PASSWORD").orNull?.trim()?.takeIf { it.isNotEmpty() }
+        ?: providers.environmentVariable("KEY_PASSWORD").orNull?.trim()?.takeIf { it.isNotEmpty() }
+        ?: providers.environmentVariable("KEYSTORE_KEY_PASSWORD").orNull?.trim()?.takeIf { it.isNotEmpty() }
+    val hasReleaseSigningCredentials = releaseKeystoreFile.exists() &&
+        releaseStorePassword != null &&
+        releaseKeyAlias != null &&
+        releaseKeyPassword != null
+
+    if (hasReleaseSigningCredentials) {
+        signingConfigs {
+            create("release") {
+                storeFile = releaseKeystoreFile
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
         }
     }
 
@@ -133,11 +166,8 @@ android {
         }
 
         release {
-            val keystoreFile = file("$rootDir/vz-pixelplay.jks")
-            signingConfig = if (keystoreFile.exists()) {
-                signingConfigs.getByName("release")
-            } else {
-                signingConfigs.getByName("debug")
+            if (hasReleaseSigningCredentials) {
+                signingConfig = signingConfigs.getByName("release")
             }
             isMinifyEnabled = true
             isShrinkResources = true
@@ -171,7 +201,9 @@ android {
     }
 
     lint {
-        checkReleaseBuilds = false
+        checkReleaseBuilds = true
+        abortOnError = true
+        baseline = file("lint-baseline.xml")
     }
 
     splits {
@@ -245,6 +277,7 @@ dependencies {
 
     // AndroidX & Compose
     implementation(libs.androidx.core.ktx)
+    implementation(libs.androidx.documentfile)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.lifecycleprocess)
@@ -254,12 +287,14 @@ dependencies {
     implementation(libs.androidx.ui.graphics)
     implementation(libs.androidx.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
+    implementation(libs.androidx.compose.material3.adaptive)
+    implementation(libs.androidx.compose.material3.adaptive.layout)
+    implementation(libs.androidx.compose.material3.adaptive.navigation)
     implementation(libs.androidx.material.icons.core)
     implementation(libs.androidx.material.icons.extended)
     implementation(libs.androidx.constraintlayout.compose)
     implementation(libs.androidx.foundation)
     implementation(libs.androidx.animation)
-    implementation(libs.androidx.palette.ktx)
     implementation(libs.androidx.core.splashscreen)
     implementation(libs.androidx.ui.text.google.fonts)
     implementation(libs.material)
@@ -328,6 +363,7 @@ dependencies {
     implementation(libs.timber)
     implementation(libs.generativeai)
     implementation(libs.llamacpp.kotlin)
+    implementation(libs.mlkit.genai.prompt)
     implementation(libs.smooth.corner.rect.android.compose)
     implementation(libs.reorderables)
     implementation(libs.codeview)
@@ -401,4 +437,51 @@ dependencies {
 
 tasks.withType<Test> {
     useJUnitPlatform()
+}
+
+gradle.taskGraph.whenReady {
+    val releasePackageTasks = setOf(
+        "${project.path}:assembleRelease",
+        "${project.path}:bundleRelease",
+        "${project.path}:packageRelease",
+        "${project.path}:packageReleaseBundle"
+    )
+    if (allTasks.any { it.path in releasePackageTasks }) {
+        val keystoreProps = Properties().apply {
+            val propFile = rootProject.file("keystore.properties")
+            if (propFile.exists()) propFile.inputStream().use { load(it) }
+        }
+        val localProps = Properties().apply {
+            val propFile = rootProject.file("local.properties")
+            if (propFile.exists()) propFile.inputStream().use { load(it) }
+        }
+        val storePath = keystoreProps.getProperty("storeFile")?.trim()?.takeIf { it.isNotEmpty() }
+            ?: providers.gradleProperty("KEYSTORE_FILE").orNull?.trim()?.takeIf { it.isNotEmpty() }
+            ?: providers.environmentVariable("KEYSTORE_FILE").orNull?.trim()?.takeIf { it.isNotEmpty() }
+            ?: "$rootDir/vz-pixelplay.jks"
+        val keystoreFile = file(storePath)
+        val hasStorePassword = !keystoreProps.getProperty("storePassword").isNullOrBlank() ||
+            !providers.gradleProperty("KEYSTORE_PASSWORD").orNull.isNullOrBlank() ||
+            !providers.gradleProperty("KEYSTORE_STORE_PASSWORD").orNull.isNullOrBlank() ||
+            !providers.environmentVariable("KEYSTORE_PASSWORD").orNull.isNullOrBlank() ||
+            !providers.environmentVariable("KEYSTORE_STORE_PASSWORD").orNull.isNullOrBlank()
+        val hasKeyAlias = !keystoreProps.getProperty("keyAlias").isNullOrBlank() ||
+            !providers.gradleProperty("KEY_ALIAS").orNull.isNullOrBlank() ||
+            !providers.gradleProperty("KEYSTORE_KEY_ALIAS").orNull.isNullOrBlank() ||
+            !providers.environmentVariable("KEY_ALIAS").orNull.isNullOrBlank() ||
+            !providers.environmentVariable("KEYSTORE_KEY_ALIAS").orNull.isNullOrBlank()
+        val hasKeyPassword = !keystoreProps.getProperty("keyPassword").isNullOrBlank() ||
+            !providers.gradleProperty("KEY_PASSWORD").orNull.isNullOrBlank() ||
+            !providers.gradleProperty("KEYSTORE_KEY_PASSWORD").orNull.isNullOrBlank() ||
+            !providers.environmentVariable("KEY_PASSWORD").orNull.isNullOrBlank() ||
+            !providers.environmentVariable("KEYSTORE_KEY_PASSWORD").orNull.isNullOrBlank()
+
+        if (!keystoreFile.exists() || !hasStorePassword || !hasKeyAlias || !hasKeyPassword) {
+            throw GradleException(
+                "Release build requires release keystore and signing credentials " +
+                    "(keystore.properties or KEYSTORE_PASSWORD/KEY_ALIAS/KEY_PASSWORD). " +
+                    "Unsigned or debug-signed release builds are disallowed."
+            )
+        }
+    }
 }

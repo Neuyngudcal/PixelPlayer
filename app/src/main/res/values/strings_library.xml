@@ -39,6 +39,7 @@
     <string name="library_sort_toggle_playlist_view">Playlist View</string>
     <string name="library_view_mode_grid">Grid</string>
     <string name="library_view_mode_list">List</string>
+    <string name="library_view_mode_album_view">Album View</string>
     <string name="library_storage_internal">Internal</string>
     <string name="library_storage_sd_card">SD Card</string>
     <string name="library_storage_sd_card_unavailable">SD card is not available right now.</string>
@@ -74,6 +75,9 @@
     <string name="library_storage_filter_online">CLOUD</string>
     <string name="library_storage_filter_offline">LOCAL</string>
     <string name="library_cd_sort_options">Sort options</string>
+    <string name="library_cd_switch_to_grid_view">Switch to grid view</string>
+    <string name="library_cd_switch_to_list_view">Switch to list view</string>
+    <string name="library_cd_switch_to_album_view">Switch to album view</string>
 
     <!-- Library selection action row -->
     <string name="library_selection_all">All</string>

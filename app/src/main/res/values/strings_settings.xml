@@ -204,6 +204,7 @@
     <string name="settings_auto_rotate_patterns_title">Auto-Rotate Patterns</string>
     <string name="settings_auto_rotate_patterns_subtitle">Cycle through collage patterns each time you visit Home.</string>
     <string name="settings_navigation_bar_section">Navigation Bar</string>
+    <string name="settings_navbar_tablet_note">These options customize the bottom navigation bar used on phones and compact window sizes.</string>
     <string name="settings_navbar_style_title">NavBar Style</string>
     <string name="settings_navbar_style_subtitle">Choose the appearance for the navigation bar.</string>
     <string name="settings_navbar_style_default">Default</string>
@@ -235,7 +236,11 @@
     <!-- Palette style -->
     <string name="settings_palette_screen_title">Colors</string>
     <string name="settings_palette_style_title">Palette style</string>
-    <string name="settings_palette_style_subtitle">Choose the album colors for the player UI.</string>
+    <string name="settings_palette_style_subtitle">Choose the Material You palette variant for album art themes.</string>
+    <string name="settings_palette_style_content">Content</string>
+    <string name="settings_palette_style_content_desc">True to album art with harmonious accents (Google Media standard).</string>
+    <string name="settings_palette_style_fidelity">Fidelity</string>
+    <string name="settings_palette_style_fidelity_desc">Exact artwork hue and chroma with complementary highlights.</string>
     <string name="settings_palette_style_tonal_spot">Tonal Spot</string>
     <string name="settings_palette_style_tonal_spot_desc">Balanced and calm.</string>
     <string name="settings_palette_style_vibrant">Vibrant</string>
@@ -244,14 +249,17 @@
     <string name="settings_palette_style_expressive_desc">Bold hue shifts and contrast.</string>
     <string name="settings_palette_style_fruit_salad">Fruit Salad</string>
     <string name="settings_palette_style_fruit_salad_desc">Playful rotated accents.</string>
-    <string name="settings_palette_style_color_accuracy_title">Color accuracy</string>
-    <string name="settings_palette_style_color_accuracy_subtitle">0 keeps the current tuning. Higher values stay closer to the album art\'s dominant hue.</string>
-    <string name="settings_palette_style_accuracy_current">Current</string>
-    <string name="settings_palette_style_accuracy_more_accurate">More accurate</string>
-    <string name="settings_palette_style_accuracy_summary_current">0 • Current</string>
-    <string name="settings_palette_style_accuracy_summary_subtle">%1$d • Subtle</string>
-    <string name="settings_palette_style_accuracy_summary_balanced">%1$d • Balanced</string>
-    <string name="settings_palette_style_accuracy_summary_precise">%1$d • Precise</string>
+    <string name="settings_palette_style_monochrome">Monochrome</string>
+    <string name="settings_palette_style_monochrome_desc">Pure grayscale tones with semantic alerts.</string>
+    <string name="settings_palette_style_neutral">Neutral</string>
+    <string name="settings_palette_style_neutral_desc">Subtle, softly tinted minimal palette.</string>
+    <string name="settings_palette_contrast_title">Color contrast</string>
+    <string name="settings_palette_contrast_subtitle">Matches Android system contrast by default, or locks a Material 3 contrast tier.</string>
+    <string name="settings_palette_contrast_system">System</string>
+    <string name="settings_palette_contrast_standard">Standard</string>
+    <string name="settings_palette_contrast_medium">Medium</string>
+    <string name="settings_palette_contrast_high">High</string>
+    <string name="settings_palette_contrast_system_summary">System • %1$s</string>
 
     <!-- NavBarCornerRadiusScreen -->
     <string name="navbar_adjust_title">Adjust Corner Radius</string>
@@ -284,8 +292,8 @@
     <string name="settings_crossfade_title">Crossfade</string>
     <string name="settings_crossfade_subtitle">Enable smooth transition between songs.</string>
     <string name="settings_crossfade_duration_title">Crossfade Duration</string>
-    <string name="settings_hifi_mode_title">Hi-Fi Mode</string>
-    <string name="settings_hifi_mode_supported_subtitle">Float 32-bit audio output. Disable if playback stutters on your device.</string>
+    <string name="settings_hifi_mode_title">Hi-Res Output (Hi-Fi Mode)</string>
+    <string name="settings_hifi_mode_supported_subtitle">When enabled, uses 32-bit float Hi-Res decoding for supported tracks above 1000 kbps and automatically switches to 16-bit PCM for other tracks. When disabled, 16-bit PCM is used for all tracks.</string>
     <string name="settings_hifi_mode_unsupported_subtitle">Not supported on this device (PCM_FLOAT AudioTrack unavailable).</string>
     <string name="settings_persistent_shuffle_title">Persistent Shuffle</string>
     <string name="settings_persistent_shuffle_subtitle">Remember shuffle setting even after closing the app.</string>
@@ -655,4 +663,18 @@
     <string name="settings_volume_section">Volume</string>
     <string name="settings_pause_on_volume_zero">Pause when volume reaches zero</string>
     <string name="settings_pause_on_volume_zero_desc">Automatically pause playback when the volume is set to 0</string>
+
+    <!-- Adaptive Tablet Navigation & Settings 2-Pane -->
+    <string name="nav_rail_expand">Expand navigation rail</string>
+    <string name="nav_rail_collapse">Collapse navigation rail</string>
+    <string name="settings_search_placeholder">Search settings</string>
+    <string name="settings_search_no_results">No matching settings found</string>
+    <string name="settings_search_no_results_hint">Try a different keyword or browse categories.</string>
+    <string name="settings_pane_expand_fullscreen">Expand detail view</string>
+    <string name="settings_pane_restore_split">Show settings menu</string>
+    <string name="settings_pane_resize_handle">Resize settings panes</string>
+    <string name="settings_group_library_appearance">Music &amp; Appearance</string>
+    <string name="settings_group_audio_interaction">Audio &amp; Interaction</string>
+    <string name="settings_group_intelligence_data">Smart Features &amp; Data</string>
+    <string name="settings_group_system_info">System &amp; Info</string>
 </resources>

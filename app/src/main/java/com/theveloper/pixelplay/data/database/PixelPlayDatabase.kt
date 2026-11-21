@@ -36,7 +36,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         AiCacheEntity::class,
         AiUsageEntity::class
     ],
-    version = 42,
+    version = 43,
     exportSchema = true
 )
 abstract class PixelPlayDatabase : RoomDatabase() {
@@ -744,6 +744,22 @@ abstract class PixelPlayDatabase : RoomDatabase() {
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_navidrome_songs_navidrome_id ON navidrome_songs(navidrome_id)")
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_navidrome_songs_playlist_id ON navidrome_songs(playlist_id)")
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_navidrome_songs_playlist_id_date_added ON navidrome_songs(playlist_id, date_added)")
+            }
+        }
+
+        val MIGRATION_42_43 = object : Migration(42, 43) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("DROP TABLE IF EXISTS album_art_themes")
+                db.execSQL(
+                    """
+                        CREATE TABLE IF NOT EXISTS album_art_themes (
+                            albumArtUriString TEXT NOT NULL,
+                            seedColorArgb INTEGER NOT NULL,
+                            algorithmVersion INTEGER NOT NULL,
+                            PRIMARY KEY(albumArtUriString)
+                        )
+                    """.trimIndent()
+                )
             }
         }
 

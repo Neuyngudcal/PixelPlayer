@@ -286,6 +286,54 @@ fun rememberTrailingCascadeWaveOffset(
 }
 
 /**
+ * Bucketed overload of [rememberTrailingCascadeWaveOffset] that depends only on [isPastLine] and
+ * [clampedDistanceFromCurrent] (`0..4`) so distant lyric rows skip recomposition when focus advances.
+ */
+@Composable
+fun rememberTrailingCascadeWaveOffset(
+    isPastLine: Boolean,
+    clampedDistanceFromCurrent: Int,
+    maxWaveDisplacementDp: Dp = 2.5.dp
+): Float {
+    val waveAnim = remember { Animatable(0f) }
+    var previousDistance by remember { mutableStateOf(clampedDistanceFromCurrent) }
+    var wasPast by remember { mutableStateOf(isPastLine) }
+    val density = LocalDensity.current
+    val maxDisplacementPx = with(density) { maxWaveDisplacementDp.toPx() }
+
+    LaunchedEffect(isPastLine, clampedDistanceFromCurrent) {
+        val prevDist = previousDistance
+        val prevPast = wasPast
+        previousDistance = clampedDistanceFromCurrent
+        wasPast = isPastLine
+        if (isPastLine || prevPast) {
+            return@LaunchedEffect
+        }
+        val delta = prevDist - clampedDistanceFromCurrent
+        if (delta !in 1..4 || clampedDistanceFromCurrent !in 0..3) {
+            return@LaunchedEffect
+        }
+        val rowsAfterFocus = clampedDistanceFromCurrent
+        // Phase delay of 32ms per row below the active line
+        val delayMs = rowsAfterFocus * 32L
+        val amplitudeScale = (1f - rowsAfterFocus * 0.12f).coerceIn(0.25f, 1f)
+        if (delayMs > 0L) {
+            delay(delayMs)
+        }
+        waveAnim.snapTo(maxDisplacementPx * amplitudeScale)
+        waveAnim.animateTo(
+            targetValue = 0f,
+            animationSpec = spring(
+                dampingRatio = 0.78f,
+                stiffness = Spring.StiffnessMediumLow
+            )
+        )
+    }
+
+    return waveAnim.value
+}
+
+/**
  * Port of Mornye's `_SweepingWordSpan` (`lib/widgets/player_lyrics_word_sweep.dart`).
  * Renders a word with:
  * - Soft-edge horizontal gradient wipe from left to right (`feather = clamp(width * 0.3, 4dp, 16dp)`)

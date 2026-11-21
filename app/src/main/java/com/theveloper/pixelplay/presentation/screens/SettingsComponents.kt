@@ -74,6 +74,12 @@ import com.theveloper.pixelplay.R
 import com.theveloper.pixelplay.data.ai.GeminiModel
 import com.theveloper.pixelplay.data.worker.SyncProgress
 import com.theveloper.pixelplay.presentation.viewmodel.LyricsRefreshProgress
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.MotionScheme
+import androidx.compose.ui.graphics.Shape
+import com.theveloper.pixelplay.ui.theme.LocalSpacing
+import com.theveloper.pixelplay.ui.theme.PixelPlayGroupShapes
 import com.theveloper.pixelplay.ui.theme.GoogleSansRounded
 import androidx.compose.ui.res.vectorResource
 import androidx.compose.ui.unit.sp
@@ -82,21 +88,60 @@ import com.theveloper.pixelplay.presentation.components.subcomps.TightWrapText
 import com.theveloper.pixelplay.presentation.utils.LocalAppHapticsConfig
 import com.theveloper.pixelplay.presentation.utils.performAppCompatHapticFeedback
 
+/**
+ * Standardized Material 3 Expressive section header for Settings screens.
+ */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+fun SettingsSectionHeader(
+    title: String,
+    modifier: Modifier = Modifier
+) {
+    val spacing = LocalSpacing.current
+    Text(
+        text = title,
+        style = MaterialTheme.typography.labelLargeEmphasized,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = modifier.padding(
+            start = spacing.lg,
+            top = spacing.xl,
+            bottom = spacing.sm
+        )
+    )
+}
+
+/**
+ * Unified rounded group container: clips outer corners to 20dp while stacking inner items with 2dp
+ * separation and 4dp inner corners (matching Samsung grouped structure with M3 Expressive tokens).
+ */
+@Composable
+fun SettingsGroupCard(
+    modifier: Modifier = Modifier,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    val spacing = LocalSpacing.current
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(PixelPlayGroupShapes.GroupOuterRadius))
+            .background(Color.Transparent),
+        verticalArrangement = Arrangement.spacedBy(spacing.groupItemGap),
+        content = content
+    )
+}
+
 @Composable
 fun SettingsSection(title: String, icon: @Composable () -> Unit, content: @Composable () -> Unit) {
-    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-        Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.padding(vertical = 8.dp)
-        ) {
-            Spacer(modifier = Modifier.width(12.dp))
-            Text(
-                    text = title,
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary
-            )
-        }
+    val spacing = LocalSpacing.current
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = spacing.lg, vertical = spacing.xs)
+    ) {
+        SettingsSectionHeader(
+            title = title,
+            modifier = Modifier.padding(top = spacing.md)
+        )
         content()
     }
 }
@@ -107,27 +152,33 @@ fun SettingsItem(
         subtitle: String,
         leadingIcon: @Composable () -> Unit,
         trailingIcon: @Composable () -> Unit = {},
+        shape: Shape = RoundedCornerShape(PixelPlayGroupShapes.GroupInnerRadius),
         onClick: () -> Unit
 ) {
+    val spacing = LocalSpacing.current
     Surface(
             color = MaterialTheme.colorScheme.surfaceContainer,
-            modifier =
-                    Modifier.fillMaxWidth()
-                            .clip(RoundedCornerShape(10.dp))
-                            .clickable(onClick = onClick)
+            shape = shape,
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(shape)
+                .clickable(onClick = onClick)
     ) {
         Row(
                 verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.padding(16.dp).fillMaxWidth()
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = spacing.listRowMinHeight)
+                    .padding(horizontal = spacing.listRowHorizontal, vertical = spacing.listRowVertical)
         ) {
             Box(
-                    modifier = Modifier.padding(end = 16.dp).size(24.dp),
+                    modifier = Modifier.padding(end = spacing.iconTextGap).size(24.dp),
                     contentAlignment = Alignment.Center
             ) { leadingIcon() }
 
             Column(
-                    modifier = Modifier.weight(1f).padding(end = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                    modifier = Modifier.weight(1f).padding(end = spacing.sm),
+                    verticalArrangement = Arrangement.spacedBy(spacing.titleSubtitleGap)
             ) {
                 Text(
                         text = title,
@@ -148,6 +199,7 @@ fun SettingsItem(
     }
 }
 
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun SwitchSettingItem(
         title: String,
@@ -155,30 +207,37 @@ fun SwitchSettingItem(
         checked: Boolean,
         onCheckedChange: (Boolean) -> Unit,
         leadingIcon: @Composable (() -> Unit)? = null,
-        enabled: Boolean = true
+        enabled: Boolean = true,
+        shape: Shape = RoundedCornerShape(PixelPlayGroupShapes.GroupInnerRadius)
 ) {
     val view = LocalView.current
     val appHapticsConfig = LocalAppHapticsConfig.current
+    val spacing = LocalSpacing.current
+    val effectsSpec = MaterialTheme.motionScheme.fastEffectsSpec<Float>()
 
     Surface(
             color = MaterialTheme.colorScheme.surfaceContainer,
-            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
+            shape = shape,
+            modifier = Modifier.fillMaxWidth().clip(shape)
     ) {
         Row(
                 verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.padding(16.dp).fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = spacing.listRowMinHeight)
+                    .padding(horizontal = spacing.listRowHorizontal, vertical = spacing.listRowVertical),
+                horizontalArrangement = Arrangement.spacedBy(spacing.md)
         ) {
             if (leadingIcon != null) {
                 Box(
-                        modifier = Modifier.padding(end = 4.dp).size(24.dp),
+                        modifier = Modifier.padding(end = spacing.xs).size(24.dp),
                         contentAlignment = Alignment.Center
                 ) { leadingIcon() }
             }
 
             Column(
                     modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                    verticalArrangement = Arrangement.spacedBy(spacing.titleSubtitleGap)
             ) {
                 Text(
                         text = title,
@@ -212,7 +271,9 @@ fun SwitchSettingItem(
                 thumbContent = {
                     AnimatedContent(
                         targetState = checked,
-                        transitionSpec = { fadeIn(tween(100)) togetherWith fadeOut(tween(100)) },
+                        transitionSpec = {
+                            fadeIn(effectsSpec) togetherWith fadeOut(effectsSpec)
+                        },
                         label = "switch_thumb_icon"
                     ) { isChecked ->
                         Icon(
@@ -235,7 +296,7 @@ fun SwitchSettingItem(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun ThemeSelectorItem(
         label: String,
@@ -243,55 +304,64 @@ fun ThemeSelectorItem(
         options: Map<String, String>,
         selectedKey: String,
         onSelectionChanged: (String) -> Unit,
-        leadingIcon: @Composable () -> Unit
+        leadingIcon: @Composable () -> Unit,
+        shape: Shape = RoundedCornerShape(PixelPlayGroupShapes.GroupInnerRadius)
 ) {
     var showSheet by remember { mutableStateOf(false) }
     val selectedOption = options[selectedKey] ?: selectedKey
+    val spacing = LocalSpacing.current
 
     Surface(
             color = MaterialTheme.colorScheme.surfaceContainer,
+            shape = shape,
             modifier =
-                    Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable {
+                    Modifier.fillMaxWidth().clip(shape).clickable {
                         showSheet = true
                     }
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = spacing.listRowMinHeight)
+                .padding(horizontal = spacing.listRowHorizontal, vertical = spacing.listRowVertical)
+        ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Box(
-                    modifier = Modifier.padding(end = 16.dp).size(24.dp),
+                    modifier = Modifier.padding(end = spacing.iconTextGap).size(24.dp),
                         contentAlignment = Alignment.Center
                 ) { leadingIcon() }
 
-                Column(modifier = Modifier.weight(1f)) {
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(spacing.titleSubtitleGap)
+                ) {
                     Text(
                         text = label,
                         style = MaterialTheme.typography.titleMedium,
                         color = MaterialTheme.colorScheme.onSurface
                     )
-                    Spacer(modifier = Modifier.height(6.dp))
                     Text(
                         text = description,
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    
-                    Spacer(modifier = Modifier.height(10.dp))
-                    
+
+                    Spacer(modifier = Modifier.height(spacing.sm))
+
                     // Selected Value Badge
                     Surface(
                         color = MaterialTheme.colorScheme.surfaceContainerLowest,
-                        shape = androidx.compose.foundation.shape.CircleShape,
+                        shape = CircleShape,
                         modifier = Modifier.align(Alignment.Start)
                     ) {
                         Text(
                              text = selectedOption,
-                             style = MaterialTheme.typography.labelMedium,
+                             style = MaterialTheme.typography.labelMediumEmphasized,
                              color = MaterialTheme.colorScheme.primary,
-                             fontWeight = FontWeight.Bold,
-                             modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                             modifier = Modifier.padding(horizontal = spacing.md, vertical = 6.dp)
                         )
                     }
                 }
@@ -300,53 +370,55 @@ fun ThemeSelectorItem(
     }
 
     if (showSheet) {
-        androidx.compose.material3.ModalBottomSheet(
+        ModalBottomSheet(
             onDismissRequest = { showSheet = false },
             containerColor = MaterialTheme.colorScheme.surface,
             contentColor = MaterialTheme.colorScheme.onSurface
         ) {
-            Column(modifier = Modifier.padding(bottom = 24.dp)) {
+            Column(modifier = Modifier.padding(bottom = spacing.xxl)) {
                 Text(
                     text = label,
-                    style = MaterialTheme.typography.headlineSmall, // Larger header
-                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp),
-                    fontWeight = FontWeight.Bold
+                    style = MaterialTheme.typography.headlineSmallEmphasized,
+                    modifier = Modifier.padding(horizontal = spacing.xxl, vertical = spacing.lg)
                 )
-                
+
                 LazyColumn(
                     modifier = Modifier
-                        .padding(horizontal = 16.dp)
+                        .padding(horizontal = spacing.lg)
                         .heightIn(max = 400.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                    verticalArrangement = Arrangement.spacedBy(spacing.sm)
                 ) {
                     items(options.entries.toList()) { (key, optionLabel) ->
                         val isSelected = key == selectedKey
                         val containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainer
                         val contentColor = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
-                        
+
                         Surface(
                             onClick = {
                                 onSelectionChanged(key)
                                 showSheet = false
                             },
-                            shape = RoundedCornerShape(24.dp),
+                            shape = RoundedCornerShape(PixelPlayGroupShapes.GroupOuterRadius),
                             color = containerColor,
-                            modifier = Modifier.fillMaxWidth().height(72.dp)
+                            modifier = Modifier.fillMaxWidth().heightIn(min = spacing.listRowMinHeight)
                         ) {
                             Row(
                                 modifier = Modifier
                                     .fillMaxSize()
-                                    .padding(horizontal = 24.dp),
+                                    .padding(horizontal = spacing.xl, vertical = spacing.lg),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(
                                     text = optionLabel,
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                    style = if (isSelected) {
+                                        MaterialTheme.typography.titleMediumEmphasized
+                                    } else {
+                                        MaterialTheme.typography.titleMedium
+                                    },
                                     color = contentColor,
                                     modifier = Modifier.weight(1f)
                                 )
-                                
+
                                 if (isSelected) {
                                     Icon(
                                         imageVector = Icons.Rounded.Check,
@@ -370,7 +442,7 @@ fun ExpressiveSettingsGroup(
 ) {
     Column(
         modifier = modifier
-            .clip(RoundedCornerShape(24.dp))
+            .clip(RoundedCornerShape(PixelPlayGroupShapes.GroupOuterRadius))
             .background(Color.Transparent),
     ) {
         content()
@@ -391,38 +463,47 @@ fun SearchableModelSelector(
     var searchQuery by remember { mutableStateOf("") }
     val selectedDisplayName = models.find { it.name == selectedModelName }?.displayName ?: selectedModelName
 
+    val spacing = LocalSpacing.current
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainer,
+        shape = RoundedCornerShape(PixelPlayGroupShapes.GroupInnerRadius),
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
+            .clip(RoundedCornerShape(PixelPlayGroupShapes.GroupInnerRadius))
             .clickable { showSheet = true }
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column(
+            modifier = Modifier.padding(
+                horizontal = spacing.listRowHorizontal,
+                vertical = spacing.listRowVertical
+            )
+        ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Box(
                     modifier = Modifier
-                        .padding(end = 16.dp)
+                        .padding(end = spacing.iconTextGap)
                         .size(24.dp),
                     contentAlignment = Alignment.Center
                 ) { leadingIcon() }
 
-                Column(modifier = Modifier.weight(1f)) {
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(spacing.titleSubtitleGap)
+                ) {
                     Text(
                         text = label,
                         style = MaterialTheme.typography.titleMedium,
                         color = MaterialTheme.colorScheme.onSurface
                     )
-                    Spacer(modifier = Modifier.height(6.dp))
                     Text(
                         text = description,
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    Spacer(modifier = Modifier.height(10.dp))
+                    Spacer(modifier = Modifier.height(spacing.sm))
                     Surface(
                         color = MaterialTheme.colorScheme.surfaceContainerLowest,
                         shape = CircleShape,
@@ -433,7 +514,7 @@ fun SearchableModelSelector(
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.primary,
                             fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                            modifier = Modifier.padding(horizontal = spacing.md, vertical = 6.dp)
                         )
                     }
                 }
@@ -561,11 +642,20 @@ fun SliderSettingsItem(
         onValueChangeFinished: (() -> Unit)? = null,
         valueText: (Float) -> String
 ) {
+    val spacing = LocalSpacing.current
     Surface(
             color = MaterialTheme.colorScheme.surfaceContainer,
-            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
+            shape = RoundedCornerShape(PixelPlayGroupShapes.GroupInnerRadius),
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(PixelPlayGroupShapes.GroupInnerRadius))
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column(
+            modifier = Modifier.padding(
+                horizontal = spacing.listRowHorizontal,
+                vertical = spacing.listRowVertical
+            )
+        ) {
             Row(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     modifier = Modifier.fillMaxWidth()
@@ -576,7 +666,7 @@ fun SliderSettingsItem(
                         style = MaterialTheme.typography.titleMedium,
                         color = MaterialTheme.colorScheme.onSurface
                 )
-                Spacer(modifier = Modifier.width(8.dp))
+                Spacer(modifier = Modifier.width(spacing.sm))
                 Text(
                         text = valueText(value),
                         style = MaterialTheme.typography.bodyMedium,
@@ -605,17 +695,27 @@ fun RefreshLibraryItem(
         onFullSync: () -> Unit,
         onRebuild: () -> Unit
 ) {
+    val spacing = LocalSpacing.current
+    val buttonLineHeight = MaterialTheme.typography.labelLarge.lineHeight
     Surface(
             color = MaterialTheme.colorScheme.surfaceContainer,
-            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
+            shape = RoundedCornerShape(PixelPlayGroupShapes.GroupInnerRadius),
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(PixelPlayGroupShapes.GroupInnerRadius))
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column(
+            modifier = Modifier.padding(
+                horizontal = spacing.listRowHorizontal,
+                vertical = spacing.listRowVertical
+            )
+        ) {
             Row(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.fillMaxWidth()
             ) {
                 Box(
-                        modifier = Modifier.padding(end = 16.dp).size(24.dp),
+                        modifier = Modifier.padding(end = spacing.iconTextGap).size(24.dp),
                         contentAlignment = Alignment.Center
                 ) {
                     Icon(
@@ -626,8 +726,8 @@ fun RefreshLibraryItem(
                 }
 
                 Column(
-                        modifier = Modifier.weight(1f).padding(end = 8.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                        modifier = Modifier.weight(1f).padding(end = spacing.sm),
+                        verticalArrangement = Arrangement.spacedBy(spacing.titleSubtitleGap)
                 ) {
                     Text(
                             text = stringResource(R.string.settings_refresh_library_title),
@@ -642,8 +742,8 @@ fun RefreshLibraryItem(
                 }
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
-            
+            Spacer(modifier = Modifier.height(spacing.md))
+
             // Full Rescan button
             FilledTonalButton(
                     onClick = onFullSync,
@@ -660,18 +760,18 @@ fun RefreshLibraryItem(
                         contentDescription = null,
                         modifier = Modifier.size(18.dp)
                     )
-                    Spacer(modifier = Modifier.width(8.dp))
+                    Spacer(modifier = Modifier.width(spacing.sm))
                     TightWrapText(
                         text = stringResource(R.string.settings_action_full_rescan),
                         overflow = TextOverflow.Ellipsis,
                         maxLines = 2,
-                        lineHeight = 22.sp,
+                        lineHeight = buttonLineHeight,
                     )
                 }
             }
-             
-            Spacer(modifier = Modifier.height(8.dp))
-            
+
+            Spacer(modifier = Modifier.height(spacing.sm))
+
             // Rebuild Database button - full width, destructive action
             OutlinedButton(
                     onClick = onRebuild,
@@ -692,12 +792,12 @@ fun RefreshLibraryItem(
                         contentDescription = null,
                         modifier = Modifier.size(18.dp)
                     )
-                    Spacer(modifier = Modifier.width(8.dp))
+                    Spacer(modifier = Modifier.width(spacing.sm))
                     TightWrapText(
                         text = stringResource(R.string.settings_action_rebuild_database),
                         overflow = TextOverflow.Ellipsis,
                         maxLines = 2,
-                        lineHeight = 22.sp,
+                        lineHeight = buttonLineHeight,
                     )
                 }
             }
@@ -770,25 +870,34 @@ fun ActionSettingsItem(
     onSecondaryAction: (() -> Unit)? = null,
     enabled: Boolean = true
 ) {
+    val spacing = LocalSpacing.current
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainer,
-        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
+        shape = RoundedCornerShape(PixelPlayGroupShapes.GroupInnerRadius),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(PixelPlayGroupShapes.GroupInnerRadius))
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column(
+            modifier = Modifier.padding(
+                horizontal = spacing.listRowHorizontal,
+                vertical = spacing.listRowVertical
+            )
+        ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Box(
-                    modifier = Modifier.padding(end = 16.dp).size(24.dp),
+                    modifier = Modifier.padding(end = spacing.iconTextGap).size(24.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     icon()
                 }
 
                 Column(
-                    modifier = Modifier.weight(1f).padding(end = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                    modifier = Modifier.weight(1f).padding(end = spacing.sm),
+                    verticalArrangement = Arrangement.spacedBy(spacing.titleSubtitleGap)
                 ) {
                     Text(
                         text = title,
@@ -847,11 +956,20 @@ fun AiApiKeyItem(
         }
     }
 
+    val spacing = LocalSpacing.current
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainer,
-        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
+        shape = RoundedCornerShape(PixelPlayGroupShapes.GroupInnerRadius),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(PixelPlayGroupShapes.GroupInnerRadius))
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column(
+            modifier = Modifier.padding(
+                horizontal = spacing.listRowHorizontal,
+                vertical = spacing.listRowVertical
+            )
+        ) {
             Text(
                 text = title,
                 style = MaterialTheme.typography.titleMedium,
@@ -934,11 +1052,20 @@ fun AiSystemPromptItem(
         }
     }
 
+    val spacing = LocalSpacing.current
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainer,
-        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
+        shape = RoundedCornerShape(PixelPlayGroupShapes.GroupInnerRadius),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(PixelPlayGroupShapes.GroupInnerRadius))
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column(
+            modifier = Modifier.padding(
+                horizontal = spacing.listRowHorizontal,
+                vertical = spacing.listRowVertical
+            )
+        ) {
             Text(
                 text = title,
                 style = MaterialTheme.typography.titleMedium,

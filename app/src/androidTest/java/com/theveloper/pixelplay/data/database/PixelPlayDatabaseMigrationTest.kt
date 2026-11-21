@@ -27,18 +27,19 @@ class PixelPlayDatabaseMigrationTest {
     @After
     fun tearDown() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
-        for (version in 25..41) {
+        for (version in 25..42) {
             context.deleteDatabase(databaseNameFor(version))
         }
         context.deleteDatabase(DB_NAME_33_TO_34)
         context.deleteDatabase(DB_NAME_23_TO_24_DRIFTED)
         context.deleteDatabase(DB_NAME_35_TO_36)
         context.deleteDatabase(DB_NAME_39_TO_40)
+        context.deleteDatabase(DB_NAME_42_TO_43)
     }
 
     @Test
     fun migrateEveryExportedSchemaToLatest() {
-        for (startVersion in 25..41) {
+        for (startVersion in 25..42) {
             helper.createDatabase(databaseNameFor(startVersion), startVersion).close()
 
             helper.runMigrationsAndValidate(
@@ -303,8 +304,23 @@ class PixelPlayDatabaseMigrationTest {
         return indexes
     }
 
+    @Test
+    fun migration42To43ReplacesThemeTableWithSeedCache() {
+        helper.createDatabase(DB_NAME_42_TO_43, 42).close()
+
+        helper.runMigrationsAndValidate(
+            DB_NAME_42_TO_43,
+            43,
+            true,
+            PixelPlayDatabase.MIGRATION_42_43
+        ).use { db ->
+            val columns = db.tableColumns("album_art_themes")
+            assertEquals(setOf("albumArtUriString", "seedColorArgb", "algorithmVersion"), columns)
+        }
+    }
+
     private object PixelPlayDatabaseVersion {
-        const val LATEST = 42
+        const val LATEST = 43
     }
 
     companion object {
@@ -312,6 +328,7 @@ class PixelPlayDatabaseMigrationTest {
         private const val DB_NAME_33_TO_34 = "migration-test-33-to-34"
         private const val DB_NAME_35_TO_36 = "migration-test-35-to-36"
         private const val DB_NAME_39_TO_40 = "migration-test-39-to-40"
+        private const val DB_NAME_42_TO_43 = "migration-test-42-to-43"
 
         private val ALL_MIGRATIONS = arrayOf(
             PixelPlayDatabase.MIGRATION_25_26,
@@ -330,7 +347,8 @@ class PixelPlayDatabaseMigrationTest {
             PixelPlayDatabase.MIGRATION_38_39,
             PixelPlayDatabase.MIGRATION_39_40,
             PixelPlayDatabase.MIGRATION_40_41,
-            PixelPlayDatabase.MIGRATION_41_42
+            PixelPlayDatabase.MIGRATION_41_42,
+            PixelPlayDatabase.MIGRATION_42_43
         )
     }
 }

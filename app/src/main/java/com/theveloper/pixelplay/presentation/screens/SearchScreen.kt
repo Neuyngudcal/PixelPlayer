@@ -48,6 +48,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -68,8 +69,10 @@ import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.DockedSearchBar
 import androidx.compose.material3.SearchBarDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.derivedStateOf
@@ -127,11 +130,15 @@ import androidx.media3.common.util.UnstableApi
 import androidx.navigation.NavHostController
 import com.theveloper.pixelplay.R
 import com.theveloper.pixelplay.data.repository.MusicRepository
+import com.theveloper.pixelplay.presentation.components.LocalInsideFloatingPane
 import com.theveloper.pixelplay.presentation.components.MiniPlayerHeight
 import com.theveloper.pixelplay.presentation.components.PlaylistBottomSheet
 import com.theveloper.pixelplay.presentation.components.PlaylistCover
+import com.theveloper.pixelplay.presentation.components.TabletPaneTokens
 import com.theveloper.pixelplay.presentation.components.resolveMainScreenBottomGradientHeight
 import com.theveloper.pixelplay.presentation.components.resolveNavBarOccupiedHeight
+import com.theveloper.pixelplay.presentation.components.resolveTabletPaneBottomMargin
+import com.theveloper.pixelplay.presentation.components.resolveTabletPaneTopMargin
 import com.theveloper.pixelplay.presentation.navigation.Screen
 import com.theveloper.pixelplay.presentation.screens.search.components.GenreCategoriesGrid
 import com.theveloper.pixelplay.presentation.viewmodel.PlaylistViewModel
@@ -167,11 +174,21 @@ fun SearchScreen(
     onSearchBarActiveChange: (Boolean) -> Unit = {}
 ) {
     var searchQuery by rememberSaveable { mutableStateOf(playerViewModel.searchQuery) }
+    val windowInfo = com.theveloper.pixelplay.ui.theme.LocalPixelPlayWindowInfo.current
+    val density = LocalDensity.current
+    val isImeVisible = WindowInsets.ime.getBottom(density) > 0
     val statusBarTopInset = WindowInsets.systemBars.asPaddingValues().calculateTopPadding()
     val systemNavBarInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     val navBarCompactMode by playerViewModel.navBarCompactMode.collectAsStateWithLifecycle()
-    val bottomBarHeightDp = resolveNavBarOccupiedHeight(systemNavBarInset, navBarCompactMode)
-    val bottomGradientHeight = resolveMainScreenBottomGradientHeight(navBarCompactMode)
+    val bottomBarHeightDp = if (windowInfo.useNavigationRail) {
+        0.dp
+    } else {
+        resolveNavBarOccupiedHeight(systemNavBarInset, navBarCompactMode)
+    }
+    val bottomGradientHeight = resolveMainScreenBottomGradientHeight(
+        compactMode = navBarCompactMode,
+        useNavigationRail = windowInfo.useNavigationRail
+    )
     var showPlaylistBottomSheet by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val haptic = LocalHapticFeedback.current
@@ -252,8 +269,8 @@ fun SearchScreen(
     val keyboardController = LocalSoftwareKeyboardController.current
     val searchInputFocusRequester = remember { FocusRequester() }
 
-    LaunchedEffect(Unit) {
-        onSearchBarActiveChange(false)
+    LaunchedEffect(isImeVisible) {
+        onSearchBarActiveChange(isImeVisible)
     }
 
     LaunchedEffect(playerViewModel, keyboardController) {
@@ -315,19 +332,33 @@ fun SearchScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
+            .background(if (windowInfo.useNavigationRail) Color.Transparent else MaterialTheme.colorScheme.background)
     ) {
 
+        val spacing = com.theveloper.pixelplay.ui.theme.LocalSpacing.current
         Column(
             modifier = Modifier.fillMaxSize()
         ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(start = 24.dp, top = statusBarTopInset + 12.dp, end = 24.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalAlignment = Alignment.CenterVertically
+            Box(
+                modifier = Modifier.fillMaxWidth(),
+                contentAlignment = Alignment.Center
             ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .then(if (windowInfo.isTabletLayout) Modifier.widthIn(max = 720.dp) else Modifier)
+                        .padding(
+                            start = if (windowInfo.useNavigationRail) TabletPaneTokens.StartMargin else spacing.screenHorizontal,
+                            top = if (windowInfo.useNavigationRail) {
+                                resolveTabletPaneTopMargin(statusBarTopInset)
+                            } else {
+                                statusBarTopInset + spacing.md
+                            },
+                            end = if (windowInfo.useNavigationRail) TabletPaneTokens.EndMargin else spacing.screenHorizontal
+                        ),
+                    horizontalArrangement = Arrangement.spacedBy(spacing.md),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                 val searchBarInputFieldColors = SearchBarDefaults.inputFieldColors(
                     focusedTextColor = MaterialTheme.colorScheme.onSurface,
                     unfocusedTextColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f),
@@ -411,23 +442,27 @@ fun SearchScreen(
                     )
                 }
 
-                FilledIconButton(
-                    modifier = Modifier.padding(bottom = 2.dp),
-                    colors = IconButtonDefaults.filledIconButtonColors(
-                        containerColor = MaterialTheme.colorScheme.primaryContainer,
-                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer
-                    ),
-                    onClick = { navController.navigateSafely(Screen.Settings.route) }
-                ) {
-                    Icon(
-                        painter = painterResource(R.drawable.rounded_settings_24),
-                        contentDescription = stringResource(R.string.library_cd_open_settings)
-                    )
+                if (!windowInfo.useNavigationRail) {
+                    FilledIconButton(
+                        modifier = Modifier.padding(bottom = 2.dp),
+                        colors = IconButtonDefaults.filledIconButtonColors(
+                            containerColor = MaterialTheme.colorScheme.primaryContainer,
+                            contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                        ),
+                        onClick = { navController.navigateSafely(Screen.Settings.route) }
+                    ) {
+                        Icon(
+                            painter = painterResource(R.drawable.rounded_settings_24),
+                            contentDescription = stringResource(R.string.library_cd_open_settings)
+                        )
+                    }
                 }
+            }
             }
 
             val showGenreBrowse by remember(searchQuery) { derivedStateOf { searchQuery.isBlank() } }
-            AnimatedContent(
+            val searchBodyContent: @Composable () -> Unit = {
+                AnimatedContent(
                 targetState = showGenreBrowse,
                 transitionSpec = {
                     val switchingToGenre = targetState
@@ -671,15 +706,49 @@ fun SearchScreen(
                     }
                 }
             }
+            }
+
+            if (windowInfo.useNavigationRail) {
+                Surface(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .padding(
+                            start = TabletPaneTokens.StartMargin,
+                            top = spacing.md,
+                            end = TabletPaneTokens.EndMargin,
+                            bottom = resolveTabletPaneBottomMargin(systemNavBarInset)
+                        ),
+                    shape = RoundedCornerShape(TabletPaneTokens.CornerRadius),
+                    color = MaterialTheme.colorScheme.surfaceContainerLowest
+                ) {
+                    CompositionLocalProvider(LocalInsideFloatingPane provides true) {
+                        Box(modifier = Modifier.fillMaxSize()) {
+                            searchBodyContent()
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .align(Alignment.BottomCenter)
+                                    .height(bottomGradientHeight)
+                                    .background(brush = bottomGradientBrush)
+                            )
+                        }
+                    }
+                }
+            } else {
+                searchBodyContent()
+            }
         }
 
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .align(Alignment.BottomCenter)
-                .height(bottomGradientHeight)
-                .background(brush = bottomGradientBrush)
-        )
+        if (!windowInfo.useNavigationRail) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .align(Alignment.BottomCenter)
+                    .height(bottomGradientHeight)
+                    .background(brush = bottomGradientBrush)
+            )
+        }
 
 
     }
@@ -1163,7 +1232,12 @@ fun SearchResultsList(
     )
 
     val imePadding = WindowInsets.ime.getBottom(localDensity).dp
-    val systemBarPaddingBottom = WindowInsets.systemBars.asPaddingValues().calculateBottomPadding() + 94.dp
+    val insideFloatingPane = LocalInsideFloatingPane.current
+    val systemBarPaddingBottom = if (insideFloatingPane) {
+        28.dp
+    } else {
+        WindowInsets.systemBars.asPaddingValues().calculateBottomPadding() + 94.dp
+    }
 
     LazyColumn(
         modifier = Modifier

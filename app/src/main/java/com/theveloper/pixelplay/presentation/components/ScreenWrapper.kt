@@ -35,6 +35,8 @@ import androidx.media3.common.util.UnstableApi
 import androidx.navigation.compose.currentBackStackEntryAsState
 import com.theveloper.pixelplay.presentation.viewmodel.PlayerViewModel
 import com.theveloper.pixelplay.presentation.navigation.isMainRootRoute
+import com.theveloper.pixelplay.ui.theme.LocalPixelPlayWindowInfo
+import com.theveloper.pixelplay.ui.theme.PixelPlayStatusBarStyle
 import androidx.lifecycle.compose.currentStateAsState
 
 
@@ -45,6 +47,7 @@ fun ScreenWrapper(
     playerViewModel: PlayerViewModel,
     modifier: Modifier = Modifier,
     animatedVisibilityScope: AnimatedVisibilityScope? = null,
+    wrapInTabletFloatingPane: Boolean = false,
     content: @Composable () -> Unit
 ) {
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -74,11 +77,14 @@ fun ScreenWrapper(
 
     val syncVisibleEntries = navController.visibleEntries.collectAsState().value.also { _ -> visibleEntriesState }
 
+    val useNavigationRail = LocalPixelPlayWindowInfo.current.useNavigationRail
     val myEntry = lifecycleOwner as? androidx.navigation.NavBackStackEntry
     val myRoute = myEntry?.destination?.route
-    val isMainRootScreen = isMainRootRoute(myRoute)
+    val isMainRootScreen = isMainRootRoute(myRoute, useNavigationRail = useNavigationRail)
     val hasVisibleNonMainRootScreen = syncVisibleEntries.any { entry ->
-        entry.destination.route?.let { route -> !isMainRootRoute(route) } == true
+        entry.destination.route?.let { route ->
+            !isMainRootRoute(route, useNavigationRail = useNavigationRail)
+        } == true
     }
     val shouldRunDepthEffects = !isMainRootScreen || hasVisibleNonMainRootScreen
 
@@ -175,6 +181,10 @@ fun ScreenWrapper(
         fallbackBlurRadius.value.dp
     }
 
+    if (useNavigationRail) {
+        PixelPlayStatusBarStyle(color = MaterialTheme.colorScheme.surfaceContainerLow)
+    }
+
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -199,9 +209,21 @@ fun ScreenWrapper(
                 }
             }
             .blur(radius = if (shouldRunDepthEffects) animatedBlurRadius else 0.dp)
-            .background(MaterialTheme.colorScheme.background)
+            .background(
+                if (useNavigationRail) {
+                    MaterialTheme.colorScheme.surfaceContainerLow
+                } else {
+                    MaterialTheme.colorScheme.background
+                }
+            )
     ) {
-        content()
+        if (useNavigationRail && wrapInTabletFloatingPane) {
+            AdaptiveFloatingPane {
+                content()
+            }
+        } else {
+            content()
+        }
 
         // Dim Layer Overlay
         Box(

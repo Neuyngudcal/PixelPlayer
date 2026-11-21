@@ -73,6 +73,7 @@ import androidx.navigation.NavController
 import com.theveloper.pixelplay.R
 import com.theveloper.pixelplay.data.model.Song
 import com.theveloper.pixelplay.data.stats.StatsTimeRange
+import com.theveloper.pixelplay.presentation.components.LocalInsideFloatingPane
 import com.theveloper.pixelplay.presentation.components.MiniPlayerHeight
 import com.theveloper.pixelplay.presentation.components.PlaylistBottomSheet
 import com.theveloper.pixelplay.presentation.components.RecentlyPlayedRangeSelector
@@ -162,13 +163,19 @@ fun RecentlyPlayedScreen(
         recentlyPlayedSongs.map { it.song }.toImmutableList()
     }
 
+    val insideFloatingPane = LocalInsideFloatingPane.current
+    val baseSurface = if (insideFloatingPane) {
+        MaterialTheme.colorScheme.surfaceContainerLowest
+    } else {
+        MaterialTheme.colorScheme.surface
+    }
     val bgColors = listOf(
         MaterialTheme.colorScheme.secondary.copy(alpha = 0.24f),
-        MaterialTheme.colorScheme.surface.copy(alpha = 0.55f),
-        MaterialTheme.colorScheme.surface
+        baseSurface.copy(alpha = 0.55f),
+        baseSurface
     )
 
-    val backgroundBrush = remember {
+    val backgroundBrush = remember(bgColors) {
         Brush.verticalGradient(
             colors = bgColors,
             endY = 1200f
@@ -192,7 +199,11 @@ fun RecentlyPlayedScreen(
                 state = lazyListState,
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(
-                    bottom = MiniPlayerHeight + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 16.dp
+                    bottom = MiniPlayerHeight + if (insideFloatingPane) {
+                        0.dp
+                    } else {
+                        WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+                    } + 16.dp
                 ),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
@@ -356,7 +367,7 @@ fun RecentlyPlayedScreen(
                 contentColor = MaterialTheme.colorScheme.onSurface
             ),
             modifier = Modifier
-                .statusBarsPadding()
+                .then(if (!insideFloatingPane) Modifier.statusBarsPadding() else Modifier)
                 .padding(start = 10.dp, top = 8.dp)
                 .clip(CircleShape)
         ) {
@@ -514,7 +525,7 @@ private fun RecentlyPlayedActions(
                 modifier = Modifier.padding(end = 4.dp),
                 overflow = TextOverflow.Ellipsis,
                 maxLines = 2,
-                lineHeight = 20.sp
+                lineHeight = MaterialTheme.typography.labelLarge.lineHeight
             )
         }
 
@@ -542,7 +553,7 @@ private fun RecentlyPlayedActions(
                 modifier = Modifier.padding(end = 4.dp),
                 overflow = TextOverflow.Ellipsis,
                 maxLines = 2,
-                lineHeight = 20.sp
+                lineHeight = MaterialTheme.typography.labelLarge.lineHeight
             )
         }
     }

@@ -5,6 +5,9 @@ import com.theveloper.pixelplay.data.database.TelegramSongEntity
 import com.theveloper.pixelplay.data.database.TelegramTopicEntity
 import com.theveloper.pixelplay.data.model.Song
 import com.theveloper.pixelplay.data.preferences.PlaylistPreferencesRepository
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.async
@@ -478,12 +481,29 @@ class TelegramRepository @Inject constructor(
         }
     }
 
-    suspend fun downloadFile(fileId: Int, priority: Int = 1): TdApi.File? {
+    suspend fun downloadFile(
+        fileId: Int,
+        priority: Int = 1,
+        offset: Long = 0L,
+        limit: Long = 0L
+    ): TdApi.File? {
         return try {
-            clientManager.sendRequest(TdApi.DownloadFile(fileId, priority, 0, 0, false))
+            clientManager.sendRequest(TdApi.DownloadFile(fileId, priority, offset, limit, false))
         } catch (e: Exception) {
             Timber.e(e, "Error evaluating DownloadFile for fileId: $fileId")
             null
+        }
+    }
+
+    suspend fun getFileDownloadedPrefixSize(fileId: Int, offset: Long): Long {
+        return try {
+            val result = clientManager.sendRequest<TdApi.FileDownloadedPrefixSize>(
+                TdApi.GetFileDownloadedPrefixSize(fileId, offset.coerceAtLeast(0L))
+            )
+            result.size.coerceAtLeast(0L)
+        } catch (e: Exception) {
+            Timber.d("Error querying downloaded prefix size for fileId=$fileId offset=$offset: ${e.message}")
+            0L
         }
     }
 
@@ -634,99 +654,146 @@ class TelegramRepository @Inject constructor(
             resolvedPathCache.remove(fileId)
         }
 
-        val existingJob = activeDownloads[fileId]
-        if (existingJob != null && existingJob.isActive) return existingJob.await()
+        while (true) {
+            val existingJob = activeDownloads[fileId]
+            if (existingJob != null && existingJob.isActive) return existingJob.await()
 
-        val newJob = repositoryScope.async(start = kotlinx.coroutines.CoroutineStart.LAZY) {
-            try {
-                downloadSemaphore.withPermit {
-                    val currentFile = getFile(fileId)
-                    if (currentFile?.local?.isDownloadingCompleted == true) {
-                        currentFile.local.path.takeIf { it.isNotEmpty() }?.let {
-                            resolvedPathCache[fileId] = it
-                            persistSongFilePathIfNeeded(fileId, it)
-                            _downloadCompleted.tryEmit(fileId)
-                            return@withPermit it
-                        }
-                    }
-
-                    val initialFile = getFile(fileId)
-                    val isSmallFile = initialFile?.size == 0L || (initialFile?.size ?: 0) < 1024 * 1024
-
-                    if (isSmallFile) {
-                        return@withPermit try {
-                            val resultFile = withTimeout(15_000L) {
-                                clientManager.sendRequest<TdApi.File>(TdApi.DownloadFile(fileId, priority, 0, 0, true))
-                            }
-                            if (resultFile.local.isDownloadingCompleted && resultFile.local.path.isNotEmpty()) {
-                                resolvedPathCache[fileId] = resultFile.local.path
-                                persistSongFilePathIfNeeded(fileId, resultFile.local.path)
+            lateinit var candidateJob: Deferred<String?>
+            candidateJob = repositoryScope.async(start = CoroutineStart.LAZY) {
+                try {
+                    downloadSemaphore.withPermit {
+                        val currentFile = getFile(fileId)
+                        if (currentFile?.local?.isDownloadingCompleted == true) {
+                            currentFile.local.path.takeIf { it.isNotEmpty() }?.let {
+                                resolvedPathCache[fileId] = it
+                                persistSongFilePathIfNeeded(fileId, it)
                                 _downloadCompleted.tryEmit(fileId)
-                                resultFile.local.path
-                            } else null
-                        } catch (e: kotlinx.coroutines.CancellationException) {
-                            throw e
-                        } catch (e: Exception) {
-                            if (e.message?.contains("canceled") != true && e.message?.contains("has failed") != true) {
-                                Timber.w("Sync download failed for $fileId: ${e.message}")
+                                return@withPermit it
                             }
-                            null
                         }
-                    }
 
-                    try {
-                        clientManager.sendRequest<TdApi.File>(TdApi.DownloadFile(fileId, priority, 0, 0, false))
-                    } catch (e: Exception) {
-                        Timber.w("Async download request failed for $fileId: ${e.message}")
-                        return@withPermit null
-                    }
+                        val isSmallFile = currentFile?.size == 0L || (currentFile?.size ?: 0) < 1024 * 1024
 
-                    val completedPath = withTimeoutOrNull(60_000L) {
-                        clientManager.updates
-                            .filterIsInstance<TdApi.UpdateFile>()
-                            .filter { it.file.id == fileId }
-                            .first { update ->
-                                val file = update.file
-                                when {
-                                    file.local.isDownloadingCompleted && file.local.path.isNotEmpty() -> true
-                                    !file.local.canBeDownloaded -> throw Exception("File cannot be downloaded")
-                                    else -> false
+                        if (isSmallFile) {
+                            return@withPermit try {
+                                val resultFile = withTimeout(15_000L) {
+                                    clientManager.sendRequest<TdApi.File>(TdApi.DownloadFile(fileId, priority, 0, 0, true))
+                                }
+                                if (resultFile.local.isDownloadingCompleted && resultFile.local.path.isNotEmpty()) {
+                                    resolvedPathCache[fileId] = resultFile.local.path
+                                    persistSongFilePathIfNeeded(fileId, resultFile.local.path)
+                                    _downloadCompleted.tryEmit(fileId)
+                                    resultFile.local.path
+                                } else null
+                            } catch (e: kotlinx.coroutines.CancellationException) {
+                                throw e
+                            } catch (e: Exception) {
+                                if (e.message?.contains("canceled") != true && e.message?.contains("has failed") != true) {
+                                    Timber.w("Sync download failed for $fileId: ${e.message}")
+                                }
+                                null
+                            }
+                        }
+
+                        // Subscribe to TDLib file updates BEFORE initiating DownloadFile so rapid completion
+                        // notifications cannot be missed between sendRequest() and Flow collection.
+                        val completionSignal = CompletableDeferred<String?>()
+                        coroutineScope {
+                            val updateCollectorJob = launch(start = CoroutineStart.UNDISPATCHED) {
+                                try {
+                                    clientManager.updates
+                                        .filterIsInstance<TdApi.UpdateFile>()
+                                        .filter { it.file.id == fileId }
+                                        .collect { update ->
+                                            val file = update.file
+                                            when {
+                                                file.local.isDownloadingCompleted && file.local.path.isNotEmpty() -> {
+                                                    completionSignal.complete(file.local.path)
+                                                }
+                                                !file.local.canBeDownloaded -> {
+                                                    completionSignal.complete(null)
+                                                }
+                                            }
+                                        }
+                                } catch (e: kotlinx.coroutines.CancellationException) {
+                                    throw e
+                                } catch (e: Exception) {
+                                    completionSignal.complete(null)
                                 }
                             }
-                            .file.local.path
-                    }
 
-                    if (completedPath != null) {
-                        resolvedPathCache[fileId] = completedPath
-                        persistSongFilePathIfNeeded(fileId, completedPath)
-                        _downloadCompleted.tryEmit(fileId)
-                        return@withPermit completedPath
-                    }
+                            try {
+                                val initiatedFile = try {
+                                    clientManager.sendRequest<TdApi.File>(
+                                        TdApi.DownloadFile(fileId, priority, 0, 0, false)
+                                    )
+                                } catch (e: kotlinx.coroutines.CancellationException) {
+                                    throw e
+                                } catch (e: Exception) {
+                                    Timber.w("Async download request failed for $fileId: ${e.message}")
+                                    return@coroutineScope null
+                                }
 
-                    val finalFile = getFile(fileId)
-                    return@withPermit if (finalFile?.local?.isDownloadingCompleted == true && finalFile.local.path.isNotEmpty()) {
-                        persistSongFilePathIfNeeded(fileId, finalFile.local.path)
-                        _downloadCompleted.tryEmit(fileId)
-                        finalFile.local.path
-                    } else null
+                                if (initiatedFile.local.isDownloadingCompleted && initiatedFile.local.path.isNotEmpty()) {
+                                    completionSignal.complete(initiatedFile.local.path)
+                                } else if (!completionSignal.isCompleted) {
+                                    val verifiedFile = getFile(fileId)
+                                    if (verifiedFile?.local?.isDownloadingCompleted == true &&
+                                        verifiedFile.local.path.isNotEmpty()
+                                    ) {
+                                        completionSignal.complete(verifiedFile.local.path)
+                                    }
+                                }
+
+                                val completedPath = withTimeoutOrNull(60_000L) {
+                                    completionSignal.await()
+                                }
+
+                                if (completedPath != null) {
+                                    resolvedPathCache[fileId] = completedPath
+                                    persistSongFilePathIfNeeded(fileId, completedPath)
+                                    _downloadCompleted.tryEmit(fileId)
+                                    return@coroutineScope completedPath
+                                }
+
+                                val finalFile = getFile(fileId)
+                                if (finalFile?.local?.isDownloadingCompleted == true && finalFile.local.path.isNotEmpty()) {
+                                    resolvedPathCache[fileId] = finalFile.local.path
+                                    persistSongFilePathIfNeeded(fileId, finalFile.local.path)
+                                    _downloadCompleted.tryEmit(fileId)
+                                    finalFile.local.path
+                                } else null
+                            } finally {
+                                updateCollectorJob.cancel()
+                            }
+                        }
+                    }
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    Timber.w("downloadFileAwait error for $fileId: ${e.message}")
+                    throw e
+                } finally {
+                    activeDownloads.remove(fileId, candidateJob)
                 }
-            } catch (e: kotlinx.coroutines.CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                Timber.w("downloadFileAwait error for $fileId: ${e.message}")
-                throw e
-            } finally {
-                activeDownloads.remove(fileId)
             }
-        }
 
-        activeDownloads[fileId] = newJob
-        return try {
-            newJob.start()
-            newJob.await()
-        } catch (e: kotlinx.coroutines.CancellationException) {
-            newJob.cancel(e)
-            throw e
+            val existingOrRace = activeDownloads.putIfAbsent(fileId, candidateJob)
+            if (existingOrRace == null) {
+                return try {
+                    candidateJob.start()
+                    candidateJob.await()
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    candidateJob.cancel(e)
+                    throw e
+                }
+            } else if (existingOrRace.isActive) {
+                candidateJob.cancel()
+                return existingOrRace.await()
+            } else {
+                activeDownloads.remove(fileId, existingOrRace)
+                candidateJob.cancel()
+            }
         }
     }
 

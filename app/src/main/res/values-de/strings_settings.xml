@@ -244,14 +244,6 @@
     <string name="settings_palette_style_expressive_desc">Starke Farbwechsel und Kontraste.</string>
     <string name="settings_palette_style_fruit_salad">Fruit Salad</string>
     <string name="settings_palette_style_fruit_salad_desc">Verspielte, gedrehte Akzente.</string>
-    <string name="settings_palette_style_color_accuracy_title">Farbtreue</string>
-    <string name="settings_palette_style_color_accuracy_subtitle">0 = aktuelle Einstellung. Höhere Werte = näher am dominanten Cover-Farbton.</string>
-    <string name="settings_palette_style_accuracy_current">Aktuell</string>
-    <string name="settings_palette_style_accuracy_more_accurate">Genauer</string>
-    <string name="settings_palette_style_accuracy_summary_current">0 • Aktuell</string>
-    <string name="settings_palette_style_accuracy_summary_subtle">%1$d • Subtil</string>
-    <string name="settings_palette_style_accuracy_summary_balanced">%1$d • Ausgewogen</string>
-    <string name="settings_palette_style_accuracy_summary_precise">%1$d • Präzise</string>
 
     <!-- NavBarCornerRadiusScreen -->
     <string name="navbar_adjust_title">Eckenradius anpassen</string>

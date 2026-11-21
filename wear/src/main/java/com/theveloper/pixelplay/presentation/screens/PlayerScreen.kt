@@ -538,11 +538,15 @@ private fun AlbumArtPage(
     onTap: () -> Unit,
 ) {
     val palette = LocalWearPalette.current
-    val textColors = remember(albumArt, palette.textPrimary, palette.textSecondary) {
+    val preferredClockTint = remember(palette.transportContainer) {
+        com.theveloper.pixelplay.presentation.theme.WearColorExtractor.deriveClockTintFromPalette(palette)
+    }
+    val textColors = remember(albumArt, palette.textPrimary, palette.textSecondary, preferredClockTint) {
         deriveAlbumOverlayTextColors(
             albumArt = albumArt,
             fallbackPrimary = palette.textPrimary,
             fallbackSecondary = palette.textSecondary,
+            preferredClock = preferredClockTint,
         )
     }
     val contrastOverlay = remember(albumArt, textColors) {
@@ -736,6 +740,7 @@ private fun deriveAlbumOverlayTextColors(
     albumArt: Bitmap?,
     fallbackPrimary: Color,
     fallbackSecondary: Color,
+    preferredClock: Color = fallbackPrimary,
 ): AlbumOverlayTextColors {
     if (albumArt == null || albumArt.width <= 0 || albumArt.height <= 0) {
         val defaultShadow = Shadow(
@@ -755,7 +760,6 @@ private fun deriveAlbumOverlayTextColors(
     val topBg = sampleRegionAverageColor(albumArt, startYFraction = 0f, endYFraction = 0.24f)
     val bottomBg = sampleRegionAverageColor(albumArt, startYFraction = 0.66f, endYFraction = 1f)
 
-    val preferredClock = deriveClockTintFromAlbumArt(albumArt, fallbackPrimary)
     val clockColor = deriveReadableTintedColor(
         preferred = preferredClock,
         background = topBg,
@@ -986,62 +990,6 @@ private fun sampleRegionAverageColor(
             (blueSum / count).toInt(),
         )
     )
-}
-
-private fun deriveClockTintFromAlbumArt(albumArt: Bitmap?, fallback: Color): Color {
-    if (albumArt == null || albumArt.width <= 0 || albumArt.height <= 0) return fallback
-
-    val width = albumArt.width
-    val height = albumArt.height
-    val step = (min(width, height) / 28).coerceAtLeast(1)
-
-    var redSum = 0L
-    var greenSum = 0L
-    var blueSum = 0L
-    var count = 0L
-
-    var y = 0
-    while (y < height) {
-        var x = 0
-        while (x < width) {
-            val pixel = albumArt.getPixel(x, y)
-            val alpha = android.graphics.Color.alpha(pixel)
-            if (alpha >= 28) {
-                val r = android.graphics.Color.red(pixel)
-                val g = android.graphics.Color.green(pixel)
-                val b = android.graphics.Color.blue(pixel)
-                if (r + g + b > 30) {
-                    redSum += r
-                    greenSum += g
-                    blueSum += b
-                    count++
-                }
-            }
-            x += step
-        }
-        y += step
-    }
-
-    if (count == 0L) return fallback
-
-    val avgColor = android.graphics.Color.rgb(
-        (redSum / count).toInt(),
-        (greenSum / count).toInt(),
-        (blueSum / count).toInt(),
-    )
-    val hsl = FloatArray(3)
-    ColorUtils.colorToHSL(avgColor, hsl)
-    hsl[1] = max(0.42f, hsl[1]).coerceAtMost(0.92f)
-    hsl[2] = max(0.68f, hsl[2]).coerceAtMost(0.90f)
-
-    var tinted = Color(ColorUtils.HSLToColor(hsl))
-    val lum = tinted.luminance()
-    tinted = when {
-        lum < 0.60f -> androidx.compose.ui.graphics.lerp(tinted, Color.White, 0.32f)
-        lum > 0.92f -> androidx.compose.ui.graphics.lerp(tinted, Color.White, 0.08f)
-        else -> tinted
-    }
-    return tinted.copy(alpha = 0.98f)
 }
 
 @Composable

@@ -6,6 +6,8 @@
     <exclude domain="sharedpref" path="netease_prefs.xml"/>
     <exclude domain="sharedpref" path="gdrive_prefs.xml"/>
     <exclude domain="sharedpref" path="qqmusic_prefs.xml"/>
+    <exclude domain="sharedpref" path="pixelplay_ai_secrets_enc.xml"/>
+    <exclude domain="sharedpref" path="telegram_db_key_enc.xml"/>
 
     <!-- Also exclude the plaintext fallback files written when
          EncryptedSharedPreferences fails to initialize. -->
@@ -14,6 +16,10 @@
     <exclude domain="sharedpref" path="netease_prefs_plain.xml"/>
     <exclude domain="sharedpref" path="gdrive_prefs_plain.xml"/>
     <exclude domain="sharedpref" path="qqmusic_prefs_plain.xml"/>
+
+    <!-- Exclude TDLib encrypted database & downloaded media files -->
+    <exclude domain="file" path="tdlib"/>
+    <exclude domain="file" path="tdlib_files"/>
 
     <!-- Exclude DataStore preferences that may contain API keys/sensitive settings -->
     <exclude domain="file" path="datastore/settings.preferences_pb"/>

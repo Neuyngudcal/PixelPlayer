@@ -33,7 +33,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -103,44 +105,62 @@ fun EnhancedSongListItem(
 ) {
     val albumArtTargetSizePx = with(LocalDensity.current) { albumArtSize.roundToPx() }
     val isHighlighted = isCurrentSong && !isLoading
-    val transition = updateTransition(
-        targetState = EnhancedSongAnimationTarget(
-            isHighlighted = isHighlighted,
-            isSelected = isSelected
-        ),
-        label = "EnhancedSongListItemTransition"
-    )
-
-    // Share one transition across the item and derive the visual properties from a
-    // couple of progress values instead of animating each color/radius independently.
-    val highlightProgress by transition.animateFloat(
-        transitionSpec = { tween(durationMillis = 400) },
-        label = "highlightProgress"
-    ) { state ->
-        if (state.isHighlighted) 1f else 0f
-    }
-    val selectionVisualProgress by transition.animateFloat(
-        transitionSpec = { tween(durationMillis = 250) },
-        label = "selectionVisualProgress"
-    ) { state ->
-        if (state.isSelected) 1f else 0f
-    }
-    val selectionScaleProgress by transition.animateFloat(
-        transitionSpec = {
-            spring(
-                dampingRatio = Spring.DampingRatioMediumBouncy,
-                stiffness = Spring.StiffnessLow
-            )
-        },
-        label = "selectionScaleProgress"
-    ) { state ->
-        if (state.isSelected) 1f else 0f
+    var hasEverAnimated by remember { mutableStateOf(isHighlighted || isSelected) }
+    if (isHighlighted || isSelected) {
+        hasEverAnimated = true
     }
 
-    val animatedCornerRadius = lerpDp(22.dp, 50.dp, highlightProgress)
-    val animatedAlbumCornerRadius = lerpDp(10.dp, 50.dp, highlightProgress)
-    val selectionScale = lerpFloat(1f, 0.98f, selectionScaleProgress)
-    val selectionBorderWidth = lerpDp(0.dp, 2.5.dp, selectionVisualProgress)
+    val colors = MaterialTheme.colorScheme
+    val baseContainerColor = containerColorOverride ?: colors.surfaceContainerLow
+
+    val highlightProgress: Float
+    val selectionVisualProgress: Float
+    val selectionScaleProgress: Float
+
+    if (hasEverAnimated) {
+        val transition = updateTransition(
+            targetState = EnhancedSongAnimationTarget(
+                isHighlighted = isHighlighted,
+                isSelected = isSelected
+            ),
+            label = "EnhancedSongListItemTransition"
+        )
+
+        // Share one transition across the item and derive the visual properties from a
+        // couple of progress values instead of animating each color/radius independently.
+        highlightProgress = transition.animateFloat(
+            transitionSpec = { tween(durationMillis = 400) },
+            label = "highlightProgress"
+        ) { state ->
+            if (state.isHighlighted) 1f else 0f
+        }.value
+        selectionVisualProgress = transition.animateFloat(
+            transitionSpec = { tween(durationMillis = 250) },
+            label = "selectionVisualProgress"
+        ) { state ->
+            if (state.isSelected) 1f else 0f
+        }.value
+        selectionScaleProgress = transition.animateFloat(
+            transitionSpec = {
+                spring(
+                    dampingRatio = Spring.DampingRatioMediumBouncy,
+                    stiffness = Spring.StiffnessLow
+                )
+            },
+            label = "selectionScaleProgress"
+        ) { state ->
+            if (state.isSelected) 1f else 0f
+        }.value
+    } else {
+        highlightProgress = 0f
+        selectionVisualProgress = 0f
+        selectionScaleProgress = 0f
+    }
+
+    val animatedCornerRadius = if (hasEverAnimated) lerpDp(22.dp, 50.dp, highlightProgress) else 22.dp
+    val animatedAlbumCornerRadius = if (hasEverAnimated) lerpDp(10.dp, 50.dp, highlightProgress) else 10.dp
+    val selectionScale = if (hasEverAnimated) lerpFloat(1f, 0.98f, selectionScaleProgress) else 1f
+    val selectionBorderWidth = if (hasEverAnimated) lerpDp(0.dp, 2.5.dp, selectionVisualProgress) else 0.dp
 
     val surfaceShape = remember(animatedCornerRadius, customShape, isHighlighted) {
         if (customShape != null && !isHighlighted) {
@@ -154,29 +174,47 @@ fun EnhancedSongListItem(
         RoundedCornerShape(animatedAlbumCornerRadius)
     }
 
-    val colors = MaterialTheme.colorScheme
-    val baseContainerColor = containerColorOverride ?: colors.surfaceContainerLow
-    val playbackContainerColor = lerpColor(baseContainerColor, colors.primaryContainer, highlightProgress)
-    val containerColor = lerpColor(playbackContainerColor, colors.secondaryContainer, selectionVisualProgress)
+    val containerColor: Color
+    val contentColor: Color
+    val selectionBorderColor: Color
+    val mvContainerColor: Color
+    val mvContentColor: Color
+    val selectionOverlayColor: Color
+    val selectionOverlayContentColor: Color
+    val showSelectionDecoration: Boolean
 
-    val baseContentColor = colors.onSurface
-    val playbackContentColor = lerpColor(baseContentColor, colors.onPrimaryContainer, highlightProgress)
-    val contentColor = lerpColor(playbackContentColor, colors.onSecondaryContainer, selectionVisualProgress)
+    if (hasEverAnimated) {
+        val playbackContainerColor = lerpColor(baseContainerColor, colors.primaryContainer, highlightProgress)
+        containerColor = lerpColor(playbackContainerColor, colors.secondaryContainer, selectionVisualProgress)
 
-    val selectionBorderColor = lerpColor(colors.primary.copy(alpha = 0f), colors.primary, selectionVisualProgress)
-    val mvContainerColor = lerpColor(colors.onSurface, colors.primaryContainer, highlightProgress)
-    val mvContentColor = lerpColor(colors.surfaceContainerHigh, colors.onPrimaryContainer, highlightProgress)
-    val selectionOverlayColor = lerpColor(
-        Color.Transparent,
-        colors.primary.copy(alpha = 0.7f),
-        selectionVisualProgress
-    )
-    val selectionOverlayContentColor = lerpColor(
-        Color.Transparent,
-        colors.onPrimary,
-        selectionVisualProgress
-    )
-    val showSelectionDecoration = selectionVisualProgress > 0.001f
+        val baseContentColor = colors.onSurface
+        val playbackContentColor = lerpColor(baseContentColor, colors.onPrimaryContainer, highlightProgress)
+        contentColor = lerpColor(playbackContentColor, colors.onSecondaryContainer, selectionVisualProgress)
+
+        selectionBorderColor = lerpColor(colors.primary.copy(alpha = 0f), colors.primary, selectionVisualProgress)
+        mvContainerColor = lerpColor(colors.onSurface, colors.primaryContainer, highlightProgress)
+        mvContentColor = lerpColor(colors.surfaceContainerHigh, colors.onPrimaryContainer, highlightProgress)
+        selectionOverlayColor = lerpColor(
+            Color.Transparent,
+            colors.primary.copy(alpha = 0.7f),
+            selectionVisualProgress
+        )
+        selectionOverlayContentColor = lerpColor(
+            Color.Transparent,
+            colors.onPrimary,
+            selectionVisualProgress
+        )
+        showSelectionDecoration = selectionVisualProgress > 0.001f
+    } else {
+        containerColor = baseContainerColor
+        contentColor = colors.onSurface
+        selectionBorderColor = Color.Transparent
+        mvContainerColor = colors.onSurface
+        mvContentColor = colors.surfaceContainerHigh
+        selectionOverlayColor = Color.Transparent
+        selectionOverlayContentColor = Color.Transparent
+        showSelectionDecoration = false
+    }
 
     if (isLoading) {
         // Shimmer Placeholder Layout
@@ -383,8 +421,8 @@ fun EnhancedSongListItem(
                             contentColor = mvContainerColor
                         ),
                         modifier = Modifier
-                            .size(36.dp)
                             .padding(end = 4.dp)
+                            .size(36.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Rounded.MoreVert,

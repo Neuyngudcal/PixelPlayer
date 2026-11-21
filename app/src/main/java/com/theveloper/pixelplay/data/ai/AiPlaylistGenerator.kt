@@ -47,10 +47,12 @@ class AiPlaylistGenerator @Inject constructor(
             val isSafe = preferencesRepo.isSafeTokenLimitEnabled.first()
             val prefSampleSize = preferencesRepo.aiSampleSize.first()
             val useExtendedFields = preferencesRepo.aiIncludeExtendedFields.first()
-            val isOfflineProvider = preferencesRepo.aiProvider.first() == AiProvider.OFFLINE_GGUF.name
+            val currentProvider = preferencesRepo.aiProvider.first()
+            val isOfflineGguf = currentProvider == AiProvider.OFFLINE_GGUF.name
+            val isOnDeviceProvider = isOfflineGguf || currentProvider == AiProvider.ANDROID_AICORE.name
             val rawSampleCap = if (isSafe) prefSampleSize else prefSampleSize * 2
-            // On-device GGUF models use a 2048-token context window; keep sample cap <= 40 for fast prefill
-            val sampleCap = if (isOfflineProvider) min(rawSampleCap, 40) else rawSampleCap
+            // On-device models (AICore / GGUF) use smaller context windows; keep sample cap <= 40 for fast prefill
+            val sampleCap = if (isOnDeviceProvider) min(rawSampleCap, 40) else rawSampleCap
             val songSample = samplingPool.take(sampleCap)
 
             val availableSongsJson = buildString {
@@ -89,7 +91,7 @@ class AiPlaylistGenerator @Inject constructor(
             val responseText = try {
                 aiHandler.get().generateContent(fullPrompt, type)
             } finally {
-                if (isOfflineProvider) {
+                if (isOfflineGguf) {
                     llamaEngine.get().scheduleAutoUnload()
                 }
             }

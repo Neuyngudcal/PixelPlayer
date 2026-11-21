@@ -1,6 +1,7 @@
 package com.theveloper.pixelplay.presentation.components
 
 import android.graphics.Bitmap
+import android.net.Uri
 import androidx.annotation.DrawableRes
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -37,6 +38,7 @@ import coil.size.Size // Import Coil's Size
 import coil.compose.SubcomposeAsyncImage
 import coil.compose.SubcomposeAsyncImageContent
 import com.theveloper.pixelplay.R
+import com.theveloper.pixelplay.utils.LocalArtworkUri
 
 val SmartImageCompactListTargetSize = Size(96, 96)
 val SmartImageListTargetSize = Size(128, 128)
@@ -54,7 +56,7 @@ fun SmartImage(
     crossfadeDurationMillis: Int = 300,
     useDiskCache: Boolean = true,
     useMemoryCache: Boolean = true,
-    allowHardware: Boolean = false,
+    allowHardware: Boolean = true,
     targetSize: Size = DefaultSmartImageSize,
     colorFilter: ColorFilter? = null,
     alpha: Float = 1f,
@@ -66,6 +68,26 @@ fun SmartImage(
     val clippedModifier = modifier.clip(shape)
     val requestTargetSize = remember(targetSize) {
         safeAlbumArtTargetSize(targetSize)
+    }
+    val isLocalArtwork = remember(model) {
+        when (model) {
+            is String -> LocalArtworkUri.isLocalArtworkUri(model)
+            is Uri -> LocalArtworkUri.isLocalArtworkUri(model)
+            is ImageRequest -> {
+                val data = model.data
+                (data as? String)?.let(LocalArtworkUri::isLocalArtworkUri) == true ||
+                    LocalArtworkUri.isLocalArtworkUri(data as? Uri)
+            }
+            else -> false
+        }
+    }
+    val effectiveDiskCachePolicy = if (isLocalArtwork || !useDiskCache) {
+        CachePolicy.DISABLED
+    } else {
+        CachePolicy.ENABLED
+    }
+    val memoryKey = remember(model, requestTargetSize) {
+        albumArtMemoryCacheKey(model, requestTargetSize)
     }
 
     // Handle direct models (Bitmap, Vector, etc) early to avoid ImageRequest overhead
@@ -96,23 +118,34 @@ fun SmartImage(
         context,
         model,
         crossfadeDurationMillis,
-        useDiskCache,
+        effectiveDiskCachePolicy,
         useMemoryCache,
         allowHardware,
-        requestTargetSize
+        requestTargetSize,
+        memoryKey
     ) {
         if (model is ImageRequest) {
             model.newBuilder(context)
                 .size(requestTargetSize)
+                .apply {
+                    if (model.memoryCacheKey == null && memoryKey != null) {
+                        memoryCacheKey(memoryKey)
+                    }
+                }
                 .build()
         } else {
             ImageRequest.Builder(context)
                 .data(model)
                 .crossfade(crossfadeDurationMillis)
-                .diskCachePolicy(if (useDiskCache) CachePolicy.ENABLED else CachePolicy.DISABLED)
+                .diskCachePolicy(effectiveDiskCachePolicy)
                 .memoryCachePolicy(if (useMemoryCache) CachePolicy.ENABLED else CachePolicy.DISABLED)
                 .allowHardware(allowHardware)
                 .size(requestTargetSize)
+                .apply {
+                    if (memoryKey != null) {
+                        memoryCacheKey(memoryKey)
+                    }
+                }
                 .build()
         }
     }

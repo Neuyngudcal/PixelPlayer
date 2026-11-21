@@ -1,5 +1,8 @@
 package com.theveloper.pixelplay.presentation.screens
 
+import com.theveloper.pixelplay.presentation.components.AdaptiveMediaDetailSplitLayout
+import com.theveloper.pixelplay.ui.theme.LocalPixelPlayWindowInfo
+import com.theveloper.pixelplay.ui.theme.LocalSpacing
 import com.theveloper.pixelplay.presentation.navigation.navigateSafely
 import com.theveloper.pixelplay.presentation.navigation.navigateSafelyReplacing
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -90,6 +93,10 @@ import kotlinx.coroutines.launch
 import racra.compose.smooth_corner_rect_library.AbsoluteSmoothCornerShape
 import kotlin.math.roundToInt
 import androidx.compose.ui.res.stringResource
+import com.theveloper.pixelplay.presentation.components.AdaptiveFloatingPane
+import com.theveloper.pixelplay.presentation.components.LocalInsideFloatingPane
+import com.theveloper.pixelplay.presentation.components.TabletPaneTokens
+import com.theveloper.pixelplay.presentation.components.resolveTabletPaneBottomMargin
 import com.theveloper.pixelplay.presentation.components.subcomps.TightWrapText
 
 // --- Data Models & Helpers ---
@@ -144,7 +151,14 @@ fun GenreDetailScreen(
     val coroutineScope = rememberCoroutineScope()
     val lazyListState = rememberLazyListState()
 
-    val statusBarHeight = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+    val windowInfo = LocalPixelPlayWindowInfo.current
+    val spacing = LocalSpacing.current
+    val isTwoPaneDetail = windowInfo.useTwoPaneDetail
+    val statusBarHeight = if (windowInfo.useNavigationRail) {
+        0.dp
+    } else {
+        WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+    }
     val systemNavBarInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     val minTopBarHeight = 58.dp + statusBarHeight // Reduced by 6dp from 64.dp
     val maxTopBarHeight = 200.dp
@@ -277,6 +291,7 @@ fun GenreDetailScreen(
     val genrePaletteStyle by playerViewModel.albumArtPaletteStyle.collectAsStateWithLifecycle(
         initialValue = AlbumArtPaletteStyle.default
     )
+    val effectiveContrastLevel by playerViewModel.effectiveContrastLevel.collectAsStateWithLifecycle()
     val isMiniPlayerVisible = stablePlayerState.currentSong != null
     val fabBottomPadding by animateDpAsState(
         targetValue = if (isMiniPlayerVisible) MiniPlayerHeight + systemNavBarInset + 16.dp else systemNavBarInset + 16.dp,
@@ -287,12 +302,13 @@ fun GenreDetailScreen(
     val baseColorScheme = MaterialTheme.colorScheme
 
     // Dynamic Theme
-    val genreColorScheme = remember(themeGenre, decodedGenreId, darkMode, genrePaletteStyle) {
+    val genreColorScheme = remember(themeGenre, decodedGenreId, darkMode, genrePaletteStyle, effectiveContrastLevel) {
         com.theveloper.pixelplay.ui.theme.GenreThemeUtils.getGenreDetailColorScheme(
             genre = themeGenre,
             fallbackGenreId = decodedGenreId,
             isDark = darkMode,
-            paletteStyle = genrePaletteStyle
+            paletteStyle = genrePaletteStyle,
+            contrastLevel = effectiveContrastLevel
         )
     }
 
@@ -300,124 +316,208 @@ fun GenreDetailScreen(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .nestedScroll(nestedScrollConnection)
-                .background(MaterialTheme.colorScheme.background) // Uses new theme background
+                .then(if (!isTwoPaneDetail && !windowInfo.useNavigationRail) Modifier.nestedScroll(nestedScrollConnection) else Modifier)
+                .background(if (windowInfo.useNavigationRail) Color.Transparent else MaterialTheme.colorScheme.background) // Uses new theme background
         ) {
             // Optimization: Cache Dp conversions
             val currentTopBarHeightDp = with(density) { topBarHeight.value.toDp() }
 
-            // Optimization: Use fixed padding and offset instead of dynamic contentPadding 
-            // to avoid triggered remeasures of the entire list on every pixel of scroll.
-            
-            LazyColumn(
-                state = lazyListState,
-                contentPadding = PaddingValues(
-                    top = minTopBarHeight + 8.dp, // FIXED padding
-                    start = 8.dp,
-                    end = if (showScrollBar) 24.dp else 8.dp,
-                    bottom = fabBottomPadding + 148.dp
-                ),
-                modifier = Modifier
-                    .fillMaxSize()
-                    .offset {
-                        // Offset the entire list down by the current "expansion" of the top bar
-                        val extraHeight = (topBarHeight.value - minTopBarHeightPx).roundToInt()
-                        IntOffset(0, extraHeight)
+            val genreTrackList: @Composable (Modifier, PaddingValues) -> Unit = { listMod, listPadding ->
+                LazyColumn(
+                    state = lazyListState,
+                    contentPadding = listPadding,
+                    modifier = listMod
+                ) {
+                    val displayItems = if (isTransitionFinished || uiState.flattenedItems.size < 20) {
+                        uiState.flattenedItems
+                    } else {
+                        uiState.flattenedItems.take(20)
                     }
-            ) {
-                // Optimization: Limit rendered items during the navigation transition 
-                // to ensure the slide-in animation remains smooth.
-                val displayItems = if (isTransitionFinished || uiState.flattenedItems.size < 20) {
-                    uiState.flattenedItems
-                } else {
-                    uiState.flattenedItems.take(20)
-                }
 
-                items(
-                    items = displayItems,
-                    key = { it.key },
-                    contentType = { it::class } // CRITICAL: Content type for optimized recycling
-                ) { item ->
-                    when (item) {
-                        is GenreDetailListItem.ArtistHeader -> {
-                            GenreArtistHeader(item.artistName, item.artistImageUrl)
-                        }
-                        is GenreDetailListItem.AlbumHeader -> {
-                            GenreAlbumHeader(
-                                album = item.album,
-                                useArtistStyle = item.useArtistStyle,
-                                onSongClick = { song ->
-                                    playerViewModel.showAndPlaySong(song, uiState.sortedSongs, genreDisplayName)
-                                }
-                            )
-                        }
-                        is GenreDetailListItem.SongItem -> {
-                            val isSelected = selectedSongIds.contains(item.song.id)
-                            val selectionIndex = multiSelectionState.getSelectionIndex(item.song.id)
-                            GenreSongItemWrapper(
-                                item = item,
-                                stablePlayerState = stablePlayerState,
-                                onSongClick = { song ->
-                                    playerViewModel.showAndPlaySong(song, uiState.sortedSongs, genreDisplayName)
-                                },
-                                onMoreOptionsClick = { song -> showSongOptionsSheet = song },
-                                isSelectionMode = isSelectionMode,
-                                isSelected = isSelected,
-                                selectionIndex = selectionIndex,
-                                onLongPress = { onSongLongPress(item.song) }
-                            )
-                        }
-                        is GenreDetailListItem.Spacer -> {
-                            Spacer(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(item.heightDp.dp)
-                                    .run {
-                                        if (item.useSurfaceBackground) background(MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.5f))
-                                        else this
+                    items(
+                        items = displayItems,
+                        key = { it.key },
+                        contentType = { it::class }
+                    ) { item ->
+                        when (item) {
+                            is GenreDetailListItem.ArtistHeader -> {
+                                GenreArtistHeader(item.artistName, item.artistImageUrl)
+                            }
+                            is GenreDetailListItem.AlbumHeader -> {
+                                GenreAlbumHeader(
+                                    album = item.album,
+                                    useArtistStyle = item.useArtistStyle,
+                                    onSongClick = { song ->
+                                        playerViewModel.showAndPlaySong(song, uiState.sortedSongs, genreDisplayName)
                                     }
-                            )
-                        }
-                        is GenreDetailListItem.Divider -> {
-                             Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .background(MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.5f))
-                                    .padding(horizontal = 16.dp, vertical = 8.dp)
-                            ) {
-                                HorizontalDivider(modifier = Modifier.alpha(0.3f))
+                                )
+                            }
+                            is GenreDetailListItem.SongItem -> {
+                                val isSelected = selectedSongIds.contains(item.song.id)
+                                val selectionIndex = multiSelectionState.getSelectionIndex(item.song.id)
+                                GenreSongItemWrapper(
+                                    item = item,
+                                    stablePlayerState = stablePlayerState,
+                                    onSongClick = { song ->
+                                        playerViewModel.showAndPlaySong(song, uiState.sortedSongs, genreDisplayName)
+                                    },
+                                    onMoreOptionsClick = { song -> showSongOptionsSheet = song },
+                                    isSelectionMode = isSelectionMode,
+                                    isSelected = isSelected,
+                                    selectionIndex = selectionIndex,
+                                    onLongPress = { onSongLongPress(item.song) }
+                                )
+                            }
+                            is GenreDetailListItem.Spacer -> {
+                                Spacer(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(item.heightDp.dp)
+                                        .run {
+                                            if (item.useSurfaceBackground) background(MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.5f))
+                                            else this
+                                        }
+                                )
+                            }
+                            is GenreDetailListItem.Divider -> {
+                                 Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .background(MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.5f))
+                                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                                ) {
+                                    HorizontalDivider(modifier = Modifier.alpha(0.3f))
+                                }
                             }
                         }
                     }
                 }
             }
 
-            // Only show scrollbar when the top bar is mostly collapsed to avoid visual conflict
-            if (showScrollBar) {
-                ExpressiveScrollBar(
-                    listState = lazyListState,
-                    modifier = Modifier
-                        .align(Alignment.CenterEnd)
-                        .padding(
-                            top = minTopBarHeight + 12.dp, // Stable padding for performance
-                            bottom = fabBottomPadding + 112.dp // Stable padding
-                        ),
-                    dragLabelProvider = genreFastScrollLabelProvider
-                )
-            }
+            if (isTwoPaneDetail) {
+                AdaptiveMediaDetailSplitLayout(
+                    title = genreDisplayName,
+                    subtitle = "${uiState.songs.size}",
+                    onBackClick = { navController.popBackStack() },
+                    onPlayClick = {
+                        uiState.sortedSongs.firstOrNull()?.let { firstSong ->
+                            playerViewModel.showAndPlaySong(firstSong, uiState.sortedSongs, genreDisplayName)
+                        }
+                    },
+                    onShuffleClick = {
+                        if (uiState.sortedSongs.isNotEmpty()) {
+                            playerViewModel.showAndPlaySong(uiState.sortedSongs.random(), uiState.sortedSongs, genreShuffleLabel)
+                        }
+                    },
+                    hasPlayableItems = uiState.sortedSongs.isNotEmpty(),
+                    heroContainerColor = startColor,
+                    heroContentColor = contentColor,
+                    topActions = {
+                        FilledIconButton(
+                            onClick = { showSortSheet = true },
+                            colors = IconButtonDefaults.filledIconButtonColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                contentColor = MaterialTheme.colorScheme.onSurface
+                            )
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.MoreVert,
+                                contentDescription = stringResource(R.string.common_options)
+                            )
+                        }
+                    },
+                    artwork = { artSize ->
+                        Surface(
+                            modifier = Modifier.size(artSize * 0.72f),
+                            shape = CircleShape,
+                            color = contentColor.copy(alpha = 0.14f)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Rounded.MusicNote,
+                                    contentDescription = genreDisplayName,
+                                    tint = contentColor,
+                                    modifier = Modifier.size(artSize * 0.36f)
+                                )
+                            }
+                        }
+                    }
+                ) {
+                    val showTabletScrollBar = LocalShowScrollbar.current &&
+                        (lazyListState.canScrollForward || lazyListState.canScrollBackward)
+                    genreTrackList(
+                        Modifier.fillMaxSize(),
+                        PaddingValues(
+                            top = spacing.xs,
+                            start = spacing.xs,
+                            end = if (showTabletScrollBar) spacing.xxl else spacing.xs,
+                            bottom = fabBottomPadding + 96.dp
+                        )
+                    )
+                    if (showTabletScrollBar) {
+                        ExpressiveScrollBar(
+                            listState = lazyListState,
+                            modifier = Modifier
+                                .align(Alignment.CenterEnd)
+                                .padding(
+                                    top = spacing.md,
+                                    bottom = fabBottomPadding + 96.dp
+                                ),
+                            dragLabelProvider = genreFastScrollLabelProvider
+                        )
+                    }
+                }
+            } else {
+                AdaptiveFloatingPane(
+                    enabled = windowInfo.useNavigationRail,
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerLowest
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .then(if (windowInfo.useNavigationRail) Modifier.nestedScroll(nestedScrollConnection) else Modifier)
+                    ) {
+                        genreTrackList(
+                            Modifier
+                                .fillMaxSize()
+                                .offset {
+                                    val extraHeight = (topBarHeight.value - minTopBarHeightPx).roundToInt()
+                                    IntOffset(0, extraHeight)
+                                },
+                            PaddingValues(
+                                top = minTopBarHeight + 8.dp,
+                                start = 8.dp,
+                                end = if (showScrollBar) 24.dp else 8.dp,
+                                bottom = fabBottomPadding + 148.dp
+                            )
+                        )
 
-            // Collapsible Top Bar with Gradient (On Top of List, High Z-Index)
-            // This ensures the gradient is ON TOP of the scrolling content, so content scrolls BEHIND it.
-            GenreCollapsibleTopBar(
-                title = genreDisplayName,
-                collapseFraction = collapseFraction,
-                headerHeight = currentTopBarHeightDp,
-                onBackPressed = { navController.popBackStack() },
-                startColor = startColor,
-                contentColor = contentColor,
-                containerColor = MaterialTheme.colorScheme.surfaceContainer,
-                collapsedContentColor = MaterialTheme.colorScheme.onSurface
-            )
+                        if (showScrollBar) {
+                            ExpressiveScrollBar(
+                                listState = lazyListState,
+                                modifier = Modifier
+                                    .align(Alignment.CenterEnd)
+                                    .padding(
+                                        top = minTopBarHeight + 12.dp,
+                                        bottom = fabBottomPadding + 112.dp
+                                    ),
+                                dragLabelProvider = genreFastScrollLabelProvider
+                            )
+                        }
+
+                        GenreCollapsibleTopBar(
+                            title = genreDisplayName,
+                            collapseFraction = collapseFraction,
+                            headerHeight = currentTopBarHeightDp,
+                            onBackPressed = { navController.popBackStack() },
+                            startColor = startColor,
+                            contentColor = contentColor,
+                            containerColor = MaterialTheme.colorScheme.surfaceContainer,
+                            collapsedContentColor = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                }
+            }
         
             // Selection Count Pill (Top-Center below collapsed top bar)
             SelectionCountPill(
@@ -429,13 +529,28 @@ fun GenreDetailScreen(
             )
 
             // FAB / SelectionActionRow (Bottom-Center or Bottom-End)
+            val fabEndPadding = if (windowInfo.useNavigationRail) {
+                TabletPaneTokens.EndMargin + spacing.lg
+            } else {
+                16.dp
+            }
+            val fabStartPadding = if (isSelectionMode) {
+                if (windowInfo.useNavigationRail) TabletPaneTokens.StartMargin + spacing.lg else 16.dp
+            } else {
+                0.dp
+            }
+            val floatingBottomOffset = if (windowInfo.useNavigationRail) {
+                resolveTabletPaneBottomMargin(systemNavBarInset)
+            } else {
+                0.dp
+            }
             Box(
                  modifier = Modifier
                     .align(if (isSelectionMode) Alignment.BottomCenter else Alignment.BottomEnd)
                     .padding(
-                        bottom = fabBottomPadding + if (isSelectionMode) 16.dp else 26.dp,
-                        start = if (isSelectionMode) 16.dp else 0.dp,
-                        end = 16.dp
+                        bottom = fabBottomPadding + floatingBottomOffset + if (isSelectionMode) 16.dp else 26.dp,
+                        start = fabStartPadding,
+                        end = fabEndPadding
                     )
                     .run {
                         if (isSelectionMode) fillMaxWidth() else this
@@ -805,7 +920,11 @@ fun GenreCollapsibleTopBar(
                 .background(verticalGradient)
         )
 
-        Box(modifier = Modifier.fillMaxSize().statusBarsPadding()) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .then(if (!LocalInsideFloatingPane.current) Modifier.statusBarsPadding() else Modifier)
+        ) {
              FilledIconButton(
                 modifier = Modifier
                     .align(Alignment.TopStart)

@@ -3,8 +3,7 @@ package com.theveloper.pixelplay.data.netease
 
 import android.content.Context
 import android.content.SharedPreferences
-import androidx.security.crypto.EncryptedSharedPreferences
-import androidx.security.crypto.MasterKey
+import com.theveloper.pixelplay.data.security.SecureSharedPreferencesFactory
 import com.theveloper.pixelplay.data.database.AlbumEntity
 import com.theveloper.pixelplay.data.database.ArtistEntity
 import com.theveloper.pixelplay.data.database.MusicDao
@@ -23,8 +22,9 @@ import com.theveloper.pixelplay.data.preferences.PlaylistPreferencesRepository
 import com.theveloper.pixelplay.data.preferences.UserPreferencesRepository
 import com.theveloper.pixelplay.data.stream.BulkSyncResult
 import com.theveloper.pixelplay.data.stream.CloudMusicUtils
+import com.theveloper.pixelplay.data.stream.CloudSongUrlCoalescer
 import dagger.hilt.android.qualifiers.ApplicationContext
-import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -63,28 +63,16 @@ class NeteaseRepository @Inject constructor(
         private const val NETEASE_MAX_PLAYLIST_PAGES = 200
     }
 
-    private val prefs: SharedPreferences = try {
-        val masterKey = MasterKey.Builder(context)
-            .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-            .build()
-        EncryptedSharedPreferences.create(
-            context,
-            "netease_prefs",
-            masterKey,
-            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-        )
-    } catch (e: Exception) {
-        Timber.e(e, "NeteaseRepository: Failed to create EncryptedSharedPreferences, falling back to plain")
-        context.getSharedPreferences("netease_prefs_plain", Context.MODE_PRIVATE)
-    }
+    private val prefs: SharedPreferences = SecureSharedPreferencesFactory.create(context, "netease_prefs")
 
     private val _isLoggedInFlow = MutableStateFlow(false)
     val isLoggedInFlow: StateFlow<Boolean> = _isLoggedInFlow.asStateFlow()
 
-    private val inFlightSongUrlRequests = java.util.concurrent.ConcurrentHashMap<Long, CompletableDeferred<Result<String>>>()
-    private val lastSongUrlAttemptAtMs = java.util.concurrent.ConcurrentHashMap<Long, Long>()
     private val songUrlRequestCooldownMs = 1500L
+    internal val songUrlCoalescer = CloudSongUrlCoalescer<Long>(
+        cooldownMs = songUrlRequestCooldownMs,
+        throttledMessage = "Netease song URL request throttled"
+    )
     private val neteaseSongUrlRequestMutex = Mutex()
     @Volatile
     private var lastGlobalSongUrlRequestAtMs = 0L
@@ -490,59 +478,44 @@ class NeteaseRepository @Inject constructor(
     // ─── Song URL Resolution ───────────────────────────────────────────
 
     suspend fun getSongUrl(songId: Long, quality: String = "lossless"): Result<String> {
-        val now = System.currentTimeMillis()
-        val lastAttempt = lastSongUrlAttemptAtMs[songId]
-        if (lastAttempt != null && now - lastAttempt < songUrlRequestCooldownMs) {
-            Timber.d("Skip Netease song URL retry due to cooldown: songId=$songId")
-            return Result.failure(IllegalStateException("Netease song URL request throttled"))
-        }
-        lastSongUrlAttemptAtMs[songId] = now
+        return songUrlCoalescer.resolve(songId) {
+            withContext(Dispatchers.IO) {
+                try {
+                    // Try the requested level first (e.g. "lossless" for SVIP accounts),
+                    // then degrade gracefully so non-privileged accounts still resolve a URL.
+                    val qualityFallbacks = linkedSetOf(quality, "exhigh", "higher", "standard")
+                    var lastFailure: String? = null
 
-        inFlightSongUrlRequests[songId]?.let {
-            return it.await()
-        }
+                    for (level in qualityFallbacks) {
+                        val raw = requestSongUrl(songId, level)
+                        val root = JSONObject(raw)
+                        val code = root.optInt("code", -1)
+                        if (code != 200) {
+                            lastFailure = "API code=$code for level=$level"
+                            continue
+                        }
 
-        val requestDeferred = CompletableDeferred<Result<String>>()
-        val existing = inFlightSongUrlRequests.putIfAbsent(songId, requestDeferred)
-        if (existing != null) {
-            return existing.await()
-        }
+                        val data = root.optJSONArray("data")
+                        val urlObj = data?.optJSONObject(0)
+                        val url = urlObj?.optString("url", "")
+                        if (!url.isNullOrBlank() && url != "null") {
+                            val secureUrl = url.replaceFirst(Regex("^http://", RegexOption.IGNORE_CASE), "https://")
+                            Timber.d("Resolved Netease URL for songId=$songId with level=$level")
+                            return@withContext Result.success(secureUrl)
+                        }
 
-        val result = withContext(Dispatchers.IO) {
-            runCatching {
-                // Try the requested level first (e.g. "lossless" for SVIP accounts),
-                // then degrade gracefully so non-privileged accounts still resolve a URL.
-                val qualityFallbacks = linkedSetOf(quality, "exhigh", "higher", "standard")
-                var lastFailure: String? = null
-
-                for (level in qualityFallbacks) {
-                    val raw = requestSongUrl(songId, level)
-                    val root = JSONObject(raw)
-                    val code = root.optInt("code", -1)
-                    if (code != 200) {
-                        lastFailure = "API code=$code for level=$level"
-                        continue
+                        val freeTrialInfo = urlObj?.opt("freeTrialInfo")
+                        lastFailure = "Empty URL at level=$level, freeTrialInfo=$freeTrialInfo"
                     }
 
-                    val data = root.optJSONArray("data")
-                    val urlObj = data?.optJSONObject(0)
-                    val url = urlObj?.optString("url", "")
-                    if (!url.isNullOrBlank() && url != "null") {
-                        Timber.d("Resolved Netease URL for songId=$songId with level=$level")
-                        return@runCatching url
-                    }
-
-                    val freeTrialInfo = urlObj?.opt("freeTrialInfo")
-                    lastFailure = "Empty URL at level=$level, freeTrialInfo=$freeTrialInfo"
+                    Result.failure(Exception("No URL available for song $songId ($lastFailure)"))
+                } catch (ce: CancellationException) {
+                    throw ce
+                } catch (e: Exception) {
+                    Result.failure(e)
                 }
-
-                throw Exception("No URL available for song $songId ($lastFailure)")
             }
         }
-
-        requestDeferred.complete(result)
-        inFlightSongUrlRequests.remove(songId, requestDeferred)
-        return result
     }
 
     /**

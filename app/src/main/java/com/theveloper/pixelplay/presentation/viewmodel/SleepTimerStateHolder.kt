@@ -10,6 +10,7 @@ import androidx.media3.session.MediaController
 import androidx.media3.session.SessionCommand
 import com.theveloper.pixelplay.R
 import com.theveloper.pixelplay.data.service.MusicNotificationProvider
+import com.theveloper.pixelplay.data.service.SleepTimerCoordinator
 import com.theveloper.pixelplay.data.service.SleepTimerReceiver
 import com.theveloper.pixelplay.data.EotStateHolder
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -40,6 +41,7 @@ import javax.inject.Singleton
 @Singleton
 class SleepTimerStateHolder @Inject constructor(
     @ApplicationContext private val context: Context,
+    private val sleepTimerCoordinator: SleepTimerCoordinator,
 ) {
     // Timer State
     private val _sleepTimerEndTimeMillis = MutableStateFlow<Long?>(null)
@@ -70,6 +72,12 @@ class SleepTimerStateHolder @Inject constructor(
     private var mediaControllerProvider: (() -> MediaController?)? = null
     private var currentSongIdProvider: (() -> StateFlow<String?>)? = null
     private var songTitleResolver: ((String?) -> String)? = null
+
+    init {
+        sleepTimerCoordinator.registerStateCleanupHandler {
+            clearTimerStateInternal()
+        }
+    }
 
     private fun sleepTimerPendingIntent(): PendingIntent {
         val intent = Intent(context, SleepTimerReceiver::class.java).apply {
@@ -258,35 +266,38 @@ class SleepTimerStateHolder @Inject constructor(
      * Cancel any active sleep timer or EOT timer.
      */
     fun cancelSleepTimer(overrideToastMessage: String? = null, suppressDefaultToast: Boolean = false) {
-        val scope = this.scope ?: return
         val wasAnythingActive = _activeTimerValueDisplay.value != null
+        clearTimerStateInternal()
 
-        // Cancel Alarm
+        val activeScope = this.scope ?: return
+        // Handle toast
+        when {
+            overrideToastMessage != null -> activeScope.launch { toastEmitter?.invoke(overrideToastMessage) }
+            !suppressDefaultToast && wasAnythingActive -> activeScope.launch {
+                toastEmitter?.invoke(context.getString(R.string.sleep_timer_cancelled_toast))
+            }
+        }
+    }
+
+    /**
+     * Clears timer UI state and cancels pending alarms/jobs safely even if [scope] has been cleared
+     * or [MusicService] is no longer running when the alarm fires.
+     */
+    private fun clearTimerStateInternal() {
         val pendingIntent = sleepTimerPendingIntent()
-        alarmManager.cancel(pendingIntent)
+        runCatching { alarmManager.cancel(pendingIntent) }
 
-        // Cancel duration timer
         sleepTimerJob?.cancel()
         sleepTimerJob = null
         _sleepTimerEndTimeMillis.value = null
 
-        // Cancel EOT timer
         eotSongMonitorJob?.cancel()
         eotSongMonitorJob = null
         _isEndOfTrackTimerActive.value = false
         EotStateHolder.setEotTargetSong(null)
 
-        // Clear display
         _activeTimerDurationMinutes.value = null
         _activeTimerValueDisplay.value = null
-
-        // Handle toast
-        when {
-            overrideToastMessage != null -> scope.launch { toastEmitter?.invoke(overrideToastMessage) }
-            !suppressDefaultToast && wasAnythingActive -> scope.launch {
-                toastEmitter?.invoke(context.getString(R.string.sleep_timer_cancelled_toast))
-            }
-        }
     }
 
     /**

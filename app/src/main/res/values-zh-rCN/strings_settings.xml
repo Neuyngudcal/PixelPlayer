@@ -244,14 +244,6 @@
     <string name="settings_palette_style_expressive_desc">大胆的色调变化和对比。</string>
     <string name="settings_palette_style_fruit_salad">混搭 (Fruit Salad)</string>
     <string name="settings_palette_style_fruit_salad_desc">俏皮的旋转点缀。</string>
-    <string name="settings_palette_style_color_accuracy_title">色彩准确度</string>
-    <string name="settings_palette_style_color_accuracy_subtitle">0 表示保持当前调整。值越高越接近专辑封面的主色调。</string>
-    <string name="settings_palette_style_accuracy_current">当前</string>
-    <string name="settings_palette_style_accuracy_more_accurate">更准确</string>
-    <string name="settings_palette_style_accuracy_summary_current">0 • 当前</string>
-    <string name="settings_palette_style_accuracy_summary_subtle">%1$d • 微妙</string>
-    <string name="settings_palette_style_accuracy_summary_balanced">%1$d • 平衡</string>
-    <string name="settings_palette_style_accuracy_summary_precise">%1$d • 精确</string>
 
     <!-- NavBarCornerRadiusScreen -->
     <string name="navbar_adjust_title">调整圆角半径</string>

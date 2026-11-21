@@ -75,21 +75,16 @@ class LibraryStateHolder @Inject constructor(
     val currentSongSortOption = _currentSongSortOption.asStateFlow()
 
     // Filter Options
-    private val _currentStorageFilter = MutableStateFlow(com.theveloper.pixelplay.data.model.StorageFilter.ALL)
+    private val _currentStorageFilter = MutableStateFlow(com.theveloper.pixelplay.data.model.StorageFilter.OFFLINE)
     val currentStorageFilter = _currentStorageFilter.asStateFlow()
 
     /**
-     * Effective storage filter that accounts for the "hide local media" preference.
-     * When hideLocalMedia is true, forces ONLINE filter (excludes source_type = 0).
+     * Effective storage filter forced to OFFLINE for local-only playback.
      */
-    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     private val effectiveStorageFilter: kotlinx.coroutines.flow.Flow<com.theveloper.pixelplay.data.model.StorageFilter> =
-        kotlinx.coroutines.flow.combine(
-            _currentStorageFilter,
-            userPreferencesRepository.hideLocalMediaFlow
-        ) { filter, hideLocal ->
-            if (hideLocal) com.theveloper.pixelplay.data.model.StorageFilter.ONLINE else filter
-        }
+        _currentStorageFilter.map {
+            com.theveloper.pixelplay.data.model.StorageFilter.OFFLINE
+        }.distinctUntilChanged()
 
     private fun effectiveFoldersStorageFilter(
         selectedFilter: com.theveloper.pixelplay.data.model.StorageFilter
@@ -222,7 +217,7 @@ class LibraryStateHolder @Inject constructor(
             _currentArtistSortOption.value = SortOption.ARTISTS.find { it.storageKey == artistSortKey } ?: SortOption.ArtistNameAZ
             _currentFolderSortOption.value = SortOption.FOLDERS.find { it.storageKey == folderSortKey } ?: SortOption.FolderNameAZ
             _currentFavoriteSortOption.value = SortOption.LIKED.find { it.storageKey == likedAndFilter.first } ?: SortOption.LikedSongDateLiked
-            _currentStorageFilter.value = likedAndFilter.second
+            _currentStorageFilter.value = com.theveloper.pixelplay.data.model.StorageFilter.OFFLINE
         }
     }
 
@@ -267,16 +262,29 @@ class LibraryStateHolder @Inject constructor(
         needsReloadAfterTrim = false
         songsJob = scope?.launch {
             _isLoadingLibrary.value = true
-            musicRepository.getAudioFiles().conflate().collect { songs ->
-                // Process heavy list conversions in a single Default dispatcher switch
-                val (immutableSongs, songsMap) = withContext(Dispatchers.Default) {
-                    songs.toImmutableList() to songs.associateBy { it.id }
-                }
+            musicRepository.getAudioFiles()
+                .distinctUntilChanged()
+                .conflate()
+                .collect { songs ->
+                    val currentSongs = _allSongs.value
+                    // Process equality check and heavy list conversions in a single Default dispatcher switch
+                    val mappedUpdate = withContext(Dispatchers.Default) {
+                        val isStructurallyEqual = currentSongs.isNotEmpty() &&
+                            currentSongs.size == songs.size &&
+                            currentSongs.indices.all { currentSongs[it] == songs[it] }
+                        if (isStructurallyEqual) {
+                            null
+                        } else {
+                            songs.toImmutableList() to songs.associateBy { it.id }
+                        }
+                    }
 
-                _allSongs.value = immutableSongs
-                _allSongsById.value = songsMap
-                _isLoadingLibrary.value = false
-            }
+                    if (mappedUpdate != null) {
+                        _allSongs.value = mappedUpdate.first
+                        _allSongsById.value = mappedUpdate.second
+                    }
+                    _isLoadingLibrary.value = false
+                }
         }
     }
 
@@ -293,7 +301,7 @@ class LibraryStateHolder @Inject constructor(
                 filter to minTracks
             }.flatMapLatest { (filter, minTracks) ->
                 musicRepository.getAlbums(filter, minTracks)
-            }.conflate().collect { albums ->
+            }.distinctUntilChanged().conflate().collect { albums ->
                 val sortedAlbums = withContext(Dispatchers.Default) {
                     sortAlbumsList(albums, _currentAlbumSortOption.value).toImmutableList()
                 }
@@ -311,7 +319,7 @@ class LibraryStateHolder @Inject constructor(
             @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
             effectiveStorageFilter.flatMapLatest { filter ->
                 musicRepository.getArtists(filter)
-            }.conflate().collect { artists ->
+            }.distinctUntilChanged().conflate().collect { artists ->
                 val sortedArtists = withContext(Dispatchers.Default) {
                     sortArtistsList(artists, _currentArtistSortOption.value).toImmutableList()
                 }
@@ -328,7 +336,7 @@ class LibraryStateHolder @Inject constructor(
             @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
             effectiveStorageFilter.flatMapLatest { filter ->
                 musicRepository.getMusicFolders(effectiveFoldersStorageFilter(filter))
-            }.conflate().collect { folders ->
+            }.distinctUntilChanged().conflate().collect { folders ->
                 val sortedFolders = withContext(Dispatchers.Default) {
                     sortFoldersList(folders, _currentFolderSortOption.value).toImmutableList()
                 }

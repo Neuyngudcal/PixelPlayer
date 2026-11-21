@@ -36,13 +36,12 @@ class GlobalSettingsModuleHandler @Inject constructor(
         val type = TypeToken.getParameterized(List::class.java, PreferenceBackupEntry::class.java).type
         val entries: List<PreferenceBackupEntry> = gson.fromJson(payload, type)
         // Clear only the keys this handler owns (exclude playlist, quickfill, equalizer keys)
-        userPreferencesRepository.clearPreferencesExceptKeys(
-            PlaylistsModuleHandler.PLAYLIST_KEYS +
-            QuickFillModuleHandler.QUICK_FILL_KEYS +
-            EqualizerModuleHandler.EQUALIZER_KEYS
-        )
-        if (entries.isNotEmpty()) {
-            userPreferencesRepository.importPreferencesFromBackup(entries, clearExisting = false)
+        userPreferencesRepository.clearPreferencesExceptKeys(EXCLUDED_KEYS)
+        val sanitizedEntries = entries.filterNot {
+            UserPreferencesRepository.isExcludedFromBackup(it.key)
+        }
+        if (sanitizedEntries.isNotEmpty()) {
+            userPreferencesRepository.importPreferencesFromBackup(sanitizedEntries, clearExisting = false)
         }
     }
 

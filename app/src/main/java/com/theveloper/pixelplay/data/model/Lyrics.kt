@@ -1,5 +1,6 @@
 package com.theveloper.pixelplay.data.model
 
+import androidx.compose.runtime.Immutable
 import kotlinx.serialization.Serializable
 
 /**
@@ -9,6 +10,7 @@ import kotlinx.serialization.Serializable
  * @param synced Lista de pares (milisegundos, línea) para letras sincronizadas.
  * @param areFromRemote Indica si las letras se obtuvieron de una fuente remota.
  */
+@Immutable
 @Serializable
 data class Lyrics(
     val plain: List<String>? = null,
@@ -17,6 +19,7 @@ data class Lyrics(
     val provider: String? = null
 )
 
+@Immutable
 @Serializable
 data class SyncedLine(
     val time: Int,
@@ -29,6 +32,7 @@ data class SyncedLine(
     val isBackground: Boolean = false // True for [bg:...] or ttm:role="x-bg" backing vocals
 )
 
+@Immutable
 @Serializable
 data class SyncedWord(
     val time: Int,

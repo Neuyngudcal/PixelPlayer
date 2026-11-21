@@ -240,14 +240,6 @@
     <string name="settings_palette_style_expressive_desc">Changements de teinte audacieux et contraste.</string>
     <string name="settings_palette_style_fruit_salad">Fruit Salad</string>
     <string name="settings_palette_style_fruit_salad_desc">Accents rotatifs ludiques.</string>
-    <string name="settings_palette_style_color_accuracy_title">Fidélité des couleurs</string>
-    <string name="settings_palette_style_color_accuracy_subtitle">0 conserve le réglage actuel. Les valeurs plus élevées restent plus proches de la teinte dominante de la pochette.</string>
-    <string name="settings_palette_style_accuracy_current">Actuel</string>
-    <string name="settings_palette_style_accuracy_more_accurate">Plus fidèle</string>
-    <string name="settings_palette_style_accuracy_summary_current">0 • Actuel</string>
-    <string name="settings_palette_style_accuracy_summary_subtle">%1$d • Subtil</string>
-    <string name="settings_palette_style_accuracy_summary_balanced">%1$d • Équilibré</string>
-    <string name="settings_palette_style_accuracy_summary_precise">%1$d • Précis</string>
 
     <!-- NavBarCornerRadiusScreen -->
     <string name="navbar_adjust_title">Ajuster le rayon des angles</string>

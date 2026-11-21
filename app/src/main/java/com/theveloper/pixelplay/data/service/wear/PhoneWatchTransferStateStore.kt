@@ -185,6 +185,32 @@ class PhoneWatchTransferStateStore @Inject constructor() {
         scheduleTerminalCleanup(requestId)
     }
 
+    /**
+     * Marks any in-flight watch transfers as cancelled when the Android 15 dataSync FGS
+     * hits its execution time limit so the foreground notification and UI reflect timeout.
+     */
+    fun markActiveTransfersTimedOut(error: String = "Transfer timed out") {
+        val activeIds = _transfers.value.values
+            .filter { it.status == WearTransferProgress.STATUS_TRANSFERRING }
+            .map { it.requestId }
+        if (activeIds.isEmpty()) return
+        val now = System.currentTimeMillis()
+        _transfers.update { map ->
+            val mutable = map.toMutableMap()
+            activeIds.forEach { requestId ->
+                cleanupJobs.remove(requestId)?.cancel()
+                val current = mutable[requestId] ?: return@forEach
+                mutable[requestId] = current.copy(
+                    status = WearTransferProgress.STATUS_CANCELLED,
+                    error = error,
+                    updatedAtMillis = now,
+                )
+            }
+            mutable
+        }
+        activeIds.forEach(::scheduleTerminalCleanup)
+    }
+
     fun retainReachableWatchNodes(nodeIds: Set<String>) {
         _reachableWatchNodeIds.value = nodeIds
         watchSongIdsByNodeId.keys.toList().forEach { nodeId ->

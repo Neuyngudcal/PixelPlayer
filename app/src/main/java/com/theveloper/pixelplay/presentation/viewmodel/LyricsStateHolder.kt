@@ -19,6 +19,7 @@ import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.coroutines.cancellation.CancellationException
+import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -204,36 +205,36 @@ class LyricsStateHolder @Inject constructor(
                     _messageEvents.emit(contextHelper(R.string.lyrics_already_available))
                     return@launch
                 }
-            }
 
-            // Build ordered list of local source checks based on user preference.
-            // API_FIRST: skip local sources, go straight to remote.
-            // EMBEDDED_FIRST: check embedded, then local .lrc, then remote.
-            // LOCAL_FIRST: check local .lrc, then embedded, then remote.
-            val localSourceChecks: List<suspend () -> Pair<String, Int>?> = when (sourcePreference) {
-                LyricsSourcePreference.API_FIRST -> emptyList()
-                LyricsSourcePreference.EMBEDDED_FIRST -> listOf(
-                    { readEmbeddedLyricsFromFile(song)?.let { it to R.string.lyrics_embedded_already_available } },
-                    { readLocalLyricsFile(song)?.let { it to R.string.lyrics_local_lrc_already_available } }
-                )
-                LyricsSourcePreference.LOCAL_FIRST -> listOf(
-                    { readLocalLyricsFile(song)?.let { it to R.string.lyrics_local_lrc_already_available } },
-                    { readEmbeddedLyricsFromFile(song)?.let { it to R.string.lyrics_embedded_already_available } }
-                )
-            }
+                // Build ordered list of local source checks based on user preference.
+                // API_FIRST: skip local sources, go straight to remote.
+                // EMBEDDED_FIRST: check embedded, then local .lrc, then remote.
+                // LOCAL_FIRST: check local .lrc, then embedded, then remote.
+                val localSourceChecks: List<suspend () -> Pair<String, Int>?> = when (sourcePreference) {
+                    LyricsSourcePreference.API_FIRST -> emptyList()
+                    LyricsSourcePreference.EMBEDDED_FIRST -> listOf(
+                        { readEmbeddedLyricsFromFile(song)?.let { it to R.string.lyrics_embedded_already_available } },
+                        { readLocalLyricsFile(song)?.let { it to R.string.lyrics_local_lrc_already_available } }
+                    )
+                    LyricsSourcePreference.LOCAL_FIRST -> listOf(
+                        { readLocalLyricsFile(song)?.let { it to R.string.lyrics_local_lrc_already_available } },
+                        { readEmbeddedLyricsFromFile(song)?.let { it to R.string.lyrics_embedded_already_available } }
+                    )
+                }
 
-            // Try local sources in priority order.
-            for (sourceCheck in localSourceChecks) {
-                val result = withContext(Dispatchers.IO) { sourceCheck() }
-                if (result != null) {
-                    val (rawLyrics, messageResId) = result
-                    val parsed = LyricsUtils.parseLyrics(rawLyrics)
-                    if (hasValidLyrics(parsed)) {
-                        val lyrics = parsed.copy(areFromRemote = false)
-                        _searchUiState.value = LyricsSearchUiState.Success(lyrics)
-                        _songUpdates.emit(song.copy(lyrics = rawLyrics) to lyrics)
-                        _messageEvents.emit(contextHelper(messageResId))
-                        return@launch
+                // Try local sources in priority order.
+                for (sourceCheck in localSourceChecks) {
+                    val result = withContext(Dispatchers.IO) { sourceCheck() }
+                    if (result != null) {
+                        val (rawLyrics, messageResId) = result
+                        val parsed = LyricsUtils.parseLyrics(rawLyrics)
+                        if (hasValidLyrics(parsed)) {
+                            val lyrics = parsed.copy(areFromRemote = false)
+                            _searchUiState.value = LyricsSearchUiState.Success(lyrics)
+                            _songUpdates.emit(song.copy(lyrics = rawLyrics) to lyrics)
+                            _messageEvents.emit(contextHelper(messageResId))
+                            return@launch
+                        }
                     }
                 }
             }
@@ -242,7 +243,7 @@ class LyricsStateHolder @Inject constructor(
             if (forcePickResults) {
                 musicRepository.searchRemoteLyrics(song)
                     .onSuccess { (query, results) ->
-                        _searchUiState.value = LyricsSearchUiState.PickResult(query, results)
+                        _searchUiState.value = LyricsSearchUiState.PickResult(query, results.toImmutableList())
                     }
                     .onFailure { error ->
                         handleError(error)
@@ -259,7 +260,7 @@ class LyricsStateHolder @Inject constructor(
                             // Fallback to search
                             musicRepository.searchRemoteLyrics(song)
                                 .onSuccess { (query, results) ->
-                                    _searchUiState.value = LyricsSearchUiState.PickResult(query, results)
+                                    _searchUiState.value = LyricsSearchUiState.PickResult(query, results.toImmutableList())
                                 }
                                 .onFailure { searchError -> handleError(searchError) }
                         } else {
@@ -280,7 +281,7 @@ class LyricsStateHolder @Inject constructor(
             _searchUiState.value = LyricsSearchUiState.Loading
             musicRepository.searchRemoteLyricsByQuery(title, artist)
                 .onSuccess { (q, results) ->
-                    _searchUiState.value = LyricsSearchUiState.PickResult(q, results)
+                    _searchUiState.value = LyricsSearchUiState.PickResult(q, results.toImmutableList())
                 }
                 .onFailure { error -> handleError(error) }
         }

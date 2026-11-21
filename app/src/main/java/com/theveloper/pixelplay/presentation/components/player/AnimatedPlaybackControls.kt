@@ -1,17 +1,18 @@
 package com.theveloper.pixelplay.presentation.components.player
 
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.Crossfade
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.AnimationSpec
-import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -32,15 +33,15 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.rememberCoroutineScope
-import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.theveloper.pixelplay.presentation.components.LocalMaterialTheme
@@ -86,15 +87,16 @@ fun AnimatedPlaybackControls(
     var playPauseVisualState by remember { mutableStateOf(isPlaying) }
     var pendingPlayPauseState by remember { mutableStateOf<Boolean?>(null) }
     val hapticFeedback = LocalHapticFeedback.current
-    val coroutineScope = rememberCoroutineScope()
 
     val motionScheme = remember { MotionScheme.expressive() }
-    val defaultSpatialDpSpec = remember { motionScheme.defaultSpatialSpec<Dp>() }
+    val defaultSpatialDpSpec = remember(motionScheme) {
+        motionScheme.fastSpatialSpec<Dp>()
+    }
 
     LaunchedEffect(lastClicked, clickTrigger) {
         if (lastClicked != null) {
             val delayTime = when (lastClicked) {
-                PlaybackButtonType.NEXT, PlaybackButtonType.PREVIOUS -> 600L
+                PlaybackButtonType.NEXT, PlaybackButtonType.PREVIOUS -> 300L
                 else -> releaseDelay
             }
             delay(delayTime)
@@ -126,127 +128,151 @@ fun AnimatedPlaybackControls(
         }
     }
 
+    fun weightFor(button: PlaybackButtonType): Float = when (lastClicked) {
+        button -> expansionWeight
+        null -> baseWeight
+        else -> compressionWeight
+    }
+
+    // Isolate weight & corner state reads to Layout/Draw phases so button press springs
+    // and squircle morphs never trigger composition re-execution on every animation frame.
+    val prevWeightState = animateFloatAsState(
+        targetValue = weightFor(PlaybackButtonType.PREVIOUS),
+        animationSpec = pressAnimationSpec,
+        label = "prevWeight"
+    )
+    val playWeightState = animateFloatAsState(
+        targetValue = weightFor(PlaybackButtonType.PLAY_PAUSE),
+        animationSpec = pressAnimationSpec,
+        label = "playWeight"
+    )
+    val nextWeightState = animateFloatAsState(
+        targetValue = weightFor(PlaybackButtonType.NEXT),
+        animationSpec = pressAnimationSpec,
+        label = "nextWeight"
+    )
+    val playCornerState = animateDpAsState(
+        targetValue = if (!playPauseVisualState) playPauseCornerPlaying else playPauseCornerPaused,
+        animationSpec = defaultSpatialDpSpec,
+        label = "playCorner"
+    )
+
     Box(
         modifier = modifier
             .fillMaxWidth()
             .height(height)
     ) {
-        Row(
+        Layout(
             modifier = Modifier.fillMaxSize(),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            fun weightFor(button: PlaybackButtonType): Float = when (lastClicked) {
-                button -> expansionWeight
-                null -> baseWeight
-                else -> compressionWeight
-            }
-
-            val prevWeight by animateFloatAsState(
-                targetValue = weightFor(PlaybackButtonType.PREVIOUS),
-                animationSpec = pressAnimationSpec,
-                label = "prevWeight"
-            )
-            Box(
-                modifier = Modifier
-                    .weight(prevWeight)
-                    .fillMaxHeight()
-                    .clip(CircleShape)
-                    .background(colorPreviousButton)
-                    .clickable {
-                        lastClicked = PlaybackButtonType.PREVIOUS
-                        clickTrigger++
-                        coroutineScope.launch {
-                            delay(180)
+            content = {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clip(CircleShape)
+                        .background(colorPreviousButton)
+                        .clickable {
+                            lastClicked = PlaybackButtonType.PREVIOUS
+                            clickTrigger++
+                            hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                             onPrevious()
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.SkipPrevious,
+                        contentDescription = "Anterior",
+                        tint = tintPreviousIcon,
+                        modifier = Modifier.size(iconSize)
+                    )
+                }
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            clip = true
+                            val corner = playCornerState.value
+                            shape = AbsoluteSmoothCornerShape(
+                                cornerRadiusTL = corner,
+                                smoothnessAsPercentTL = 60,
+                                cornerRadiusTR = corner,
+                                smoothnessAsPercentTR = 60,
+                                cornerRadiusBL = corner,
+                                smoothnessAsPercentBL = 60,
+                                cornerRadiusBR = corner,
+                                smoothnessAsPercentBR = 60
+                            )
                         }
-                    },
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Rounded.SkipPrevious,
-                    contentDescription = "Anterior",
-                    tint = tintPreviousIcon,
-                    modifier = Modifier.size(iconSize)
-                )
-            }
+                        .background(colorPlayPause)
+                        .clickable {
+                            lastClicked = PlaybackButtonType.PLAY_PAUSE
+                            clickTrigger++
+                            hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            onPlayPause()
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    MorphingPlayPauseIcon(
+                        isPlaying = playPauseVisualState,
+                        tint = tintPlayPauseIcon,
+                        size = playPauseIconSize,
+                        motionScheme = motionScheme
+                    )
+                }
 
-            val playWeight by animateFloatAsState(
-                targetValue = weightFor(PlaybackButtonType.PLAY_PAUSE),
-                animationSpec = pressAnimationSpec,
-                label = "playWeight"
-            )
-            val playCorner by animateDpAsState(
-                targetValue = if (!playPauseVisualState) playPauseCornerPlaying else playPauseCornerPaused,
-                animationSpec = defaultSpatialDpSpec,
-                label = "playCorner"
-            )
-            Box(
-                modifier = Modifier
-                    .weight(playWeight)
-                    .fillMaxHeight()
-                    .graphicsLayer {
-                        clip = true
-                        shape = AbsoluteSmoothCornerShape(
-                            cornerRadiusTL = playCorner,
-                            smoothnessAsPercentTR = 60,
-                            cornerRadiusBL = playCorner,
-                            smoothnessAsPercentTL = 60,
-                            cornerRadiusTR = playCorner,
-                            smoothnessAsPercentBL = 60,
-                            cornerRadiusBR = playCorner,
-                            smoothnessAsPercentBR = 60
-                        )
-                    }
-                    .background(colorPlayPause)
-                    .clickable {
-                        lastClicked = PlaybackButtonType.PLAY_PAUSE
-                        clickTrigger++
-                        hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        onPlayPause()
-                    },
-                contentAlignment = Alignment.Center
-            ) {
-                MorphingPlayPauseIcon(
-                    isPlaying = playPauseVisualState,
-                    tint = tintPlayPauseIcon,
-                    size = playPauseIconSize,
-                    motionScheme = motionScheme
-                )
-            }
-
-            val nextWeight by animateFloatAsState(
-                targetValue = weightFor(PlaybackButtonType.NEXT),
-                animationSpec = pressAnimationSpec,
-                label = "nextWeight"
-            )
-            Box(
-                modifier = Modifier
-                    .weight(nextWeight)
-                    .fillMaxHeight()
-                    .clip(CircleShape)
-                    .background(colorNextButton)
-                    .clickable {
-                        lastClicked = PlaybackButtonType.NEXT
-                        clickTrigger++
-                        coroutineScope.launch {
-                            delay(180)
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clip(CircleShape)
+                        .background(colorNextButton)
+                        .clickable {
+                            lastClicked = PlaybackButtonType.NEXT
+                            clickTrigger++
+                            hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                             onNext()
-                        }
-                    },
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Rounded.SkipNext,
-                    contentDescription = "Siguiente",
-                    tint = tintNextIcon,
-                    modifier = Modifier.size(iconSize)
-                )
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.SkipNext,
+                        contentDescription = "Siguiente",
+                        tint = tintNextIcon,
+                        modifier = Modifier.size(iconSize)
+                    )
+                }
+            }
+        ) { measurables, constraints ->
+            val gapPx = 6.dp.roundToPx()
+            val totalGapPx = gapPx * 2
+            val availableWidth = (constraints.maxWidth - totalGapPx).coerceAtLeast(0)
+            val heightPx = constraints.maxHeight
+
+            val w0 = prevWeightState.value.coerceAtLeast(0.01f)
+            val w1 = playWeightState.value.coerceAtLeast(0.01f)
+            val w2 = nextWeightState.value.coerceAtLeast(0.01f)
+            val weightSum = w0 + w1 + w2
+
+            val width0 = (availableWidth * (w0 / weightSum)).toInt().coerceAtLeast(0)
+            val width1 = (availableWidth * (w1 / weightSum)).toInt().coerceAtLeast(0)
+            val width2 = (availableWidth - width0 - width1).coerceAtLeast(0)
+
+            val placeable0 = measurables[0].measure(Constraints.fixed(width0, heightPx))
+            val placeable1 = measurables[1].measure(Constraints.fixed(width1, heightPx))
+            val placeable2 = measurables[2].measure(Constraints.fixed(width2, heightPx))
+
+            layout(constraints.maxWidth, heightPx) {
+                var x = 0
+                placeable0.placeRelative(x, 0)
+                x += width0 + gapPx
+                placeable1.placeRelative(x, 0)
+                x += width1 + gapPx
+                placeable2.placeRelative(x, 0)
             }
         }
     }
 }
 
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun MorphingPlayPauseIcon(
     isPlaying: Boolean,
@@ -254,10 +280,24 @@ private fun MorphingPlayPauseIcon(
     size: Dp,
     motionScheme: MotionScheme
 ) {
-    Crossfade(
+    AnimatedContent(
         targetState = isPlaying,
-        animationSpec = motionScheme.fastEffectsSpec(),
-        label = "playPauseCrossfade"
+        transitionSpec = {
+            (scaleIn(
+                initialScale = 0.68f,
+                animationSpec = motionScheme.fastSpatialSpec()
+            ) + fadeIn(
+                animationSpec = motionScheme.fastEffectsSpec()
+            )).togetherWith(
+                scaleOut(
+                    targetScale = 0.68f,
+                    animationSpec = motionScheme.fastSpatialSpec()
+                ) + fadeOut(
+                    animationSpec = motionScheme.fastEffectsSpec()
+                )
+            )
+        },
+        label = "playPauseMorph"
     ) { playing ->
         Icon(
             imageVector = if (playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,

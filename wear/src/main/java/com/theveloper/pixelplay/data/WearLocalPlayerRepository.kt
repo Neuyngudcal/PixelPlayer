@@ -5,7 +5,6 @@ import android.content.ComponentName
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import android.graphics.Color
 import android.media.MediaMetadataRetriever
 import android.net.Uri
 import androidx.core.content.ContextCompat
@@ -17,6 +16,7 @@ import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.theveloper.pixelplay.data.local.LocalSongDao
 import com.theveloper.pixelplay.data.local.LocalSongEntity
+import com.theveloper.pixelplay.presentation.theme.WearColorExtractor
 import com.theveloper.pixelplay.shared.WearLibraryItem
 import com.theveloper.pixelplay.shared.WearThemePalette
 import kotlinx.coroutines.CoroutineScope
@@ -823,18 +823,13 @@ class WearLocalPlayerRepository @Inject constructor(
         return try {
             retriever.setDataSource(song.localPath)
             val embedded = retriever.embeddedPicture ?: return null
-            val bitmap = BitmapFactory.decodeByteArray(
+            val bitmap = decodeBoundedBitmapFromBytes(
                 embedded,
-                0,
-                embedded.size,
-                BitmapFactory.Options().apply {
-                    inPreferredConfig = Bitmap.Config.RGB_565
-                    inSampleSize = 2
-                },
+                maxDimension = WearColorExtractor.EXTRACTION_DECODE_DIMENSION,
             ) ?: return null
 
             try {
-                extractSeedColorArgb(bitmap)
+                WearColorExtractor.extractSeedColorArgb(bitmap)
             } finally {
                 bitmap.recycle()
             }
@@ -851,18 +846,13 @@ class WearLocalPlayerRepository @Inject constructor(
         return try {
             retriever.setDataSource(application, uri)
             val embedded = retriever.embeddedPicture ?: return null
-            val bitmap = BitmapFactory.decodeByteArray(
+            val bitmap = decodeBoundedBitmapFromBytes(
                 embedded,
-                0,
-                embedded.size,
-                BitmapFactory.Options().apply {
-                    inPreferredConfig = Bitmap.Config.RGB_565
-                    inSampleSize = 2
-                },
+                maxDimension = WearColorExtractor.EXTRACTION_DECODE_DIMENSION,
             ) ?: return null
 
             try {
-                extractSeedColorArgb(bitmap)
+                WearColorExtractor.extractSeedColorArgb(bitmap)
             } finally {
                 bitmap.recycle()
             }
@@ -886,43 +876,5 @@ class WearLocalPlayerRepository @Inject constructor(
         } finally {
             runCatching { retriever.release() }
         }
-    }
-
-    private fun extractSeedColorArgb(bitmap: Bitmap): Int? {
-        if (bitmap.width <= 0 || bitmap.height <= 0) return null
-
-        val step = (minOf(bitmap.width, bitmap.height) / 24).coerceAtLeast(1)
-        var redSum = 0L
-        var greenSum = 0L
-        var blueSum = 0L
-        var count = 0L
-
-        var y = 0
-        while (y < bitmap.height) {
-            var x = 0
-            while (x < bitmap.width) {
-                val pixel = bitmap.getPixel(x, y)
-                if (Color.alpha(pixel) >= 28) {
-                    val red = Color.red(pixel)
-                    val green = Color.green(pixel)
-                    val blue = Color.blue(pixel)
-                    if (red + green + blue > 36) {
-                        redSum += red
-                        greenSum += green
-                        blueSum += blue
-                        count++
-                    }
-                }
-                x += step
-            }
-            y += step
-        }
-
-        if (count == 0L) return null
-        return Color.rgb(
-            (redSum / count).toInt(),
-            (greenSum / count).toInt(),
-            (blueSum / count).toInt(),
-        )
     }
 }

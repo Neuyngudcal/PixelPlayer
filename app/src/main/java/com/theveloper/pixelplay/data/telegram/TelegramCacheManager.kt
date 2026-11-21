@@ -1,9 +1,12 @@
 package com.theveloper.pixelplay.data.telegram
 
 import android.content.Context
+import androidx.annotation.VisibleForTesting
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -11,7 +14,6 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.launch
 import org.drinkless.tdlib.TdApi
 import timber.log.Timber
-import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -33,9 +35,21 @@ class TelegramCacheManager @Inject constructor(
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     
-    // Track currently playing Telegram file to avoid deleting it
+    // Track currently playing Telegram file(s) to avoid deleting in-use / crossfading tracks
     @Volatile
     private var activeFileId: Int? = null
+
+    @Volatile
+    private var secondaryActiveFileId: Int? = null
+
+    // Reference-counted pins held by active streams or transitions so TDLib DeleteFile never evicts them
+    private val pinnedFileCounts = ConcurrentHashMap<Int, Int>()
+
+    // Pending delayed eviction jobs keyed by fileId so re-activation/pinning cancels scheduled deletions
+    private val pendingEvictionJobs = ConcurrentHashMap<Int, Job>()
+
+    @VisibleForTesting
+    internal var evictionGraceDelayMs: Long = 2_000L
     
     // Track recently played files for potential cleanup
     private val recentlyPlayedFileIds = ConcurrentHashMap.newKeySet<Int>()
@@ -88,31 +102,94 @@ class TelegramCacheManager @Inject constructor(
     private val HISTORY_CACHE_LIMIT = 5 
 
     /**
+     * Pin a Telegram file so LRU eviction cannot delete it while a stream or crossfade uses it.
+     * Supports nested/concurrent pins via reference counting and cancels any pending deletion.
+     */
+    fun pinFile(fileId: Int) {
+        pendingEvictionJobs.remove(fileId)?.cancel()
+        synchronized(pinnedFileCounts) {
+            pinnedFileCounts[fileId] = (pinnedFileCounts[fileId] ?: 0) + 1
+        }
+    }
+
+    /**
+     * Release one pin acquired via [pinFile].
+     */
+    fun unpinFile(fileId: Int) {
+        synchronized(pinnedFileCounts) {
+            val current = pinnedFileCounts[fileId] ?: return
+            if (current <= 1) {
+                pinnedFileCounts.remove(fileId)
+            } else {
+                pinnedFileCounts[fileId] = current - 1
+            }
+        }
+    }
+
+    /**
+     * Protect both primary and secondary (e.g. crossfading/pre-buffered) active playback files.
+     */
+    fun setActivePlaybackFiles(primaryFileId: Int?, secondaryFileId: Int? = null) {
+        secondaryActiveFileId = secondaryFileId
+        if (secondaryFileId != null) {
+            pendingEvictionJobs.remove(secondaryFileId)?.cancel()
+        }
+        if (primaryFileId != null) {
+            setActivePlayback(primaryFileId)
+        } else {
+            activeFileId = null
+        }
+    }
+
+    internal fun isFileProtected(fileId: Int): Boolean {
+        if (fileId == activeFileId || fileId == secondaryActiveFileId) return true
+        if ((pinnedFileCounts[fileId] ?: 0) > 0) return true
+        return synchronized(audioFileHistory) { audioFileHistory.contains(fileId) }
+    }
+
+    private fun isFilePinnedOrActive(fileId: Int): Boolean {
+        return fileId == activeFileId ||
+            fileId == secondaryActiveFileId ||
+            (pinnedFileCounts[fileId] ?: 0) > 0
+    }
+
+    /**
      * Mark a file as currently being played and manage the rolling cache.
      */
     fun setActivePlayback(fileId: Int?) {
         if (fileId == null) return
-        
+
+        // Cancel any pending deletion if this file is re-activated within the grace period
+        pendingEvictionJobs.remove(fileId)?.cancel()
+
+        val filesToEvict = mutableListOf<Int>()
         // LRU Logic: Move to end (most recent)
         synchronized(audioFileHistory) {
-            if (audioFileHistory.contains(fileId)) {
-                audioFileHistory.remove(fileId)
-            }
+            audioFileHistory.remove(fileId)
             audioFileHistory.add(fileId)
-            
+
             Timber.d("TelegramCacheManager: Active file $fileId. History size: ${audioFileHistory.size}")
-            
-            // Trim One Oldest file if over limit
-            while (audioFileHistory.size > HISTORY_CACHE_LIMIT) {
-                val oldestFileId = audioFileHistory.removeAt(0) // Remove first (oldest)
-                Timber.d("TelegramCacheManager: Cache full. Deleting oldest file: $oldestFileId")
-                cleanupAudioFile(oldestFileId)
+
+            // Trim oldest unprotected files if over limit
+            var index = 0
+            while (audioFileHistory.size > HISTORY_CACHE_LIMIT && index < audioFileHistory.size) {
+                val candidate = audioFileHistory[index]
+                if (candidate == fileId || isFilePinnedOrActive(candidate)) {
+                    index++
+                } else {
+                    audioFileHistory.removeAt(index)
+                    filesToEvict.add(candidate)
+                }
             }
         }
-        
+
         activeFileId = fileId
+        filesToEvict.forEach { oldestFileId ->
+            Timber.d("TelegramCacheManager: Cache full. Scheduling deletion for oldest file: $oldestFileId")
+            cleanupAudioFile(oldestFileId)
+        }
     }
-    
+
     /**
      * Called when playback stops completely.
      * We do NOT delete immediately anymore; we let the LRU history handle it
@@ -120,30 +197,47 @@ class TelegramCacheManager @Inject constructor(
      */
     fun onPlaybackStopped() {
         val fileId = activeFileId
-        if (fileId != null) {
-            Timber.d("TelegramCacheManager: Playback stopped (File retained in history buffer)")
+        val secondaryId = secondaryActiveFileId
+        if (fileId != null || secondaryId != null) {
+            Timber.d("TelegramCacheManager: Playback stopped (Files retained in history buffer)")
             activeFileId = null
+            secondaryActiveFileId = null
         }
     }
-    
+
     /**
      * Clean up a specific audio file that is evicted from the history buffer.
      */
     private fun cleanupAudioFile(fileId: Int) {
-        scope.launch {
-            // No strict 10s delay needed here since we have a buffer of 4 other songs 
-            // before this one gets pushed out. But a small safety delay is always good.
-            kotlinx.coroutines.delay(2_000) 
-            
+        if (isFileProtected(fileId)) {
+            Timber.d("TelegramCacheManager: Skipping cleanup for protected file $fileId")
+            return
+        }
+        lateinit var job: Job
+        job = scope.launch {
             try {
+                // Small safety grace window in case another player/seek re-activates this file
+                kotlinx.coroutines.delay(evictionGraceDelayMs)
+
+                if (isFileProtected(fileId)) {
+                    Timber.d("TelegramCacheManager: Aborting deletion for re-activated/pinned file $fileId")
+                    return@launch
+                }
+
                 // Use TDLib's DeleteFile to remove the downloaded file
                 @Suppress("UNUSED_VARIABLE")
                 val result: TdApi.Ok = telegramClientManager.sendRequest(TdApi.DeleteFile(fileId))
                 Timber.d("TelegramCacheManager: Deleted evicted audio file $fileId")
+            } catch (e: CancellationException) {
+                Timber.d("TelegramCacheManager: Cancelled pending deletion for file $fileId")
             } catch (e: Exception) {
                 Timber.w("TelegramCacheManager: Could not delete file $fileId: ${e.message}")
+            } finally {
+                pendingEvictionJobs.remove(fileId, job)
             }
         }
+        val previous = pendingEvictionJobs.put(fileId, job)
+        previous?.cancel()
     }
     
     /**
@@ -260,20 +354,29 @@ class TelegramCacheManager @Inject constructor(
      */
     suspend fun clearAllCache() {
         Timber.d("TelegramCacheManager: Clearing all Telegram cache")
-        
-        // Clear memory tracking
+
+        // Cancel pending eviction jobs and clear memory tracking
+        val jobsToCancel = pendingEvictionJobs.values.toList()
+        pendingEvictionJobs.clear()
+        jobsToCancel.forEach { it.cancel() }
+
         activeFileId = null
+        secondaryActiveFileId = null
+        pinnedFileCounts.clear()
+        synchronized(audioFileHistory) {
+            audioFileHistory.clear()
+        }
         recentlyPlayedFileIds.clear()
-        
+
         // Clear failed art cache
         failedArtCache.clear()
-        
+
         // Clear embedded art cache
         clearEmbeddedArtCache()
-        
+
         // Clear TDLib cache
         clearTdLibCache()
-        
+
         Timber.d("TelegramCacheManager: All Telegram cache cleared")
     }
 }

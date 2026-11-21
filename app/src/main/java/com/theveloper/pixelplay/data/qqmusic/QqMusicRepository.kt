@@ -3,8 +3,8 @@ package com.theveloper.pixelplay.data.qqmusic
 
 import android.content.Context
 import android.content.SharedPreferences
-import androidx.security.crypto.EncryptedSharedPreferences
-import androidx.security.crypto.MasterKey
+import com.theveloper.pixelplay.BuildConfig
+import com.theveloper.pixelplay.data.security.SecureSharedPreferencesFactory
 import android.util.Base64
 import com.theveloper.pixelplay.data.database.AlbumEntity
 import com.theveloper.pixelplay.data.database.ArtistEntity
@@ -20,8 +20,9 @@ import com.theveloper.pixelplay.data.network.qqmusic.QqMusicApiService
 import com.theveloper.pixelplay.data.preferences.PlaylistPreferencesRepository
 import com.theveloper.pixelplay.data.stream.BulkSyncResult
 import com.theveloper.pixelplay.data.stream.CloudMusicUtils
+import com.theveloper.pixelplay.data.stream.CloudSongUrlCoalescer
 import dagger.hilt.android.qualifiers.ApplicationContext
-import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -67,27 +68,15 @@ class QqMusicRepository @Inject constructor(
         val failedPlaylistCount: Int
     )
 
-    private val prefs: SharedPreferences = try {
-        val masterKey = MasterKey.Builder(context)
-            .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-            .build()
-        EncryptedSharedPreferences.create(
-            context,
-            "qqmusic_prefs",
-            masterKey,
-            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-        )
-    } catch (e: Exception) {
-        Timber.e(e, "QqMusicRepository: Failed to create EncryptedSharedPreferences, falling back to plain")
-        context.getSharedPreferences("qqmusic_prefs_plain", Context.MODE_PRIVATE)
-    }
+    private val prefs: SharedPreferences = SecureSharedPreferencesFactory.create(context, "qqmusic_prefs")
 
     private val _isLoggedInFlow = MutableStateFlow(false)
     val isLoggedInFlow: StateFlow<Boolean> = _isLoggedInFlow.asStateFlow()
-    private val inFlightSongUrlRequests = java.util.concurrent.ConcurrentHashMap<String, CompletableDeferred<Result<String>>>()
-    private val lastSongUrlAttemptAtMs = java.util.concurrent.ConcurrentHashMap<String, Long>()
     private val songUrlRequestCooldownMs = 1500L
+    internal val songUrlCoalescer = CloudSongUrlCoalescer<String>(
+        cooldownMs = songUrlRequestCooldownMs,
+        throttledMessage = "QQ song URL request throttled"
+    )
     private val qqSongUrlRequestMutex = Mutex()
     @Volatile
     private var lastGlobalSongUrlRequestAtMs = 0L
@@ -139,7 +128,9 @@ class QqMusicRepository @Inject constructor(
                 try {
                     // Try to get nickname from created playlists API
                     val createdPlaylistsRaw = api.getUserCreatedPlaylists(start = 0, size = 1)
-                    Timber.d("QQ Music getUserCreatedPlaylists response: ${createdPlaylistsRaw.take(500)}")
+                    if (BuildConfig.DEBUG) {
+                        Timber.d("QQ Music getUserCreatedPlaylists response length=${createdPlaylistsRaw.length}")
+                    }
 
                     if (createdPlaylistsRaw.isNotBlank()) {
                         val json = JSONObject(createdPlaylistsRaw)
@@ -172,59 +163,43 @@ class QqMusicRepository @Inject constructor(
     }
 
     suspend fun getSongUrl(songMid: String): Result<String> {
-        val now = System.currentTimeMillis()
-        val lastAttempt = lastSongUrlAttemptAtMs[songMid]
-        if (lastAttempt != null && now - lastAttempt < songUrlRequestCooldownMs) {
-            Timber.d("Skip QQ song URL retry due to cooldown: songMid=$songMid")
-            return Result.failure(IllegalStateException("QQ song URL request throttled"))
-        }
-        lastSongUrlAttemptAtMs[songMid] = now
+        return songUrlCoalescer.resolve(songMid) {
+            withContext(Dispatchers.IO) {
+                try {
+                    // Phase 1: Request without filename to get default M4A URL and discover media_mid.
+                    val defaultPurl = requestPurl(songMid)
 
-        inFlightSongUrlRequests[songMid]?.let {
-            return it.await()
-        }
-
-        val requestDeferred = CompletableDeferred<Result<String>>()
-        val existing = inFlightSongUrlRequests.putIfAbsent(songMid, requestDeferred)
-        if (existing != null) {
-            return existing.await()
-        }
-
-        val result = withContext(Dispatchers.IO) {
-            runCatching {
-                // Phase 1: Request without filename to get default M4A URL and discover media_mid.
-                val defaultPurl = requestPurl(songMid)
-
-                if (defaultPurl.isBlank()) {
-                    throw IllegalStateException("No playable URL for songMid=$songMid (empty purl)")
-                }
-
-                val defaultUrl = if (defaultPurl.startsWith("http")) defaultPurl
-                    else "https://ws.stream.qqmusic.qq.com/$defaultPurl"
-
-                // Extract media_mid from purl (format: "C400{mediaMid}.m4a?vkey=...")
-                val mediaMid = defaultPurl.substringBefore("?").drop(4).substringBefore(".")
-                if (mediaMid.isNotBlank()) {
-                    // Phase 2: Try MP3 320kbps with discovered media_mid.
-                    val mp3Filename = "M500${mediaMid}.mp3"
-                    val mp3Purl = requestPurl(songMid, filename = mp3Filename)
-                    if (mp3Purl.isNotBlank()) {
-                        Timber.d("Resolved QQ Music MP3 URL for songMid=$songMid")
-                        return@runCatching if (mp3Purl.startsWith("http")) mp3Purl
-                            else "https://ws.stream.qqmusic.qq.com/$mp3Purl"
+                    if (defaultPurl.isBlank()) {
+                        return@withContext Result.failure(
+                            IllegalStateException("No playable URL for songMid=$songMid (empty purl)")
+                        )
                     }
-                    Timber.d("MP3 unavailable for songMid=$songMid, falling back to M4A")
-                }
 
-                // Fallback: use the default M4A URL.
-                Timber.d("Resolved QQ Music M4A URL for songMid=$songMid")
-                defaultUrl
+                    val defaultUrl = normalizeStreamUrl(defaultPurl)
+
+                    // Extract media_mid from purl (format: "C400{mediaMid}.m4a?vkey=...")
+                    val mediaMid = defaultPurl.substringBefore("?").drop(4).substringBefore(".")
+                    if (mediaMid.isNotBlank()) {
+                        // Phase 2: Try MP3 320kbps with discovered media_mid.
+                        val mp3Filename = "M500${mediaMid}.mp3"
+                        val mp3Purl = requestPurl(songMid, filename = mp3Filename)
+                        if (mp3Purl.isNotBlank()) {
+                            Timber.d("Resolved QQ Music MP3 URL for songMid=$songMid")
+                            return@withContext Result.success(normalizeStreamUrl(mp3Purl))
+                        }
+                        Timber.d("MP3 unavailable for songMid=$songMid, falling back to M4A")
+                    }
+
+                    // Fallback: use the default M4A URL.
+                    Timber.d("Resolved QQ Music M4A URL for songMid=$songMid")
+                    Result.success(defaultUrl)
+                } catch (ce: CancellationException) {
+                    throw ce
+                } catch (e: Exception) {
+                    Result.failure(e)
+                }
             }
         }
-
-        requestDeferred.complete(result)
-        inFlightSongUrlRequests.remove(songMid, requestDeferred)
-        return result
     }
 
     /**
@@ -802,5 +777,14 @@ class QqMusicRepository @Inject constructor(
         } catch (e: Exception) {
             Timber.w(e, "Failed to delete app playlist for QQ Music playlist $qqPlaylistId")
         }
+    }
+
+    private fun normalizeStreamUrl(rawUrl: String): String {
+        val fullUrl = if (rawUrl.startsWith("http", ignoreCase = true)) {
+            rawUrl
+        } else {
+            "https://ws.stream.qqmusic.qq.com/${rawUrl.trimStart('/')}"
+        }
+        return fullUrl.replaceFirst(Regex("^http://", RegexOption.IGNORE_CASE), "https://")
     }
 }

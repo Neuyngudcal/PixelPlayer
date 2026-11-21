@@ -59,17 +59,12 @@ internal fun rememberSheetInteractionState(
     val isDraggingState = rememberUpdatedState(isDragging)
     val playerShadowShape = remember(
         overallSheetTopCornerRadiusProvider,
-        playerContentActualBottomRadiusProvider,
-        playerContentExpansionFraction
+        playerContentActualBottomRadiusProvider
     ) {
         PlayerSheetDynamicShape(
             topRadiusProvider = overallSheetTopCornerRadiusProvider,
             bottomRadiusProvider = playerContentActualBottomRadiusProvider,
-            useSmoothShapeProvider = {
-                useSmoothCornersState.value &&
-                    !isDraggingState.value &&
-                    !playerContentExpansionFraction.isRunning
-            }
+            useSmoothShapeProvider = { useSmoothCornersState.value }
         )
     }
 
@@ -133,7 +128,7 @@ private class PlayerSheetDynamicShape(
     ): Outline {
         val topRadius = topRadiusProvider().nonNegative()
         val bottomRadius = bottomRadiusProvider().nonNegative()
-        if (topRadius <= 1.dp || bottomRadius <= 1.dp || !useSmoothShapeProvider()) {
+        if ((topRadius <= 1.dp && bottomRadius <= 1.dp) || !useSmoothShapeProvider()) {
             val topRadiusPx = with(density) { topRadius.toPx() }
             val bottomRadiusPx = with(density) { bottomRadius.toPx() }
             return Outline.Rounded(
@@ -146,17 +141,16 @@ private class PlayerSheetDynamicShape(
                 )
             )
         }
-
         val shape =
             AbsoluteSmoothCornerShape(
                 cornerRadiusTL = topRadius,
-                smoothnessAsPercentBL = 60,
-                cornerRadiusTR = topRadius,
-                smoothnessAsPercentBR = 60,
-                cornerRadiusBR = bottomRadius,
                 smoothnessAsPercentTL = 60,
+                cornerRadiusTR = topRadius,
+                smoothnessAsPercentTR = 60,
                 cornerRadiusBL = bottomRadius,
-                smoothnessAsPercentTR = 60
+                smoothnessAsPercentBL = 60,
+                cornerRadiusBR = bottomRadius,
+                smoothnessAsPercentBR = 60
             )
         return shape.createOutline(size, layoutDirection, density)
     }
