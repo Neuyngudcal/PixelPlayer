@@ -9,6 +9,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.media3.common.util.UnstableApi
 import androidx.navigation.NavHostController
 import com.theveloper.pixelplay.data.model.Song
+import com.theveloper.pixelplay.presentation.components.player.TabletPlayerDisplayMode
 import com.theveloper.pixelplay.presentation.navigation.Screen
 import com.theveloper.pixelplay.presentation.navigation.navigateSafelyReplacing
 import com.theveloper.pixelplay.presentation.viewmodel.PlayerViewModel
@@ -37,13 +38,19 @@ internal fun rememberSheetActionHandlers(
     sheetMotionController: SheetMotionController,
     queueSheetController: QueueSheetController,
     sheetModalOverlayController: SheetModalOverlayController,
-    sheetCollapsedTargetY: Float
+    sheetCollapsedTargetY: Float,
+    supportsSideDockedMode: Boolean = false,
+    tabletDisplayMode: TabletPlayerDisplayMode = TabletPlayerDisplayMode.FULLSCREEN,
+    onSwitchToSideDocked: () -> Unit = {}
 ): SheetActionHandlers {
     val queueSheetControllerState = rememberUpdatedState(queueSheetController)
     val sheetModalOverlayControllerState = rememberUpdatedState(sheetModalOverlayController)
     val sheetMotionControllerState = rememberUpdatedState(sheetMotionController)
     val sheetCollapsedTargetYState = rememberUpdatedState(sheetCollapsedTargetY)
     val playerViewModelState = rememberUpdatedState(playerViewModel)
+    val supportsSideDockedModeState = rememberUpdatedState(supportsSideDockedMode)
+    val tabletDisplayModeState = rememberUpdatedState(tabletDisplayMode)
+    val onSwitchToSideDockedState = rememberUpdatedState(onSwitchToSideDocked)
 
     val openQueueSheet = remember {
         { queueSheetControllerState.value.animate(true) }
@@ -74,14 +81,23 @@ internal fun rememberSheetActionHandlers(
             )
         }
     }
-    val onNavigateToAlbum = remember(scope, navController) {
-        { song: Song ->
+    val handlePlayerDismissOrDockOnNavigate: () -> Unit = {
+        queueSheetControllerState.value.animate(false)
+        sheetModalOverlayControllerState.value.updateSelectedSongForInfo(null)
+        if (supportsSideDockedModeState.value) {
+            if (tabletDisplayModeState.value == TabletPlayerDisplayMode.FULLSCREEN) {
+                onSwitchToSideDockedState.value()
+            }
+        } else {
             scope.launch {
                 sheetMotionControllerState.value.snapCollapsed(sheetCollapsedTargetYState.value)
             }
             playerViewModelState.value.collapsePlayerSheet()
-            queueSheetControllerState.value.animate(false)
-            sheetModalOverlayControllerState.value.updateSelectedSongForInfo(null)
+        }
+    }
+    val onNavigateToAlbum = remember(scope, navController) {
+        { song: Song ->
+            handlePlayerDismissOrDockOnNavigate()
             if (song.albumId != -1L) {
                 navController.navigateSafelyReplacing(
                     route = Screen.AlbumDetail.createRoute(song.albumId),
@@ -92,12 +108,7 @@ internal fun rememberSheetActionHandlers(
     }
     val onNavigateToArtist = remember(scope, navController) {
         { song: Song ->
-            scope.launch {
-                sheetMotionControllerState.value.snapCollapsed(sheetCollapsedTargetYState.value)
-            }
-            playerViewModelState.value.collapsePlayerSheet()
-            queueSheetControllerState.value.animate(false)
-            sheetModalOverlayControllerState.value.updateSelectedSongForInfo(null)
+            handlePlayerDismissOrDockOnNavigate()
             if (song.artistId != -1L) {
                 navController.navigateSafelyReplacing(
                     route = Screen.ArtistDetail.createRoute(song.artistId),
@@ -108,12 +119,7 @@ internal fun rememberSheetActionHandlers(
     }
     val onNavigateToGenre = remember(scope, navController) {
         { song: Song ->
-            scope.launch {
-                sheetMotionControllerState.value.snapCollapsed(sheetCollapsedTargetYState.value)
-            }
-            playerViewModelState.value.collapsePlayerSheet()
-            queueSheetControllerState.value.animate(false)
-            sheetModalOverlayControllerState.value.updateSelectedSongForInfo(null)
+            handlePlayerDismissOrDockOnNavigate()
             if (!song.genre.isNullOrEmpty()) {
                 val encodedGenre = java.net.URLEncoder.encode(song.genre, "UTF-8")
                 navController.navigateSafelyReplacing(

@@ -41,11 +41,14 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.theveloper.pixelplay.R
 import com.theveloper.pixelplay.presentation.components.LocalMaterialTheme
 import kotlinx.coroutines.delay
+import kotlin.math.roundToInt
 import racra.compose.smooth_corner_rect_library.AbsoluteSmoothCornerShape
 
 private enum class PlaybackButtonType { NONE, PREVIOUS, PLAY_PAUSE, NEXT }
@@ -180,28 +183,29 @@ fun AnimatedPlaybackControls(
                 ) {
                     Icon(
                         imageVector = Icons.Rounded.SkipPrevious,
-                        contentDescription = "Anterior",
+                        contentDescription = stringResource(R.string.common_previous_track),
                         tint = tintPreviousIcon,
                         modifier = Modifier.size(iconSize)
                     )
                 }
 
+                val playShapeCache = remember { HashMap<Int, AbsoluteSmoothCornerShape>(32) }
+
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
                         .graphicsLayer {
+                            val quantizedHalfDp = (playCornerState.value.value.coerceAtLeast(0f) * 2f).roundToInt()
+                            shape = playShapeCache.getOrPut(quantizedHalfDp) {
+                                val r = (quantizedHalfDp / 2f).dp
+                                AbsoluteSmoothCornerShape(
+                                    cornerRadiusTL = r, smoothnessAsPercentTL = 60,
+                                    cornerRadiusTR = r, smoothnessAsPercentTR = 60,
+                                    cornerRadiusBL = r, smoothnessAsPercentBL = 60,
+                                    cornerRadiusBR = r, smoothnessAsPercentBR = 60
+                                )
+                            }
                             clip = true
-                            val corner = playCornerState.value
-                            shape = AbsoluteSmoothCornerShape(
-                                cornerRadiusTL = corner,
-                                smoothnessAsPercentTL = 60,
-                                cornerRadiusTR = corner,
-                                smoothnessAsPercentTR = 60,
-                                cornerRadiusBL = corner,
-                                smoothnessAsPercentBL = 60,
-                                cornerRadiusBR = corner,
-                                smoothnessAsPercentBR = 60
-                            )
                         }
                         .background(colorPlayPause)
                         .clickable {
@@ -235,7 +239,7 @@ fun AnimatedPlaybackControls(
                 ) {
                     Icon(
                         imageVector = Icons.Rounded.SkipNext,
-                        contentDescription = "Siguiente",
+                        contentDescription = stringResource(R.string.common_next_track),
                         tint = tintNextIcon,
                         modifier = Modifier.size(iconSize)
                     )
@@ -301,7 +305,9 @@ private fun MorphingPlayPauseIcon(
     ) { playing ->
         Icon(
             imageVector = if (playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-            contentDescription = if (playing) "Pausar" else "Reproducir",
+            contentDescription = stringResource(
+                if (playing) R.string.common_pause else R.string.common_play
+            ),
             tint = tint,
             modifier = Modifier.size(size)
         )

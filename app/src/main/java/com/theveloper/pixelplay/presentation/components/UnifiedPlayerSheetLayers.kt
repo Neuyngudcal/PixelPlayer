@@ -40,6 +40,7 @@ import com.theveloper.pixelplay.presentation.components.scoped.rememberFullPlaye
 import com.theveloper.pixelplay.presentation.viewmodel.PlayerSheetState
 import com.theveloper.pixelplay.presentation.viewmodel.PlayerViewModel
 import com.theveloper.pixelplay.presentation.viewmodel.StablePlayerState
+import kotlin.math.roundToInt
 
 @OptIn(UnstableApi::class)
 @Composable
@@ -52,7 +53,7 @@ internal fun BoxScope.UnifiedPlayerMiniAndFullLayers(
     isPreparingPlayback: Boolean,
     playerContentExpansionFraction: Animatable<Float, AnimationVector1D>,
     albumColorScheme: ColorScheme,
-    bottomSheetOpenFraction: Float,
+    bottomSheetOpenFractionProvider: () -> Float,
     fullPlayerVisualState: FullPlayerVisualState,
     containerHeight: Dp,
     currentQueueSourceName: String,
@@ -66,14 +67,17 @@ internal fun BoxScope.UnifiedPlayerMiniAndFullLayers(
     shouldRenderFullPlayer: Boolean = true,
     currentHorizontalPaddingStartPxProvider: () -> Float,
     currentHorizontalPaddingEndPxProvider: () -> Float,
+    supportsSideDockedMode: Boolean = false,
+    screenWidthPx: Float = 0f,
+    targetExpandedWidthPxProvider: () -> Float = { screenWidthPx },
+    targetExpandedHeightPxProvider: () -> Float = { 0f },
     onShowQueueClicked: () -> Unit,
-    onQueueDragStart: () -> Unit,
-    onQueueDrag: (Float) -> Unit,
-    onQueueRelease: (Float, Float) -> Unit,
     onShowCastClicked: () -> Unit,
     onSwipePreviewChanged: (String?, () -> Float) -> Unit = { _, _ -> },
     tabletDisplayMode: TabletPlayerDisplayMode = TabletPlayerDisplayMode.FULLSCREEN,
-    onToggleTabletDisplayMode: () -> Unit = {}
+    onToggleTabletDisplayMode: () -> Unit = {},
+    fullScreenFractionProvider: () -> Float = { 1f },
+    onOverlayVisibilityChanged: (Boolean) -> Unit = {}
 ) {
     val shouldRenderMiniPlayer by remember {
         derivedStateOf { playerContentExpansionFraction.value < 0.28f }
@@ -100,29 +104,6 @@ internal fun BoxScope.UnifiedPlayerMiniAndFullLayers(
                                 alpha = (1f - (f / 0.22f)).coerceIn(0f, 1f)
                                 translationY = -f * 24f
                             }
-                            .layout { measurable, constraints ->
-                                val fraction = playerContentExpansionFraction.value
-                                val startPaddingPx = currentHorizontalPaddingStartPxProvider().toInt().coerceAtLeast(0)
-                                val endPaddingPx = currentHorizontalPaddingEndPxProvider().toInt().coerceAtLeast(0)
-                                val isFullScreenCoordinateSpace =
-                                    constraints.maxWidth > (startPaddingPx + endPaddingPx + 64)
-
-                                val targetWidth = if (fraction > 0f && isFullScreenCoordinateSpace) {
-                                    (constraints.maxWidth - startPaddingPx - endPaddingPx).coerceAtLeast(0)
-                                } else {
-                                    constraints.maxWidth
-                                }
-                                val placeable = measurable.measure(
-                                    constraints.copy(
-                                        minWidth = targetWidth,
-                                        maxWidth = targetWidth
-                                    )
-                                )
-                                layout(constraints.maxWidth, constraints.maxHeight) {
-                                    val xOffset = if (fraction > 0f && isFullScreenCoordinateSpace) startPaddingPx else 0
-                                    placeable.placeRelative(xOffset, 0)
-                                }
-                            }
                             .zIndex(miniPlayerZIndex)
                     ) {
                         val isMiniPlayerVisible by remember {
@@ -148,8 +129,8 @@ internal fun BoxScope.UnifiedPlayerMiniAndFullLayers(
             CompositionLocalProvider(
                 LocalMaterialTheme provides albumColorScheme
             ) {
-                val fullPlayerScale by remember(bottomSheetOpenFraction) {
-                    derivedStateOf { lerp(1f, 0.95f, bottomSheetOpenFraction) }
+                val fullPlayerScaleProvider = remember(bottomSheetOpenFractionProvider) {
+                    { lerp(1f, 0.95f, bottomSheetOpenFractionProvider().coerceIn(0f, 1f)) }
                 }
 
                 val fullPlayerZIndex by remember {
@@ -166,7 +147,7 @@ internal fun BoxScope.UnifiedPlayerMiniAndFullLayers(
                 val fullPlayerRuntimePolicy = rememberFullPlayerRuntimePolicy(
                     currentSheetState = currentSheetContentState,
                     expansionFraction = playerContentExpansionFraction,
-                    bottomSheetOpenFraction = bottomSheetOpenFraction
+                    bottomSheetOpenFractionProvider = bottomSheetOpenFractionProvider
                 )
 
                 // Scoped queue collection: only the FullPlayer subtree observes
@@ -178,8 +159,43 @@ internal fun BoxScope.UnifiedPlayerMiniAndFullLayers(
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
+                        // Always measure FullPlayerContent at its stable expanded target dimensions
+                        // (even while pre-warmed in COLLAPSED state) so Frame 1 of sheet expansion
+                        // performs zero re-measurement of FullPlayerContent.
+                        .layout { measurable, constraints ->
+                            val targetContentHeightPx = if (supportsSideDockedMode) {
+                                targetExpandedHeightPxProvider()
+                                    .roundToInt()
+                                    .coerceAtLeast(1)
+                            } else {
+                                containerHeight.roundToPx().coerceAtLeast(1)
+                            }
+                            val measureWidth = if (supportsSideDockedMode) {
+                                targetExpandedWidthPxProvider()
+                                    .roundToInt()
+                                    .takeIf { it > 0 } ?: screenWidthPx.roundToInt().coerceAtLeast(1)
+                            } else {
+                                screenWidthPx.roundToInt().takeIf { it > 0 } ?: constraints.maxWidth
+                            }
+                            val placeable = measurable.measure(
+                                constraints.copy(
+                                    minWidth = measureWidth,
+                                    maxWidth = measureWidth,
+                                    minHeight = targetContentHeightPx,
+                                    maxHeight = targetContentHeightPx
+                                )
+                            )
+                            layout(constraints.maxWidth, constraints.maxHeight) {
+                                val xOffset = if (supportsSideDockedMode) {
+                                    ((constraints.maxWidth - measureWidth) / 2f).roundToInt()
+                                } else {
+                                    -currentHorizontalPaddingStartPxProvider().toInt()
+                                }
+                                placeable.placeRelative(xOffset, 0)
+                            }
+                        }
                         .graphicsLayer {
-                            val combinedScale = fullPlayerScale * fullPlayerVisualState.contentScale
+                            val combinedScale = fullPlayerScaleProvider() * fullPlayerVisualState.contentScale
                             alpha = fullPlayerVisualState.contentAlpha
                             translationY = fullPlayerVisualState.translationY
                             scaleX = combinedScale
@@ -261,16 +277,15 @@ internal fun BoxScope.UnifiedPlayerMiniAndFullLayers(
                         onPrevious = onPrevious,
                         onCollapse = onCollapse,
                         onShowQueueClicked = onShowQueueClicked,
-                        onQueueDragStart = onQueueDragStart,
-                        onQueueDrag = onQueueDrag,
-                        onQueueRelease = onQueueRelease,
                         onShowCastClicked = onShowCastClicked,
                         onShuffleToggle = onShuffleToggle,
                         onRepeatToggle = onRepeatToggle,
                         onFavoriteToggle = onFavoriteToggle,
                         onSwipePreviewChanged = onSwipePreviewChanged,
                         tabletDisplayMode = tabletDisplayMode,
-                        onToggleTabletDisplayMode = onToggleTabletDisplayMode
+                        onToggleTabletDisplayMode = onToggleTabletDisplayMode,
+                        fullScreenFractionProvider = fullScreenFractionProvider,
+                        onOverlayVisibilityChanged = onOverlayVisibilityChanged
                     )
                 }
             }

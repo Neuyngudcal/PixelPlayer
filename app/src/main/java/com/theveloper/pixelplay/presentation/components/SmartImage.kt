@@ -44,6 +44,29 @@ val SmartImageCompactListTargetSize = Size(96, 96)
 val SmartImageListTargetSize = Size(128, 128)
 private val DefaultSmartImageSize = Size(300, 300)
 
+/** Request size of the Library album grid cards (AlbumGridItemRedesigned). */
+val SmartImageGridTargetSize = Size(256, 256)
+
+/**
+ * Placeholder for a bigger SmartImage of the same artwork. It hits the memory-cache entry that a
+ * grid card (targetSize = SmartImageGridTargetSize) already decoded, so AlbumDetail's header shows
+ * the artwork on its first frame instead of the placeholder icon while the full-size image loads.
+ */
+@Composable
+fun rememberGridThumbnailPlaceholder(model: String?): ImageRequest? {
+    val context = LocalContext.current
+    return remember(context, model) {
+        val memoryKey = albumArtMemoryCacheKey(model, SmartImageGridTargetSize)
+            ?: return@remember null
+        ImageRequest.Builder(context)
+            .data(model)
+            .size(SmartImageGridTargetSize)
+            .memoryCacheKey(memoryKey)
+            .diskCachePolicy(CachePolicy.DISABLED)
+            .build()
+    }
+}
+
 @Composable
 fun SmartImage(
     model: Any?,

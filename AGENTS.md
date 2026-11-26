@@ -86,6 +86,13 @@ Before writing or modifying ANY UI/UX code, you MUST mentally execute and verify
      - Enter/Exit animations MUST use a single owner (`defaultSpatialSpec()` / `slowSpatialSpec()` with `scale = 0.94f -> 1.0f` depth parallax). NEVER stack two independent enter animations on the same sheet.
 5. **Non-Uniform Scale Guardrail:**
    - NEVER apply non-uniform `scaleY != scaleX` (`visualOvershootScaleY`) directly to a full-screen container holding square album art or circular buttons. Dampen any vertical squash/stretch by `(1f - expansionFraction)` so it only affects the collapsed MiniPlayer bar.
+6. **Screen Navigation Transition Patterns (official M3 transitions):**
+   - M3 screen transitions still use the easing + duration system, so `NavHost` transitions stay `tween` + emphasized easing from `presentation/navigation/Transitions.kt`. NEVER convert them to `*SpatialSpec()` springs. Common transitions must not bounce.
+   - **Forward / backward** (parent → child): `aospSharedAxis*`.
+   - **Top level** (navigation bar / rail destination switch): `topLevelFadeThroughEnter/Exit` (fade out fully, then fade in). NEVER a lateral slide between top-level destinations.
+   - **Lateral** (tabs, carousels): pager slide without fade.
+   - **Container transform**: only for hero moments with shallow hierarchy (e.g. MiniPlayer ↔ FullPlayer, Library album grid card ↔ `AlbumDetail` header via `Modifier.albumHeroBounds` in `presentation/navigation/SharedHeroTransitions.kt`); not for deep hierarchies. Never call `sharedBounds` / `sharedElement` directly elsewhere.
+   - **Clean fades**: fade old content out before fading new content in; avoid long cross-fades.
 
 ### Step 5: Compose Phase Isolation, Gestures & Modifier Order
 1. **Draw-Phase & Layout-Phase Isolation (60/120fps Rule):**
@@ -120,6 +127,6 @@ When building or refactoring UI in PixelPlayer, prefer official **Material 3 Exp
 Before returning code to the user, verify every item below:
 - [ ] **No Hardcoded Colors/Strings:** All colors come from `LocalMaterialTheme.current` / `MaterialTheme.colorScheme`; all user-facing strings use `stringResource(R.string...)`.
 - [ ] **Modifier Order:** No `.padding(...)` appears after `.size(...)` on `IconButton` / `FilledIconButton` / `Surface` unless inner padding is explicitly intended.
-- [ ] **Official M3E Motion Physics:** Spatial animations use `MotionScheme.expressive().{fast|default|slow}SpatialSpec()`; color/alpha animations use `{fast|default|slow}EffectsSpec()` (`dampingRatio = 1.0f`).
+- [ ] **Official M3E Motion Physics:** Component spatial animations use `MotionScheme.expressive().{fast|default|slow}SpatialSpec()`; color/alpha animations use `{fast|default|slow}EffectsSpec()` (`dampingRatio = 1.0f`). **Exception:** NavHost screen transitions and the album container transform use the `tween` + emphasized-easing helpers in `presentation/navigation/Transitions.kt` (Step 4, item 6). Never convert them to springs.
 - [ ] **No Recomposition Leaks:** Per-frame animations are read inside `graphicsLayer` / `offset` / `drawWithContent`, not in composition scope.
 - [ ] **Landscape & Insets Safe:** Media containers use `minOf(maxWidth, maxHeight)`; bottom menus/toolbars include `navigationBarHeight` and toolbar height offsets.

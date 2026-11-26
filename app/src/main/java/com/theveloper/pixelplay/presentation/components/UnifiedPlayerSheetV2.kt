@@ -99,6 +99,7 @@ import com.theveloper.pixelplay.ui.theme.LocalPixelPlayDarkTheme
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 import kotlin.math.roundToInt
@@ -219,7 +220,11 @@ fun UnifiedPlayerSheetV2(
     val preparingSongId = playerUiSheetSlice.preparingSongId
 
     val currentSheetContentState by playerViewModel.sheetState.collectAsStateWithLifecycle()
-    val predictiveBackCollapseProgress by playerViewModel.predictiveBackCollapseFraction.collectAsStateWithLifecycle()
+    val predictiveBackCollapseProgressState =
+        playerViewModel.predictiveBackCollapseFraction.collectAsStateWithLifecycle()
+    val predictiveBackCollapseProgressProvider = remember {
+        { predictiveBackCollapseProgressState.value }
+    }
     val predictiveBackSwipeEdge by playerViewModel.predictiveBackSwipeEdge.collectAsStateWithLifecycle()
     val prewarmFullPlayer = rememberPrewarmFullPlayer(
         currentSongId = infrequentPlayerState.currentSong?.id,
@@ -247,11 +252,14 @@ fun UnifiedPlayerSheetV2(
         }
     }
     val dismissThresholdPx = remember(screenWidthPx) { screenWidthPx * 0.4f }
-    val swipeDismissProgress by remember(dismissThresholdPx) {
+    val swipeDismissProgressState = remember(dismissThresholdPx) {
         derivedStateOf {
             if (dismissThresholdPx == 0f) 0f
             else (abs(offsetAnimatable.value) / dismissThresholdPx).coerceIn(0f, 1f)
         }
+    }
+    val swipeDismissProgressProvider = remember(swipeDismissProgressState) {
+        { swipeDismissProgressState.value }
     }
 
     val screenHeightPx = remember(configuration, density) {
@@ -296,19 +304,6 @@ fun UnifiedPlayerSheetV2(
         )
     }
 
-    PlayerArtistNavigationEffect(
-        navController = navController,
-        sheetCollapsedTargetY = sheetCollapsedTargetY,
-        sheetMotionController = sheetMotionController,
-        playerViewModel = playerViewModel
-    )
-    PlayerAlbumNavigationEffect(
-        navController = navController,
-        sheetCollapsedTargetY = sheetCollapsedTargetY,
-        sheetMotionController = sheetMotionController,
-        playerViewModel = playerViewModel
-    )
-
     // FullPlayerVisualState now holds lazy getters that read from the Animatable
     // inside graphicsLayer (draw-phase), avoiding per-frame recomposition.
     val fullPlayerVisualState = rememberFullPlayerVisualState(
@@ -321,14 +316,6 @@ fun UnifiedPlayerSheetV2(
         expansionFraction = playerContentExpansionFraction
     )
     val shouldRenderFullPlayer = fullPlayerCompositionPolicy.shouldRenderFullPlayer
-
-    // Battery: tell the PlaybackStateHolder when the slider-bearing UI is
-    // actually rendered. When it isn't (mini-player only), the position
-    // ticker drops from 250 ms to 1 s — slider precision isn't needed.
-    DisposableEffect(shouldRenderFullPlayer) {
-        playerViewModel.setSliderUiMounted(shouldRenderFullPlayer)
-        onDispose { playerViewModel.setSliderUiMounted(false) }
-    }
 
     suspend fun animatePlayerSheet(
         targetExpanded: Boolean,
@@ -389,7 +376,7 @@ fun UnifiedPlayerSheetV2(
                             1.0f at 300
                         }
                     )
-                } else if (shouldBounceCollapse) {
+                } else if (shouldBounceCollapse && !visualOvershootScaleY.isRunning) {
                     visualOvershootScaleY.snapTo(0.97f)
                     visualOvershootScaleY.animateTo(
                         targetValue = 1f,
@@ -425,7 +412,7 @@ fun UnifiedPlayerSheetV2(
         collapsedStateHorizontalPadding = collapsedStateHorizontalPadding,
         collapsedStartHorizontalPadding = collapsedStartHorizontalPadding,
         collapsedEndHorizontalPadding = collapsedEndHorizontalPadding,
-        predictiveBackCollapseProgress = predictiveBackCollapseProgress,
+        predictiveBackCollapseProgressProvider = predictiveBackCollapseProgressProvider,
         predictiveBackSwipeEdge = predictiveBackSwipeEdge,
         currentSheetContentState = currentSheetContentState,
         playerContentExpansionFraction = playerContentExpansionFraction,
@@ -437,7 +424,7 @@ fun UnifiedPlayerSheetV2(
         isNavBarHidden = isNavBarHidden,
         isPlaying = infrequentPlayerState.isPlaying,
         hasCurrentSong = infrequentPlayerState.currentSong != null,
-        swipeDismissProgress = swipeDismissProgress,
+        swipeDismissProgressProvider = swipeDismissProgressProvider,
         containerWidth = resolvedContainerWidth,
         supportsSideDockedMode = sheetBoundsSpec.supportsSideDockedMode,
         sideDockedWidth = sheetBoundsSpec.sideDockedWidth,
@@ -477,36 +464,6 @@ fun UnifiedPlayerSheetV2(
         showPlayerContentArea = showPlayerContentArea,
         currentSheetContentState = currentSheetContentState
     )
-    val isTabletFullscreenBackActive =
-        sheetBoundsSpec.supportsSideDockedMode &&
-            currentSheetContentState == PlayerSheetState.EXPANDED &&
-            tabletDisplayMode == TabletPlayerDisplayMode.FULLSCREEN &&
-            !showQueueSheet &&
-            !castSheetState.showCastSheet
-    BackHandler(enabled = isTabletFullscreenBackActive) {
-        onTabletDisplayModeChange(TabletPlayerDisplayMode.SIDE_DOCKED)
-    }
-
-    val hasLeftPaneNavigationBackStack = navController.previousBackStackEntry != null
-    val canHandlePlayerBack by remember(
-        sheetBackAndDragState.predictiveBackEnabled,
-        showQueueSheet,
-        castSheetState.showCastSheet,
-        isTabletFullscreenBackActive,
-        sheetBoundsSpec.supportsSideDockedMode,
-        tabletDisplayMode,
-        hasLeftPaneNavigationBackStack
-    ) {
-        derivedStateOf {
-            sheetBackAndDragState.predictiveBackEnabled &&
-                !showQueueSheet &&
-                !castSheetState.showCastSheet &&
-                !isTabletFullscreenBackActive &&
-                !(sheetBoundsSpec.supportsSideDockedMode &&
-                    tabletDisplayMode == TabletPlayerDisplayMode.SIDE_DOCKED &&
-                    hasLeftPaneNavigationBackStack)
-        }
-    }
     val velocityTracker = remember { VelocityTracker() }
     val sheetModalOverlayController = rememberSheetModalOverlayController(
         scope = scope,
@@ -516,6 +473,57 @@ fun UnifiedPlayerSheetV2(
     )
     val pendingSaveQueueOverlay = sheetModalOverlayController.pendingSaveQueueOverlay
     val selectedSongForInfo = sheetModalOverlayController.selectedSongForInfo
+    var isFullPlayerInternalOverlayOpen by remember { mutableStateOf(false) }
+    val hasAnyCardOverlayOpen =
+        showQueueSheet ||
+            queueSheetState.isCollapsing ||
+            castSheetState.showCastSheet ||
+            selectedSongForInfo != null ||
+            pendingSaveQueueOverlay != null ||
+            isFullPlayerInternalOverlayOpen
+
+    val isTabletFullscreenBackActive =
+        sheetBoundsSpec.supportsSideDockedMode &&
+            currentSheetContentState == PlayerSheetState.EXPANDED &&
+            tabletDisplayMode == TabletPlayerDisplayMode.FULLSCREEN &&
+            !hasAnyCardOverlayOpen
+    BackHandler(enabled = isTabletFullscreenBackActive) {
+        onTabletDisplayModeChange(TabletPlayerDisplayMode.SIDE_DOCKED)
+    }
+
+    val hasLeftPaneNavigationBackStack = navController.previousBackStackEntry != null
+    val canHandlePlayerBack by remember(
+        sheetBackAndDragState.predictiveBackEnabled,
+        hasAnyCardOverlayOpen,
+        isTabletFullscreenBackActive,
+        sheetBoundsSpec.supportsSideDockedMode,
+        tabletDisplayMode,
+        hasLeftPaneNavigationBackStack
+    ) {
+        derivedStateOf {
+            sheetBackAndDragState.predictiveBackEnabled &&
+                !hasAnyCardOverlayOpen &&
+                !isTabletFullscreenBackActive &&
+                !(sheetBoundsSpec.supportsSideDockedMode &&
+                    tabletDisplayMode == TabletPlayerDisplayMode.SIDE_DOCKED &&
+                    hasLeftPaneNavigationBackStack)
+        }
+    }
+    val switchToSideDockedMode = remember(onTabletDisplayModeChange) {
+        { onTabletDisplayModeChange(TabletPlayerDisplayMode.SIDE_DOCKED) }
+    }
+    val dismissAllCardSubOverlays = remember(
+        queueSheetController,
+        castSheetState,
+        sheetModalOverlayController
+    ) {
+        {
+            queueSheetController.animate(false)
+            castSheetState.dismissCastSheet()
+            sheetModalOverlayController.updateSelectedSongForInfo(null)
+            sheetModalOverlayController.dismissSaveQueueOverlay()
+        }
+    }
     val sheetActionHandlers = rememberSheetActionHandlers(
         scope = scope,
         navController = navController,
@@ -523,7 +531,31 @@ fun UnifiedPlayerSheetV2(
         sheetMotionController = sheetMotionController,
         queueSheetController = queueSheetController,
         sheetModalOverlayController = sheetModalOverlayController,
-        sheetCollapsedTargetY = sheetCollapsedTargetY
+        sheetCollapsedTargetY = sheetCollapsedTargetY,
+        supportsSideDockedMode = sheetBoundsSpec.supportsSideDockedMode,
+        tabletDisplayMode = tabletDisplayMode,
+        onSwitchToSideDocked = switchToSideDockedMode
+    )
+
+    PlayerArtistNavigationEffect(
+        navController = navController,
+        sheetCollapsedTargetY = sheetCollapsedTargetY,
+        sheetMotionController = sheetMotionController,
+        playerViewModel = playerViewModel,
+        supportsSideDockedMode = sheetBoundsSpec.supportsSideDockedMode,
+        tabletDisplayMode = tabletDisplayMode,
+        onSwitchToSideDocked = switchToSideDockedMode,
+        onDismissSubOverlays = dismissAllCardSubOverlays
+    )
+    PlayerAlbumNavigationEffect(
+        navController = navController,
+        sheetCollapsedTargetY = sheetCollapsedTargetY,
+        sheetMotionController = sheetMotionController,
+        playerViewModel = playerViewModel,
+        supportsSideDockedMode = sheetBoundsSpec.supportsSideDockedMode,
+        tabletDisplayMode = tabletDisplayMode,
+        onSwitchToSideDocked = switchToSideDockedMode,
+        onDismissSubOverlays = dismissAllCardSubOverlays
     )
 
     val hapticFeedback = LocalHapticFeedback.current
@@ -548,6 +580,9 @@ fun UnifiedPlayerSheetV2(
         }
     )
 
+    val sideDockedTopMarginPx = remember(sideDockedTopMargin, density) {
+        with(density) { sideDockedTopMargin.toPx() }
+    }
     PlayerSheetPredictiveBackHandler(
         enabled = canHandlePlayerBack,
         playerViewModel = playerViewModel,
@@ -556,7 +591,18 @@ fun UnifiedPlayerSheetV2(
         sheetMotionController = sheetMotionController,
         animationDurationMs = ANIMATION_DURATION_MS,
         onSwipeEdgeChanged = { playerViewModel.updatePredictiveBackSwipeEdge(it) },
-        registrationKey = currentBackStackEntry?.id
+        registrationKey = currentBackStackEntry?.id,
+        expandedVisualYProvider = {
+            if (sheetBoundsSpec.supportsSideDockedMode) {
+                androidx.compose.ui.util.lerp(
+                    sideDockedTopMarginPx,
+                    sheetExpandedTargetY,
+                    fullScreenFractionProvider().coerceIn(0f, 1f)
+                )
+            } else {
+                sheetExpandedTargetY
+            }
+        }
     )
 
     val queuePredictiveBackProgress = remember { Animatable(0f) }
@@ -570,21 +616,45 @@ fun UnifiedPlayerSheetV2(
         isQueueCollapsing = queueSheetState.isCollapsing,
         queueHiddenOffsetPx = queueHiddenOffsetPx,
         screenHeightPx = screenHeightPx,
-        castSheetOpenFraction = castSheetState.castSheetOpenFraction,
+        castSheetOpenFractionProvider = castSheetState.castSheetOpenFractionProvider,
         queueSheetOffset = queueSheetOffset,
         queuePredictiveBackProgress = queuePredictiveBackProgress
     )
     val internalIsKeyboardVisible = sheetOverlayState.internalIsKeyboardVisible
     val actuallyShowSheetContent = sheetOverlayState.actuallyShowSheetContent
     val isQueueVisible = sheetOverlayState.isQueueVisible
-    val bottomSheetOpenFraction = sheetOverlayState.bottomSheetOpenFraction
-    val queueScrimAlpha = sheetOverlayState.queueScrimAlpha
+    val isQueueScrimVisible = sheetOverlayState.isQueueScrimVisible
+    val bottomSheetOpenFractionProvider = sheetOverlayState.bottomSheetOpenFractionProvider
+    val queueScrimAlphaProvider = sheetOverlayState.queueScrimAlphaProvider
     val shouldRenderQueueHost by remember(internalIsKeyboardVisible, selectedSongForInfo) {
         derivedStateOf {
             !internalIsKeyboardVisible || selectedSongForInfo != null
         }
     }
     val isQueueTelemetryActive = showQueueSheet
+
+    // Battery: only keep 250 ms ticker active while expanded player/lyrics UI is visibly
+    // mounted and not fully occluded by Queue/Cast sheets. In collapsed Mini Player
+    // (even when FullPlayer stays warm in composition), drop back to MINIPLAYER_TICK_MS (1 s).
+    val isSliderUiVisiblyMounted by remember(
+        infrequentPlayerState.currentSong?.id,
+        currentSheetContentState,
+        playerContentExpansionFraction,
+        bottomSheetOpenFractionProvider
+    ) {
+        derivedStateOf {
+            val hasSong = infrequentPlayerState.currentSong?.id != null
+            val isPlayerVisiblyExpanded =
+                currentSheetContentState == PlayerSheetState.EXPANDED ||
+                    playerContentExpansionFraction.value > 0.015f
+            val isOccludedByQueueOrCast = bottomSheetOpenFractionProvider() >= 0.92f
+            hasSong && isPlayerVisiblyExpanded && !isOccludedByQueueOrCast
+        }
+    }
+    DisposableEffect(isSliderUiVisiblyMounted) {
+        playerViewModel.setSliderUiMounted(isSliderUiVisiblyMounted)
+        onDispose { playerViewModel.setSliderUiMounted(false) }
+    }
 
     LaunchedEffect(showQueueSheet) {
         playerViewModel.updateQueueSheetVisibility(showQueueSheet)
@@ -639,38 +709,16 @@ fun UnifiedPlayerSheetV2(
     val albumColorScheme = sheetThemeState.albumColorScheme
     val miniPlayerScheme = sheetThemeState.miniPlayerScheme
     val isPreparingPlayback = sheetThemeState.isPreparingPlayback
-    val miniReadyAlpha = sheetThemeState.miniReadyAlpha
-    val miniAppearScale = sheetThemeState.miniAppearScale
+    val miniReadyAlphaProvider = sheetThemeState.miniReadyAlphaProvider
+    val miniAppearScaleProvider = sheetThemeState.miniAppearScaleProvider
     // Elevation is only visible in the mini/collapsed state (expansion < 0.18),
     // or on the floating Side-Docked card in expanded state.
     val isSideDockedCardOverlayMode =
         sheetBoundsSpec.supportsSideDockedMode &&
             tabletDisplayMode == TabletPlayerDisplayMode.SIDE_DOCKED
     val isDragging = sheetBackAndDragState.isDragging
-    val visualCardShadowElevation by remember(
-        showQueueSheet,
-        miniReadyAlpha,
-        isDragging,
-        sheetBoundsSpec.supportsSideDockedMode,
-        fullScreenFractionProvider
-    ) {
-        derivedStateOf {
-            val isSideDockedCard =
-                sheetBoundsSpec.supportsSideDockedMode && fullScreenFractionProvider() < 0.99f
-            if ((!isSideDockedCard && showQueueSheet) || isDragging) {
-                0.dp
-            } else if (isSideDockedCard && playerContentExpansionFraction.value > 0.18f) {
-                6.dp
-            } else if (
-                playerContentExpansionFraction.isRunning ||
-                playerContentExpansionFraction.value > 0.18f
-            ) {
-                0.dp
-            } else {
-                (3f * miniReadyAlpha).dp
-            }
-        }
-    }
+    val showQueueSheetState = rememberUpdatedState(showQueueSheet)
+    val isDraggingState = rememberUpdatedState(isDragging)
 
     val sheetInteractionState = rememberSheetInteractionState(
         scope = scope,
@@ -725,19 +773,26 @@ fun UnifiedPlayerSheetV2(
         }
     }
 
+    val sheetOvershootPx by remember(
+        visualSheetTranslationYProvider,
+        currentSheetContentState,
+        isDragging
+    ) {
+        derivedStateOf {
+            val translationY = visualSheetTranslationYProvider().roundToInt()
+            if (translationY < 0) -translationY else 0
+        }
+    }
+
     // Use a plain Box instead of M3 Surface here so empty space to the left of the
     // Side-Docked Phone Card on tablets does not intercept or block pointer events on MainUI.
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .layout { measurable, constraints ->
-                val translationY = visualSheetTranslationYProvider().roundToInt()
-                val overshoot = if (currentSheetContentState == PlayerSheetState.EXPANDED && !isDragging) {
-                    -translationY
-                } else {
-                    if (translationY < 0) -translationY else 0
-                }
-                val targetHeight = (constraints.maxHeight + overshoot).coerceAtLeast(0)
+                // Read translationY ONLY in the placement block so normal vertical dragging
+                // invalidates placement only and never re-measures the sheet tree.
+                val targetHeight = (constraints.maxHeight + sheetOvershootPx).coerceAtLeast(0)
                 val placeable = measurable.measure(
                     constraints.copy(
                         minHeight = targetHeight,
@@ -745,7 +800,7 @@ fun UnifiedPlayerSheetV2(
                     )
                 )
                 layout(constraints.maxWidth, constraints.maxHeight) {
-                    placeable.placeRelative(0, translationY)
+                    placeable.placeRelative(0, visualSheetTranslationYProvider().roundToInt())
                 }
             }
     ) {
@@ -756,15 +811,34 @@ fun UnifiedPlayerSheetV2(
         ) {
             Column(modifier = Modifier.fillMaxSize()) {
                 if (showPlayerContentArea) {
-                    val shouldRenderQueueLayer by remember(
+                    var isQueuePrewarmedAfterSettle by remember(infrequentPlayerState.currentSong?.id) {
+                        mutableStateOf(false)
+                    }
+                    LaunchedEffect(
+                        infrequentPlayerState.currentSong?.id,
                         currentSheetContentState,
-                        playerContentExpansionFraction,
+                        playerContentExpansionFraction.isRunning,
+                        currentSheetTranslationY.isRunning
+                    ) {
+                        if (infrequentPlayerState.currentSong?.id == null) {
+                            isQueuePrewarmedAfterSettle = false
+                        } else if (
+                            currentSheetContentState == PlayerSheetState.EXPANDED &&
+                            !playerContentExpansionFraction.isRunning &&
+                            !currentSheetTranslationY.isRunning &&
+                            !isQueuePrewarmedAfterSettle
+                        ) {
+                            delay(150L)
+                            isQueuePrewarmedAfterSettle = true
+                        }
+                    }
+                    val shouldRenderQueueLayer by remember(
+                        isQueuePrewarmedAfterSettle,
                         showQueueSheet,
                         queueSheetState.isCollapsing
                     ) {
                         derivedStateOf {
-                            (currentSheetContentState == PlayerSheetState.EXPANDED &&
-                                playerContentExpansionFraction.value >= 0.98f) ||
+                            isQueuePrewarmedAfterSettle ||
                                 showQueueSheet ||
                                 queueSheetState.isCollapsing
                         }
@@ -776,10 +850,11 @@ fun UnifiedPlayerSheetV2(
                             .graphicsLayer {
                                 val expansion = playerContentExpansionFraction.value.coerceIn(0f, 1f)
                                 val effectiveOvershootY = 1f + (visualOvershootScaleY.value - 1f) * (1f - expansion)
+                                val miniAppearScale = miniAppearScaleProvider()
                                 translationX = offsetAnimatable.value
                                 scaleX = miniAppearScale
                                 scaleY = effectiveOvershootY * miniAppearScale
-                                alpha = miniReadyAlpha
+                                alpha = miniReadyAlphaProvider()
                                 transformOrigin = TransformOrigin(0.5f, 1f)
                             }
                             // outerLayout:
@@ -808,86 +883,64 @@ fun UnifiedPlayerSheetV2(
                                     placeable.placeRelative(startPaddingPx, 0)
                                 }
                             }
-                            // Always apply Modifier.shadow with the dynamic elevation
-                            // (0.dp renders nothing). Keeping the modifier chain
-                            // structurally stable avoids the costly relayout/redraw
-                            // restructure when the elevation crosses 0.dp during
-                            // expand/collapse or right after play/pause.
-                            .shadow(
-                                elevation = visualCardShadowElevation,
-                                shape = sheetInteractionState.playerShadowShape,
-                                clip = false
-                            )
-                            .clip(sheetInteractionState.playerShadowShape)
+                            // Single RenderNode for both shadow elevation and rounded clipping:
+                            // evaluates PlayerSheetDynamicShape.createOutline ONCE per frame
+                            // (instead of twice with separate .shadow + .clip) and avoids
+                            // recomposing UnifiedPlayerSheetV2 when shadow elevation toggles.
+                            .graphicsLayer {
+                                val expansion = playerContentExpansionFraction.value.coerceIn(0f, 1f)
+                                val miniShadow = 3f * miniReadyAlphaProvider()
+                                val dockedCardElevation = androidx.compose.ui.util.lerp(miniShadow, 6f, expansion)
+                                val fullScreenElevation = if (
+                                    showQueueSheetState.value ||
+                                    isDraggingState.value ||
+                                    playerContentExpansionFraction.isRunning ||
+                                    expansion > 0.18f
+                                ) {
+                                    0f
+                                } else {
+                                    miniShadow
+                                }
+                                val elevationDp = if (sheetBoundsSpec.supportsSideDockedMode) {
+                                    androidx.compose.ui.util.lerp(
+                                        dockedCardElevation,
+                                        fullScreenElevation,
+                                        fullScreenFractionProvider().coerceIn(0f, 1f)
+                                    )
+                                } else {
+                                    fullScreenElevation
+                                }
+                                shadowElevation = elevationDp.dp.toPx()
+                                shape = sheetInteractionState.playerShadowShape
+                                clip = true
+                            }
                             .drawBehind {
                                 drawRect(color = albumColorScheme.primaryContainer)
                             }
                     ) {
-                        // Child 1: Mini & Full Player layers measured at stable expanded target bounds.
+                        // Child 1: MiniPlayer fills outerLayout directly (never snapping 560dp -> 408dp on
+                        // Frame 1), while FullPlayerContent measures at its stable target expanded bounds.
                         Box(
                             modifier = Modifier
                                 .fillMaxSize()
-                                // innerLayout:
-                                // Measures the actual player content with target expanded height/width
-                                // so that it can render at stable bounds during drag/morph while clipped
-                                // to the card bounds by outerLayout.
-                                .layout { measurable, constraints ->
-                                    val fraction = playerContentExpansionFraction.value
-                                    val startPaddingPx = currentHorizontalPaddingStartPxProvider().toInt()
-                                    val targetContentHeightPx = if (sheetBoundsSpec.supportsSideDockedMode) {
-                                        sheetVisualState.targetExpandedHeightPxProvider()
-                                            .roundToInt()
-                                            .coerceAtLeast(1)
-                                    } else {
-                                        containerHeight.roundToPx()
-                                    }
-                                    val measureWidth = if (fraction > 0f) {
-                                        if (sheetBoundsSpec.supportsSideDockedMode) {
-                                            sheetVisualState.targetExpandedWidthPxProvider()
-                                                .roundToInt()
-                                                .takeIf { it > 0 } ?: screenWidthPx.roundToInt()
-                                        } else {
-                                            screenWidthPx.roundToInt()
-                                        }
-                                    } else {
-                                        constraints.maxWidth
-                                    }
-                                    val placeable = measurable.measure(
-                                        constraints.copy(
-                                            minWidth = measureWidth,
-                                            maxWidth = measureWidth,
-                                            minHeight = targetContentHeightPx,
-                                            maxHeight = targetContentHeightPx
-                                        )
-                                    )
-                                    layout(constraints.maxWidth, constraints.maxHeight) {
-                                        val xOffset = if (fraction > 0f) {
-                                            if (sheetBoundsSpec.supportsSideDockedMode) {
-                                                ((constraints.maxWidth - measureWidth) / 2f).roundToInt()
-                                            } else {
-                                                -startPaddingPx
-                                            }
-                                        } else {
-                                            0
-                                        }
-                                        placeable.placeRelative(xOffset, 0)
-                                    }
-                                }
                                 .miniPlayerDismissHorizontalGesture(
                                     enabled = currentSheetContentState == PlayerSheetState.COLLAPSED,
                                     handler = miniDismissGestureHandler
                                 )
                                 .playerSheetVerticalDragGesture(
-                                    enabled = sheetInteractionState.canDragSheet,
+                                    enabled = sheetInteractionState.canDragSheet && !hasAnyCardOverlayOpen,
                                     handler = sheetInteractionState.sheetVerticalDragGestureHandler
                                 )
                                 .clickable(
-                                    enabled = true,
+                                    enabled = currentSheetContentState == PlayerSheetState.COLLAPSED ||
+                                        (tapBackgroundClosesPlayer && !isSideDockedCardOverlayMode && !hasAnyCardOverlayOpen),
                                     interactionSource = remember { MutableInteractionSource() },
                                     indication = null
                                 ) {
                                     if (currentSheetContentState == PlayerSheetState.COLLAPSED) {
                                         playerViewModel.expandPlayerSheet()
+                                    } else if (tapBackgroundClosesPlayer && !isSideDockedCardOverlayMode && !hasAnyCardOverlayOpen) {
+                                        playerViewModel.collapsePlayerSheet()
                                     }
                                 }
                                 .semantics {
@@ -903,7 +956,7 @@ fun UnifiedPlayerSheetV2(
                                 isPreparingPlayback = isPreparingPlayback,
                                 playerContentExpansionFraction = playerContentExpansionFraction,
                                 albumColorScheme = albumColorScheme,
-                                bottomSheetOpenFraction = bottomSheetOpenFraction,
+                                bottomSheetOpenFractionProvider = bottomSheetOpenFractionProvider,
                                 fullPlayerVisualState = fullPlayerVisualState,
                                 containerHeight = containerHeight,
                                 currentQueueSourceName = currentQueueSourceName,
@@ -917,14 +970,17 @@ fun UnifiedPlayerSheetV2(
                                 shouldRenderFullPlayer = shouldRenderFullPlayer || prewarmFullPlayer,
                                 currentHorizontalPaddingStartPxProvider = currentHorizontalPaddingStartPxProvider,
                                 currentHorizontalPaddingEndPxProvider = currentHorizontalPaddingEndPxProvider,
+                                supportsSideDockedMode = sheetBoundsSpec.supportsSideDockedMode,
+                                screenWidthPx = screenWidthPx,
+                                targetExpandedWidthPxProvider = sheetVisualState.targetExpandedWidthPxProvider,
+                                targetExpandedHeightPxProvider = sheetVisualState.targetExpandedHeightPxProvider,
                                 onShowQueueClicked = sheetActionHandlers.openQueueSheet,
-                                onQueueDragStart = sheetActionHandlers.beginQueueDrag,
-                                onQueueDrag = sheetActionHandlers.dragQueueBy,
-                                onQueueRelease = sheetActionHandlers.endQueueDrag,
                                 onShowCastClicked = castSheetState.openCastSheet,
                                 onSwipePreviewChanged = onSwipePreviewChanged,
                                 tabletDisplayMode = tabletDisplayMode,
-                                onToggleTabletDisplayMode = onToggleTabletDisplayMode
+                                onToggleTabletDisplayMode = onToggleTabletDisplayMode,
+                                fullScreenFractionProvider = fullScreenFractionProvider,
+                                onOverlayVisibilityChanged = { isFullPlayerInternalOverlayOpen = it }
                             )
                         }
 
@@ -965,57 +1021,110 @@ fun UnifiedPlayerSheetV2(
 
                         val queuePredictiveBackSwipeEdgeState = rememberUpdatedState(queuePredictiveBackSwipeEdge)
 
-                        // Child 2: Queue & Song Info Host constrained inside the Music Player card bounds
-                        // (408dp x dockedHeight in Side-Docked mode; full screen in Fullscreen / Phone mode).
-                        UnifiedPlayerQueueAndSongInfoHost(
-                            shouldRenderHost = shouldRenderQueueHost && (shouldRenderQueueLayer || selectedSongForInfo != null),
-                            keepQueueSheetWarm = currentSheetContentState == PlayerSheetState.EXPANDED &&
-                                !internalIsKeyboardVisible,
-                            isQueueTelemetryActive = isQueueTelemetryActive,
-                            albumColorScheme = if (showQueueSheet || queueSheetState.isCollapsing || selectedSongForInfo != null) {
-                                albumColorScheme
-                            } else {
-                                sheetThemeState.targetAlbumColorScheme
-                            },
-                            queueScrimAlpha = queueScrimAlpha,
-                            showQueueSheet = showQueueSheet,
-                            isQueueCollapsing = queueSheetState.isCollapsing,
-                            queueHiddenOffsetPx = queueHiddenOffsetPx,
-                            queueSheetOffset = queueSheetOffset,
-                            queueSheetHeightPx = queueSheetHeightPx,
-                            onQueueSheetHeightPxChange = onQueueSheetHeightPxChange,
-                            configurationResetKey = configuration,
-                            currentQueueSourceName = currentQueueSourceName,
-                            infrequentPlayerState = infrequentPlayerState,
-                            playerViewModel = playerViewModel,
-                            selectedSongForInfo = selectedSongForInfo,
-                            onSelectedSongForInfoChange = sheetActionHandlers.onSelectedSongForInfoChange,
-                            onAnimateQueueSheet = sheetActionHandlers.animateQueueSheet,
-                            onBeginQueueDrag = sheetActionHandlers.beginQueueDrag,
-                            onDragQueueBy = sheetActionHandlers.dragQueueBy,
-                            onEndQueueDrag = sheetActionHandlers.endQueueDrag,
-                            onLaunchSaveQueueOverlay = sheetActionHandlers.onLaunchSaveQueueOverlay,
-                            onNavigateToAlbum = sheetActionHandlers.onNavigateToAlbum,
-                            onNavigateToArtist = sheetActionHandlers.onNavigateToArtist,
-                            onNavigateToGenre = sheetActionHandlers.onNavigateToGenre,
-                            queuePredictiveBackProgress = queuePredictiveBackProgress,
-                            queuePredictiveBackSwipeEdge = queuePredictiveBackSwipeEdgeState,
-                            shouldRenderQueueLayer = shouldRenderQueueLayer,
-                            isContainedInCard = isSideDockedCardOverlayMode,
-                            minMeasuredQueueHeightPx = miniPlayerContentHeightPx * 2.5f
-                        )
-
-                        // Child 3: Connect Device sheet constrained strictly inside the docked card in Side-Docked mode.
-                        if (isSideDockedCardOverlayMode) {
-                            UnifiedPlayerCastLayer(
-                                showCastSheet = castSheetState.showCastSheet,
-                                internalIsKeyboardVisible = internalIsKeyboardVisible,
-                                albumColorScheme = albumColorScheme,
+                        // Child 2: Queue, Song Info, Save Queue & Connect Device Host measured at stable expanded
+                        // bounds. Keyed on supportsSideDockedMode (not tabletDisplayMode) so toggling
+                        // SIDE_DOCKED <-> FULLSCREEN never unmounts or resets active Cast / Queue overlays.
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .layout { measurable, constraints ->
+                                    val targetContentHeightPx = if (sheetBoundsSpec.supportsSideDockedMode) {
+                                        sheetVisualState.targetExpandedHeightPxProvider()
+                                            .roundToInt()
+                                            .coerceAtLeast(1)
+                                    } else {
+                                        containerHeight.roundToPx().coerceAtLeast(1)
+                                    }
+                                    val measureWidth = if (sheetBoundsSpec.supportsSideDockedMode) {
+                                        sheetVisualState.targetExpandedWidthPxProvider()
+                                            .roundToInt()
+                                            .takeIf { it > 0 } ?: screenWidthPx.roundToInt().coerceAtLeast(1)
+                                    } else {
+                                        screenWidthPx.roundToInt().takeIf { it > 0 } ?: constraints.maxWidth
+                                    }
+                                    val placeable = measurable.measure(
+                                        constraints.copy(
+                                            minWidth = measureWidth,
+                                            maxWidth = measureWidth,
+                                            minHeight = targetContentHeightPx,
+                                            maxHeight = targetContentHeightPx
+                                        )
+                                    )
+                                    layout(constraints.maxWidth, constraints.maxHeight) {
+                                        val isOverlayActive =
+                                            showQueueSheet ||
+                                                queueSheetState.isCollapsing ||
+                                                selectedSongForInfo != null ||
+                                                pendingSaveQueueOverlay != null ||
+                                                (sheetBoundsSpec.supportsSideDockedMode && castSheetState.showCastSheet)
+                                        if (!isOverlayActive) {
+                                            placeable.placeRelative(0, 10000)
+                                        } else {
+                                            val xOffset = if (sheetBoundsSpec.supportsSideDockedMode) {
+                                                ((constraints.maxWidth - measureWidth) / 2f).roundToInt()
+                                            } else {
+                                                -currentHorizontalPaddingStartPxProvider().toInt()
+                                            }
+                                            placeable.placeRelative(xOffset, 0)
+                                        }
+                                    }
+                                }
+                        ) {
+                            UnifiedPlayerQueueAndSongInfoHost(
+                                shouldRenderHost = shouldRenderQueueHost && (shouldRenderQueueLayer || selectedSongForInfo != null),
+                                keepQueueSheetWarm = (isQueuePrewarmedAfterSettle || currentSheetContentState == PlayerSheetState.EXPANDED) &&
+                                    !internalIsKeyboardVisible,
+                                isQueueTelemetryActive = isQueueTelemetryActive,
+                                albumColorScheme = if (showQueueSheet || queueSheetState.isCollapsing || selectedSongForInfo != null) {
+                                    albumColorScheme
+                                } else {
+                                    sheetThemeState.targetAlbumColorScheme
+                                },
+                                isQueueScrimVisible = isQueueScrimVisible,
+                                queueScrimAlphaProvider = queueScrimAlphaProvider,
+                                showQueueSheet = showQueueSheet,
+                                isQueueCollapsing = queueSheetState.isCollapsing,
+                                queueHiddenOffsetPx = queueHiddenOffsetPx,
+                                queueSheetOffset = queueSheetOffset,
+                                queueSheetHeightPx = queueSheetHeightPx,
+                                onQueueSheetHeightPxChange = onQueueSheetHeightPxChange,
+                                configurationResetKey = configuration,
+                                currentQueueSourceName = currentQueueSourceName,
+                                infrequentPlayerState = infrequentPlayerState,
                                 playerViewModel = playerViewModel,
-                                onDismiss = castSheetState.dismissCastSheet,
-                                onExpansionChanged = castSheetState.onCastExpansionChanged,
-                                isContainedInCard = true
+                                selectedSongForInfo = selectedSongForInfo,
+                                onSelectedSongForInfoChange = sheetActionHandlers.onSelectedSongForInfoChange,
+                                onAnimateQueueSheet = sheetActionHandlers.animateQueueSheet,
+                                onBeginQueueDrag = sheetActionHandlers.beginQueueDrag,
+                                onDragQueueBy = sheetActionHandlers.dragQueueBy,
+                                onEndQueueDrag = sheetActionHandlers.endQueueDrag,
+                                onLaunchSaveQueueOverlay = sheetActionHandlers.onLaunchSaveQueueOverlay,
+                                onNavigateToAlbum = sheetActionHandlers.onNavigateToAlbum,
+                                onNavigateToArtist = sheetActionHandlers.onNavigateToArtist,
+                                onNavigateToGenre = sheetActionHandlers.onNavigateToGenre,
+                                queuePredictiveBackProgress = queuePredictiveBackProgress,
+                                queuePredictiveBackSwipeEdge = queuePredictiveBackSwipeEdgeState,
+                                shouldRenderQueueLayer = shouldRenderQueueLayer,
+                                isContainedInCard = isSideDockedCardOverlayMode,
+                                minMeasuredQueueHeightPx = miniPlayerContentHeightPx * 2.5f
                             )
+
+                            if (sheetBoundsSpec.supportsSideDockedMode) {
+                                UnifiedPlayerCastLayer(
+                                    showCastSheet = castSheetState.showCastSheet,
+                                    internalIsKeyboardVisible = internalIsKeyboardVisible,
+                                    albumColorScheme = albumColorScheme,
+                                    playerViewModel = playerViewModel,
+                                    onDismiss = castSheetState.dismissCastSheet,
+                                    onExpansionChanged = castSheetState.onCastExpansionChanged,
+                                    isContainedInCard = true
+                                )
+                                UnifiedPlayerSaveQueueLayer(
+                                    pendingOverlay = pendingSaveQueueOverlay,
+                                    onDismissOverlay = { sheetModalOverlayController.dismissSaveQueueOverlay() },
+                                    isContainedInCard = true
+                                )
+                            }
                         }
                     }
                 }
@@ -1023,7 +1132,7 @@ fun UnifiedPlayerSheetV2(
         }
     }
 
-    if (!isSideDockedCardOverlayMode) {
+    if (!sheetBoundsSpec.supportsSideDockedMode) {
         UnifiedPlayerCastLayer(
             showCastSheet = castSheetState.showCastSheet,
             internalIsKeyboardVisible = internalIsKeyboardVisible,
@@ -1033,10 +1142,10 @@ fun UnifiedPlayerSheetV2(
             onExpansionChanged = castSheetState.onCastExpansionChanged,
             isContainedInCard = false
         )
+        UnifiedPlayerSaveQueueLayer(
+            pendingOverlay = pendingSaveQueueOverlay,
+            onDismissOverlay = { sheetModalOverlayController.dismissSaveQueueOverlay() },
+            isContainedInCard = false
+        )
     }
-
-    UnifiedPlayerSaveQueueLayer(
-        pendingOverlay = pendingSaveQueueOverlay,
-        onDismissOverlay = { sheetModalOverlayController.dismissSaveQueueOverlay() }
-    )
 }

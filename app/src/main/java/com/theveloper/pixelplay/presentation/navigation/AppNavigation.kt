@@ -8,11 +8,6 @@ import androidx.annotation.OptIn
 import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -25,7 +20,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import com.theveloper.pixelplay.R
-import androidx.compose.ui.unit.IntOffset
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.media3.common.util.UnstableApi
 import androidx.navigation.NavBackStackEntry
@@ -93,19 +87,52 @@ fun AppNavigation(
     // transition lambdas always see the latest value when a navigation starts.
     val useNavigationRailState = rememberUpdatedState(LocalPixelPlayWindowInfo.current.useNavigationRail)
 
-    // Top-level destinations (bottom bar: Home/Search/Library; rail adds Equalizer/Settings) slide
-    // along the nav order when switching between each other, and use the AOSP push/pop otherwise.
+    // M3 container transform (Library album card -> AlbumDetail): phone single-pane layout only.
+    val albumHeroHandoff = remember { AlbumHeroHandoff() }
+    val heroWindowInfo = LocalPixelPlayWindowInfo.current
+    val heroAllowedState = rememberUpdatedState(
+        EnableAlbumHeroTransition &&
+            !heroWindowInfo.useNavigationRail &&
+            !heroWindowInfo.useTwoPaneDetail
+    )
+
+    // Top-level destinations (bottom bar: Home/Search/Library; rail adds Equalizer/Settings) use the
+    // M3 "Top level" fade through when switching between each other, and the AOSP push/pop otherwise.
     val mainRootEnter: AnimatedContentTransitionScope<NavBackStackEntry>.() -> EnterTransition =
         remember(useNavigationRailState) {
-            { mainRootEnterTransition(useNavigationRailState.value, fallback = aospSharedAxisEnter()) }
+            {
+                mainRootEnterTransition(
+                    useNavigationRailState.value,
+                    fallback = aospSharedAxisEnter(),
+                    includeJumpFromPushedScreen = true
+                )
+            }
         }
     val mainRootExit: AnimatedContentTransitionScope<NavBackStackEntry>.() -> ExitTransition =
         remember(useNavigationRailState) {
-            { mainRootExitTransition(useNavigationRailState.value, fallback = aospSharedAxisExit()) }
+            {
+                mainRootExitTransition(
+                    useNavigationRailState.value,
+                    fallback = if (isAlbumHeroTransition(albumHeroHandoff, heroAllowedState.value)) {
+                        containerTransformExit()
+                    } else {
+                        aospSharedAxisExit()
+                    }
+                )
+            }
         }
     val mainRootPopEnter: AnimatedContentTransitionScope<NavBackStackEntry>.() -> EnterTransition =
         remember(useNavigationRailState) {
-            { mainRootEnterTransition(useNavigationRailState.value, fallback = aospSharedAxisPopEnter()) }
+            {
+                mainRootEnterTransition(
+                    useNavigationRailState.value,
+                    fallback = if (isAlbumHeroTransition(albumHeroHandoff, heroAllowedState.value)) {
+                        containerTransformEnter()
+                    } else {
+                        aospSharedAxisPopEnter()
+                    }
+                )
+            }
         }
     val mainRootPopExit: AnimatedContentTransitionScope<NavBackStackEntry>.() -> ExitTransition =
         remember(useNavigationRailState) {
@@ -113,11 +140,18 @@ fun AppNavigation(
         }
 
     startDestination?.let { initialRoute ->
+        AlbumHeroTransitionHost(albumHeroHandoff) {
         NavHost(
             navController = navController,
             startDestination = initialRoute,
             enterTransition = { aospSharedAxisEnter() },
-            exitTransition = { aospSharedAxisExit() },
+            exitTransition = {
+                if (isJumpToTopLevel(useNavigationRailState.value)) {
+                    topLevelFadeThroughExit()
+                } else {
+                    aospSharedAxisExit()
+                }
+            },
             popEnterTransition = { aospSharedAxisPopEnter() },
             popExitTransition = { aospSharedAxisPopExit() }
         ) {
@@ -274,6 +308,20 @@ fun AppNavigation(
             composable(
                 route = Screen.AlbumDetail.route,
                 arguments = listOf(navArgument("albumId") { type = NavType.StringType }),
+                enterTransition = {
+                    if (isAlbumHeroTransition(albumHeroHandoff, heroAllowedState.value)) {
+                        containerTransformEnter()
+                    } else {
+                        aospSharedAxisEnter()
+                    }
+                },
+                popExitTransition = {
+                    if (isAlbumHeroTransition(albumHeroHandoff, heroAllowedState.value)) {
+                        containerTransformExit()
+                    } else {
+                        aospSharedAxisPopExit()
+                    }
+                },
             ) { backStackEntry ->
                 val albumId = backStackEntry.arguments?.getString("albumId")
                 if (albumId != null) {
@@ -384,6 +432,7 @@ fun AppNavigation(
                 }
             }
         }
+        } // AlbumHeroTransitionHost
     }
 }
 
@@ -393,68 +442,49 @@ private fun String.toRoute(): String = when (this) {
     else -> Screen.Home.route
 }
 
-private enum class MainRootDirection {
-    FORWARD,
-    BACKWARD
-}
-
-// Bottom-nav (Home / Search / Library) switches share the AOSP push duration and emphasized easing
-// so they stay in phase with ScreenWrapper's depth effects, which run on the same timeline.
-private val MAIN_ROOT_TRANSITION_SPEC =
-    tween<IntOffset>(durationMillis = AOSP_TRANSITION_DURATION, easing = M3EmphasizedEasing)
-
-private val MAIN_ROOT_FADE_SPEC =
-    tween<Float>(durationMillis = AOSP_TRANSITION_DURATION / 2, easing = M3EmphasizedEasing)
-
-private fun mainRootDirection(
-    fromRoute: String?,
-    toRoute: String?,
+/**
+ * M3 "Top level" transition pattern: switching between navigation bar / rail destinations is a
+ * fade through, never a lateral slide (a slide implies the destinations can be swiped, which
+ * conflicts with carousels and swipeable list items). Applies to both navigate and pop, so a
+ * predictive back gesture between two top-level destinations scrubs the same fade through.
+ */
+private fun AnimatedContentTransitionScope<NavBackStackEntry>.isTopLevelSwitch(
     useNavigationRail: Boolean
-): MainRootDirection? {
-    val fromIndex = mainRootRouteIndex(fromRoute, useNavigationRail) ?: return null
-    val toIndex = mainRootRouteIndex(toRoute, useNavigationRail) ?: return null
-    if (fromIndex == toIndex) return null
-    return if (toIndex > fromIndex) MainRootDirection.FORWARD else MainRootDirection.BACKWARD
+): Boolean {
+    val fromRoute = initialState.destination.route
+    val toRoute = targetState.destination.route
+    return fromRoute != toRoute &&
+        isMainRootRoute(fromRoute, useNavigationRail) &&
+        isMainRootRoute(toRoute, useNavigationRail)
 }
+
+/**
+ * A non-pop navigation from a pushed screen straight to a top-level destination (a navigation bar
+ * or rail tap while a detail screen is open). Only used by non-pop transitions: a real back
+ * navigation to a top-level destination keeps the backward slide.
+ */
+private fun AnimatedContentTransitionScope<NavBackStackEntry>.isJumpToTopLevel(
+    useNavigationRail: Boolean
+): Boolean =
+    !isMainRootRoute(initialState.destination.route, useNavigationRail) &&
+        isMainRootRoute(targetState.destination.route, useNavigationRail)
 
 private fun AnimatedContentTransitionScope<NavBackStackEntry>.mainRootEnterTransition(
     useNavigationRail: Boolean,
-    fallback: EnterTransition
-): EnterTransition = when (
-    mainRootDirection(initialState.destination.route, targetState.destination.route, useNavigationRail)
-) {
-    MainRootDirection.FORWARD -> {
-        slideInHorizontally(
-            animationSpec = MAIN_ROOT_TRANSITION_SPEC,
-            initialOffsetX = { (it * 0.5f).toInt() }
-        ) + fadeIn(animationSpec = MAIN_ROOT_FADE_SPEC)
+    fallback: EnterTransition,
+    includeJumpFromPushedScreen: Boolean = false
+): EnterTransition =
+    if (
+        isTopLevelSwitch(useNavigationRail) ||
+        (includeJumpFromPushedScreen && isJumpToTopLevel(useNavigationRail))
+    ) {
+        topLevelFadeThroughEnter()
+    } else {
+        fallback
     }
-    MainRootDirection.BACKWARD -> {
-        slideInHorizontally(
-            animationSpec = MAIN_ROOT_TRANSITION_SPEC,
-            initialOffsetX = { -(it * 0.5f).toInt() }
-        ) + fadeIn(animationSpec = MAIN_ROOT_FADE_SPEC)
-    }
-    null -> fallback
-}
 
 private fun AnimatedContentTransitionScope<NavBackStackEntry>.mainRootExitTransition(
     useNavigationRail: Boolean,
     fallback: ExitTransition
-): ExitTransition = when (
-    mainRootDirection(initialState.destination.route, targetState.destination.route, useNavigationRail)
-) {
-    MainRootDirection.FORWARD -> {
-        slideOutHorizontally(
-            animationSpec = MAIN_ROOT_TRANSITION_SPEC,
-            targetOffsetX = { -(it * 0.5f).toInt() }
-        ) + fadeOut(animationSpec = MAIN_ROOT_FADE_SPEC)
-    }
-    MainRootDirection.BACKWARD -> {
-        slideOutHorizontally(
-            animationSpec = MAIN_ROOT_TRANSITION_SPEC,
-            targetOffsetX = { (it * 0.5f).toInt() }
-        ) + fadeOut(animationSpec = MAIN_ROOT_FADE_SPEC)
-    }
-    null -> fallback
-}
+): ExitTransition =
+    if (isTopLevelSwitch(useNavigationRail)) topLevelFadeThroughExit() else fallback

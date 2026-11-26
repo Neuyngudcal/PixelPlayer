@@ -14,6 +14,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -42,6 +43,7 @@ import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.pow
+import kotlin.math.roundToInt
 import kotlin.math.roundToLong
 
 /**
@@ -57,7 +59,8 @@ fun rememberInterpolatedLyricsPosition(
     lyricsSyncOffsetMs: Int = 0,
     positionOverrideMs: Long? = null,
     seekThresholdMs: Long = 750L,
-    correctionFactor: Float = 0.25f
+    correctionFactor: Float = 0.25f,
+    highFrequencyInterpolation: Boolean = true
 ): State<Long> {
     val displayedPositionState = remember {
         mutableLongStateOf((positionOverrideMs ?: playbackPositionFlow.value) + lyricsSyncOffsetMs)
@@ -113,11 +116,20 @@ fun rememberInterpolatedLyricsPosition(
         displayedPositionState.longValue = (base + lyricsSyncOffsetMs).coerceAtLeast(0L)
     }
 
-    // 60/120fps frame ticker while playing
-    LaunchedEffect(isPlaying, lyricsSyncOffsetMs, positionOverrideMs) {
+    // Frame ticker while playing (120fps for word-by-word lyrics, 20Hz for line-only lyrics)
+    LaunchedEffect(isPlaying, lyricsSyncOffsetMs, positionOverrideMs, highFrequencyInterpolation) {
         if (!isPlaying || positionOverrideMs != null) return@LaunchedEffect
         while (true) {
-            withFrameNanos {
+            if (highFrequencyInterpolation) {
+                withFrameNanos {
+                    val now = SystemClock.elapsedRealtime()
+                    val elapsed = (now - anchorElapsedMs).coerceAtLeast(0L)
+                    val interpolatedBase = max(smoothedBaseMs, anchorPositionMs + elapsed)
+                    smoothedBaseMs = interpolatedBase
+                    displayedPositionState.longValue = (interpolatedBase + lyricsSyncOffsetMs).coerceAtLeast(0L)
+                }
+            } else {
+                delay(50L)
                 val now = SystemClock.elapsedRealtime()
                 val elapsed = (now - anchorElapsedMs).coerceAtLeast(0L)
                 val interpolatedBase = max(smoothedBaseMs, anchorPositionMs + elapsed)
@@ -348,7 +360,7 @@ fun MornyeSweepingWordSpan(
     endMs: Int,
     nextWordStartMs: Int?,
     lineEndMs: Int?,
-    currentPositionMs: Long,
+    currentPositionProvider: () -> Long,
     isCurrentLine: Boolean,
     isPastLine: Boolean,
     activeColor: Color,
@@ -375,28 +387,51 @@ fun MornyeSweepingWordSpan(
         max(candidate, startMs + 120)
     }
 
-    val progress = when {
-        !isCurrentLine -> if (isPastLine) 0f else 0f
-        else -> syncedLyricSegmentProgress(currentPositionMs, startMs, effectiveEndMs)
+    val liftStartMs = startMs - 180
+    val liftSettleEndMs = max(effectiveEndMs + 180, startMs + 540)
+
+    // Five-state motion bucket so idle unsung (0) and settled sung (4) words never read
+    // high-frequency playback time inside graphicsLayer or allocate sweep overlays.
+    val wordMotionState by remember(
+        isCurrentLine,
+        liftStartMs,
+        startMs,
+        effectiveEndMs,
+        liftSettleEndMs,
+        currentPositionProvider
+    ) {
+        derivedStateOf {
+            if (!isCurrentLine) {
+                0
+            } else {
+                val posMs = currentPositionProvider()
+                when {
+                    posMs <= liftStartMs -> 0
+                    posMs <= startMs -> 1
+                    posMs < effectiveEndMs -> 2
+                    posMs < liftSettleEndMs -> 3
+                    else -> 4
+                }
+            }
+        }
     }
 
-    val liftAmount = if (isCurrentLine) {
-        syncedLyricSegmentLift(currentPositionMs, startMs, effectiveEndMs)
+    // Only allocate glow tracking on held notes (> 900ms); quantize to 0..6 to protect TextBlobCache.
+    val canGlow = (effectiveEndMs - startMs) > 900
+    val glowStep by if (canGlow) {
+        remember(isCurrentLine, startMs, effectiveEndMs, currentPositionProvider) {
+            derivedStateOf {
+                if (!isCurrentLine) {
+                    0
+                } else {
+                    (syncedLyricSegmentGlow(currentPositionProvider(), startMs, effectiveEndMs) * 6f)
+                        .roundToInt()
+                        .coerceIn(0, 6)
+                }
+            }
+        }
     } else {
-        0f
-    }
-
-    val glowAmount = if (isCurrentLine) {
-        syncedLyricSegmentGlow(currentPositionMs, startMs, effectiveEndMs)
-    } else {
-        0f
-    }
-
-    val translationY = -liftAmount * baseLiftPx
-    val wordScale = if (isCurrentLine && progress in 0.01f..0.99f) {
-        1f + 0.025f * min(1f, liftAmount)
-    } else {
-        1f
+        remember { mutableStateOf(0) }
     }
 
     val baseTextColor = if (isCurrentLine) {
@@ -405,16 +440,19 @@ fun MornyeSweepingWordSpan(
         activeColor.copy(alpha = inactiveAlpha)
     }
 
-    val activeTextStyle = if (glowAmount > 0.01f) {
-        style.copy(
-            shadow = Shadow(
-                color = activeColor.copy(alpha = (0.65f * glowAmount).coerceIn(0f, 0.85f)),
-                offset = Offset.Zero,
-                blurRadius = glowBlurPx * (0.5f + 0.5f * glowAmount)
+    val activeTextStyle = remember(style, activeColor, glowStep, glowBlurPx) {
+        if (glowStep > 0) {
+            val glowAmount = glowStep / 6f
+            style.copy(
+                shadow = Shadow(
+                    color = activeColor.copy(alpha = (0.65f * glowAmount).coerceIn(0f, 0.85f)),
+                    offset = Offset.Zero,
+                    blurRadius = glowBlurPx * (0.5f + 0.5f * glowAmount)
+                )
             )
-        )
-    } else {
-        style
+        } else {
+            style
+        }
     }
 
     Box(
@@ -426,86 +464,117 @@ fun MornyeSweepingWordSpan(
             )
             .padding(vertical = 4.dp, horizontal = 1.dp)
             .graphicsLayer {
-                this.translationY = translationY
-                this.scaleX = wordScale
-                this.scaleY = wordScale
+                when (wordMotionState) {
+                    0 -> {
+                        translationY = 0f
+                        scaleX = 1f
+                        scaleY = 1f
+                        return@graphicsLayer
+                    }
+                    4 -> {
+                        translationY = -baseLiftPx
+                        scaleX = 1f
+                        scaleY = 1f
+                        return@graphicsLayer
+                    }
+                    else -> {
+                        val posMs = currentPositionProvider()
+                        val progress = syncedLyricSegmentProgress(posMs, startMs, effectiveEndMs)
+                        val liftAmount = syncedLyricSegmentLift(posMs, startMs, effectiveEndMs)
+                        val wordScale = if (progress in 0.01f..0.99f) {
+                            1f + 0.025f * min(1f, liftAmount)
+                        } else {
+                            1f
+                        }
+                        translationY = -liftAmount * baseLiftPx
+                        scaleX = wordScale
+                        scaleY = wordScale
+                    }
+                }
             }
     ) {
-        if (!isCurrentLine || progress <= 0.001f) {
-            Text(
-                text = wordText,
-                style = style,
-                color = baseTextColor,
-                fontSize = fontSize,
-                fontWeight = fontWeight
-            )
-        } else if (progress >= 0.999f) {
-            // Already-sung word in the active line stays 100% lit (with any held-note release glow)
-            Text(
-                text = wordText,
-                style = activeTextStyle,
-                color = activeColor,
-                fontSize = fontSize,
-                fontWeight = fontWeight
-            )
-        } else {
-            // Unsung dim base word
-            Text(
-                text = wordText,
-                style = style,
-                color = baseTextColor,
-                fontSize = fontSize,
-                fontWeight = fontWeight
-            )
-            // Soft-feathered horizontal gradient sweep overlay
-            Text(
-                text = wordText,
-                style = activeTextStyle,
-                color = activeColor,
-                fontSize = fontSize,
-                fontWeight = fontWeight,
-                modifier = Modifier
-                    .graphicsLayer {
-                        compositingStrategy = CompositingStrategy.Offscreen
-                    }
-                    .drawWithContent {
-                        drawContent()
-                        val w = size.width
-                        if (w > 0f) {
-                            val feather = (w * 0.30f).coerceIn(minFeatherPx, maxFeatherPx)
-                            val totalTravel = w + feather
-                            val center = progress * totalTravel - (feather * 0.5f)
-                            val leftStop = ((center - feather * 0.5f) / w).coerceIn(0f, 1f)
-                            val rightStop = ((center + feather * 0.5f) / w).coerceIn(0f, 1f)
+        when (wordMotionState) {
+            0, 1 -> {
+                Text(
+                    text = wordText,
+                    style = style,
+                    color = baseTextColor,
+                    fontSize = fontSize,
+                    fontWeight = fontWeight
+                )
+            }
+            3, 4 -> {
+                // Already-sung word in the active line stays 100% lit (with any held-note release glow)
+                Text(
+                    text = wordText,
+                    style = activeTextStyle,
+                    color = activeColor,
+                    fontSize = fontSize,
+                    fontWeight = fontWeight
+                )
+            }
+            else -> {
+                // Unsung dim base word
+                Text(
+                    text = wordText,
+                    style = style,
+                    color = baseTextColor,
+                    fontSize = fontSize,
+                    fontWeight = fontWeight
+                )
+                // Soft-feathered horizontal gradient sweep overlay driven purely in draw phase
+                Text(
+                    text = wordText,
+                    style = activeTextStyle,
+                    color = activeColor,
+                    fontSize = fontSize,
+                    fontWeight = fontWeight,
+                    modifier = Modifier
+                        .graphicsLayer {
+                            compositingStrategy = CompositingStrategy.Offscreen
+                        }
+                        .drawWithContent {
+                            drawContent()
+                            val w = size.width
+                            if (w > 0f) {
+                                val progress = syncedLyricSegmentProgress(
+                                    currentPositionProvider(),
+                                    startMs,
+                                    effectiveEndMs
+                                )
+                                val feather = (w * 0.30f).coerceIn(minFeatherPx, maxFeatherPx)
+                                val totalTravel = w + feather
+                                val center = progress * totalTravel - (feather * 0.5f)
+                                val leftStop = ((center - feather * 0.5f) / w).coerceIn(0f, 1f)
+                                val rightStop = ((center + feather * 0.5f) / w).coerceIn(0f, 1f)
 
-                            if (rightStop <= 0.001f) {
-                                drawRect(
-                                    color = Color.Transparent,
-                                    size = size,
-                                    blendMode = BlendMode.DstIn
-                                )
-                            } else if (leftStop >= 0.999f) {
-                                // Fully visible
-                            } else {
-                                val safeRight = max(rightStop, leftStop + 0.002f).coerceAtMost(1f)
-                                val maskBrush = Brush.horizontalGradient(
-                                    0f to Color.White,
-                                    leftStop to Color.White,
-                                    safeRight to Color.Transparent,
-                                    1f to Color.Transparent,
-                                    startX = 0f,
-                                    endX = w
-                                )
-                                drawRect(
-                                    brush = maskBrush,
-                                    topLeft = Offset.Zero,
-                                    size = Size(w, size.height),
-                                    blendMode = BlendMode.DstIn
-                                )
+                                if (rightStop <= 0.001f) {
+                                    drawRect(
+                                        color = Color.Transparent,
+                                        size = size,
+                                        blendMode = BlendMode.DstIn
+                                    )
+                                } else if (leftStop < 0.999f) {
+                                    val safeRight = max(rightStop, leftStop + 0.002f).coerceAtMost(1f)
+                                    val maskBrush = Brush.horizontalGradient(
+                                        0f to Color.White,
+                                        leftStop to Color.White,
+                                        safeRight to Color.Transparent,
+                                        1f to Color.Transparent,
+                                        startX = 0f,
+                                        endX = w
+                                    )
+                                    drawRect(
+                                        brush = maskBrush,
+                                        topLeft = Offset.Zero,
+                                        size = Size(w, size.height),
+                                        blendMode = BlendMode.DstIn
+                                    )
+                                }
                             }
                         }
-                    }
-            )
+                )
+            }
         }
     }
 }

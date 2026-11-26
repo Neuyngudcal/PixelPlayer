@@ -472,7 +472,9 @@ class PlayerViewModel @Inject constructor(
     private val _isCastSheetVisible = MutableStateFlow(false)
     val isCastSheetVisible: StateFlow<Boolean> = _isCastSheetVisible.asStateFlow()
 
-    val playerContentExpansionFraction = Animatable(0f)
+    // Sub-pixel 0.05% visibilityThreshold prevents 0f..1f horizontal docking and left-pane
+    // clearance from snapping ~150ms before pixel-space vertical translationY settles.
+    val playerContentExpansionFraction = Animatable(0f, visibilityThreshold = 0.0005f)
 
     private val _isMiniPlayerDismissing = MutableStateFlow(false)
     val isMiniPlayerDismissing: StateFlow<Boolean> = _isMiniPlayerDismissing.asStateFlow()

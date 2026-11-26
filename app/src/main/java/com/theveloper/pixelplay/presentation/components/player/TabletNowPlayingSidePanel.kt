@@ -45,6 +45,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -567,19 +568,42 @@ fun SideDockedLyricsPreviewCard(
     onLyricsCardClick: () -> Unit,
     onQueueButtonClick: () -> Unit,
     onExpandLyricsFullClick: () -> Unit = onLyricsCardClick,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    compact: Boolean = false
 ) {
     val scheme = LocalMaterialTheme.current
+    val motionScheme = MaterialTheme.motionScheme
+    val latestPositionProvider by rememberUpdatedState(currentPositionProvider)
     val previewLine by remember(lyrics, lyricsSyncOffset) {
         derivedStateOf {
             val synced = lyrics?.synced
             val plain = lyrics?.plain
             when {
                 !synced.isNullOrEmpty() -> {
-                    val posMs = (currentPositionProvider() + lyricsSyncOffset.toLong()).coerceAtLeast(0L)
-                    val active = synced.lastOrNull { it.time <= posMs && it.line.isNotBlank() }
-                        ?: synced.firstOrNull { it.line.isNotBlank() }
-                    active?.line ?: ""
+                    val posMs = (latestPositionProvider() + lyricsSyncOffset.toLong()).coerceAtLeast(0L)
+                    var low = 0
+                    var high = synced.lastIndex
+                    var rightmostIdx = -1
+                    while (low <= high) {
+                        val mid = (low + high) ushr 1
+                        if (synced[mid].time <= posMs) {
+                            rightmostIdx = mid
+                            low = mid + 1
+                        } else {
+                            high = mid - 1
+                        }
+                    }
+                    var matchedLine: String? = null
+                    var idx = rightmostIdx
+                    while (idx >= 0) {
+                        val candidate = synced[idx]
+                        if (candidate.line.isNotBlank()) {
+                            matchedLine = candidate.line
+                            break
+                        }
+                        idx--
+                    }
+                    matchedLine ?: synced.firstOrNull { it.line.isNotBlank() }?.line ?: ""
                 }
                 !plain.isNullOrEmpty() -> {
                     plain.firstOrNull { it.isNotBlank() } ?: ""
@@ -588,21 +612,25 @@ fun SideDockedLyricsPreviewCard(
             }
         }
     }
+    val emptyLyricsLabel = stringResource(R.string.player_lyrics_empty_title)
+    val displayLine = previewLine.ifBlank { emptyLyricsLabel }
+    val buttonSize = if (compact) 30.dp else 34.dp
+    val cornerRadius = if (compact) 18.dp else 22.dp
 
     Surface(
         modifier = modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(22.dp))
+            .clip(RoundedCornerShape(cornerRadius))
             .clickable(onClick = onLyricsCardClick),
-        shape = RoundedCornerShape(22.dp),
+        shape = RoundedCornerShape(cornerRadius),
         color = scheme.onPrimaryContainer.copy(alpha = 0.12f),
         border = BorderStroke(1.dp, scheme.onPrimaryContainer.copy(alpha = 0.10f))
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
+                .padding(horizontal = 16.dp, vertical = if (compact) 8.dp else 12.dp),
+            verticalArrangement = Arrangement.spacedBy(if (compact) 4.dp else 6.dp)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -633,7 +661,7 @@ fun SideDockedLyricsPreviewCard(
                 ) {
                     Box(
                         modifier = Modifier
-                            .size(34.dp)
+                            .size(buttonSize)
                             .clip(CircleShape)
                             .background(scheme.onPrimaryContainer.copy(alpha = 0.14f))
                             .clickable(onClick = onQueueButtonClick),
@@ -643,13 +671,13 @@ fun SideDockedLyricsPreviewCard(
                             painter = painterResource(R.drawable.rounded_queue_music_24),
                             contentDescription = stringResource(R.string.player_panel_up_next),
                             tint = scheme.onPrimaryContainer,
-                            modifier = Modifier.size(17.dp)
+                            modifier = Modifier.size(if (compact) 15.dp else 17.dp)
                         )
                     }
 
                     Box(
                         modifier = Modifier
-                            .size(34.dp)
+                            .size(buttonSize)
                             .clip(CircleShape)
                             .background(scheme.onPrimaryContainer.copy(alpha = 0.14f))
                             .clickable(onClick = onExpandLyricsFullClick),
@@ -659,20 +687,29 @@ fun SideDockedLyricsPreviewCard(
                             imageVector = Icons.Rounded.KeyboardArrowUp,
                             contentDescription = stringResource(R.string.player_panel_lyrics),
                             tint = scheme.onPrimaryContainer,
-                            modifier = Modifier.size(18.dp)
+                            modifier = Modifier.size(if (compact) 16.dp else 18.dp)
                         )
                     }
                 }
             }
 
-            Text(
-                text = previewLine.ifBlank { stringResource(R.string.player_lyrics_empty_title) },
-                style = MaterialTheme.typography.titleSmall.copy(fontFamily = null),
-                fontWeight = FontWeight.SemiBold,
-                color = scheme.onPrimaryContainer.copy(alpha = if (previewLine.isNotBlank()) 0.92f else 0.65f),
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis
-            )
+            AnimatedContent(
+                targetState = displayLine,
+                transitionSpec = {
+                    fadeIn(animationSpec = motionScheme.fastEffectsSpec()) togetherWith
+                        fadeOut(animationSpec = motionScheme.fastEffectsSpec())
+                },
+                label = "SideDockedPreviewLyricLine"
+            ) { lineText ->
+                Text(
+                    text = lineText,
+                    style = MaterialTheme.typography.titleSmall.copy(fontFamily = null),
+                    fontWeight = FontWeight.SemiBold,
+                    color = scheme.onPrimaryContainer.copy(alpha = if (previewLine.isNotBlank()) 0.92f else 0.65f),
+                    maxLines = if (compact) 1 else 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
         }
     }
 }

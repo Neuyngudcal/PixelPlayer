@@ -213,8 +213,26 @@ object GenreTypography {
         }
     }
 
+    private data class StyleCacheKey(
+        val hash: Long,
+        val profile: GenreTitleProfile,
+        val isGridView: Boolean
+    )
+
+    private val styleCandidatesCache =
+        java.util.concurrent.ConcurrentHashMap<StyleCacheKey, List<TextStyle>>()
+
     @OptIn(ExperimentalTextApi::class)
     private fun buildStyleCandidates(
+        hash: Long,
+        profile: GenreTitleProfile,
+        isGridView: Boolean
+    ): List<TextStyle> = styleCandidatesCache.getOrPut(StyleCacheKey(hash, profile, isGridView)) {
+        buildStyleCandidatesUncached(hash = hash, profile = profile, isGridView = isGridView)
+    }
+
+    @OptIn(ExperimentalTextApi::class)
+    private fun buildStyleCandidatesUncached(
         hash: Long,
         profile: GenreTitleProfile,
         isGridView: Boolean

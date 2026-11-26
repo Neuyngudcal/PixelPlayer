@@ -3,6 +3,8 @@ package com.theveloper.pixelplay.presentation.components.scoped
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.AnimationSpec
 import androidx.compose.animation.core.AnimationVector1D
+import androidx.compose.animation.core.SpringSpec
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.MutatorMutex
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
@@ -18,6 +20,9 @@ internal class SheetMotionController(
     private val defaultAnimationSpec: AnimationSpec<Float>,
     private val expandedY: Float = 0f
 ) {
+    @Volatile
+    private var activeTargetExpanded: Boolean? = null
+
     suspend fun animateTo(
         targetExpanded: Boolean,
         canExpand: Boolean,
@@ -25,9 +30,20 @@ internal class SheetMotionController(
         animationSpec: AnimationSpec<Float> = defaultAnimationSpec,
         initialVelocity: Float = 0f
     ) {
-        val targetFraction = if (canExpand && targetExpanded) 1f else 0f
+        val effectiveTargetExpanded = canExpand && targetExpanded
+        val targetFraction = if (effectiveTargetExpanded) 1f else 0f
         val targetY = if (targetExpanded) expandedY else collapsedY
         val velocityScale = (collapsedY - expandedY).coerceAtLeast(1f)
+
+        // If a velocity-preserving gesture fling is already animating toward this exact target,
+        // do not cancel and restart it with initialVelocity = 0f from LaunchedEffect.
+        if (
+            activeTargetExpanded == effectiveTargetExpanded &&
+            (translationY.isRunning || expansionFraction.isRunning) &&
+            initialVelocity == 0f
+        ) {
+            return
+        }
 
         if (
             translationY.value == targetY &&
@@ -39,31 +55,49 @@ internal class SheetMotionController(
         }
 
         mutex.mutate {
-            coroutineScope {
-                launch {
-                    translationY.animateTo(
-                        targetValue = targetY,
-                        initialVelocity = initialVelocity,
-                        animationSpec = animationSpec
-                    )
+            activeTargetExpanded = effectiveTargetExpanded
+            try {
+                coroutineScope {
+                    launch {
+                        translationY.animateTo(
+                            targetValue = targetY,
+                            initialVelocity = initialVelocity,
+                            animationSpec = animationSpec
+                        )
+                    }
+                    launch {
+                        val fractionAnimationSpec = if (animationSpec is SpringSpec<Float>) {
+                            spring(
+                                dampingRatio = animationSpec.dampingRatio,
+                                stiffness = animationSpec.stiffness,
+                                visibilityThreshold = 0.0005f
+                            )
+                        } else {
+                            animationSpec
+                        }
+                        expansionFraction.animateTo(
+                            targetValue = targetFraction,
+                            initialVelocity = initialVelocity / velocityScale,
+                            animationSpec = fractionAnimationSpec
+                        )
+                    }
                 }
-                launch {
-                    expansionFraction.animateTo(
-                        targetValue = targetFraction,
-                        initialVelocity = initialVelocity / velocityScale,
-                        animationSpec = animationSpec
-                    )
+            } finally {
+                if (activeTargetExpanded == effectiveTargetExpanded) {
+                    activeTargetExpanded = null
                 }
             }
         }
     }
 
     suspend fun stop() {
+        activeTargetExpanded = null
         translationY.stop()
         expansionFraction.stop()
     }
 
     suspend fun snapTo(translationYValue: Float, expansionFractionValue: Float) {
+        activeTargetExpanded = null
         mutex.mutate {
             translationY.snapTo(translationYValue)
             expansionFraction.snapTo(expansionFractionValue)

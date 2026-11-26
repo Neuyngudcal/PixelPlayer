@@ -16,6 +16,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -57,7 +58,9 @@ fun OptimizedAlbumArt(
     targetSize: Size = SafeOriginalAlbumArtSize,
     placeholderModel: Any? = null,
     crossfadeDurationMillis: Int = 350,
-    useSubcomposition: Boolean = true
+    useSubcomposition: Boolean = true,
+    placeholderContainerColor: Color = MaterialTheme.colorScheme.surfaceContainerHigh,
+    placeholderContentColor: Color = MaterialTheme.colorScheme.onSurfaceVariant
 ) {
     val context = LocalContext.current
     val requestTargetSize = remember(targetSize) {
@@ -138,7 +141,11 @@ fun OptimizedAlbumArt(
         }
         Box(modifier = modifier) {
             if (showPlaceholder) {
-                PlaceholderContent(title = title)
+                PlaceholderContent(
+                    title = title,
+                    containerColor = placeholderContainerColor,
+                    contentColor = placeholderContentColor
+                )
             }
             AsyncImage(
                 model = requestModel,
@@ -182,11 +189,27 @@ fun OptimizedAlbumArt(
                     contentDescription = null,
                     modifier = Modifier.fillMaxSize(),
                     contentScale = ContentScale.Crop,
-                    loading = { PlaceholderContent(title = title) },
-                    error = { PlaceholderContent(title = title) }
+                    loading = {
+                        PlaceholderContent(
+                            title = title,
+                            containerColor = placeholderContainerColor,
+                            contentColor = placeholderContentColor
+                        )
+                    },
+                    error = {
+                        PlaceholderContent(
+                            title = title,
+                            containerColor = placeholderContainerColor,
+                            contentColor = placeholderContentColor
+                        )
+                    }
                 )
             } else {
-                PlaceholderContent(title = title)
+                PlaceholderContent(
+                    title = title,
+                    containerColor = placeholderContainerColor,
+                    contentColor = placeholderContentColor
+                )
             }
         },
         error = {
@@ -194,7 +217,11 @@ fun OptimizedAlbumArt(
             if (cachedPainter != null) {
                 SubcomposeAsyncImageContent(painter = cachedPainter)
             } else {
-                PlaceholderContent(title = title)
+                PlaceholderContent(
+                    title = title,
+                    containerColor = placeholderContainerColor,
+                    contentColor = placeholderContentColor
+                )
             }
         },
         success = {
@@ -204,11 +231,15 @@ fun OptimizedAlbumArt(
 }
 
 @Composable
-private fun PlaceholderContent(title: String) {
+private fun PlaceholderContent(
+    title: String,
+    containerColor: Color,
+    contentColor: Color
+) {
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.surfaceContainerHigh),
+            .background(containerColor),
         contentAlignment = Alignment.Center
     ) {
         Image(
@@ -216,9 +247,7 @@ private fun PlaceholderContent(title: String) {
             contentDescription = "$title placeholder",
             contentScale = ContentScale.Fit,
             modifier = Modifier.size(96.dp),
-            colorFilter = androidx.compose.ui.graphics.ColorFilter.tint(
-                MaterialTheme.colorScheme.onSurfaceVariant
-            ),
+            colorFilter = androidx.compose.ui.graphics.ColorFilter.tint(contentColor),
         )
     }
 }

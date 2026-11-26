@@ -43,6 +43,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.common.util.UnstableApi
 import androidx.navigation.NavController
@@ -63,6 +64,7 @@ import com.theveloper.pixelplay.presentation.components.MiniPlayerHeight
 import com.theveloper.pixelplay.presentation.components.PlaylistContainer
 import com.theveloper.pixelplay.presentation.components.albumFastScrollLabel
 import com.theveloper.pixelplay.presentation.components.artistFastScrollLabel
+import com.theveloper.pixelplay.presentation.navigation.LocalAlbumHeroHandoff
 import com.theveloper.pixelplay.presentation.viewmodel.PlayerViewModel
 import com.theveloper.pixelplay.presentation.viewmodel.PlaylistUiState
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -98,6 +100,13 @@ fun LibraryAlbumsTab(
 
     val dummyListState = rememberLazyListState()
     val dummyGridState = rememberLazyGridState()
+
+    val albumHeroHandoff = LocalAlbumHeroHandoff.current
+    // Library is RESUMED again only after an album hero transition (forward or back) has finished.
+    LifecycleResumeEffect(albumHeroHandoff) {
+        albumHeroHandoff?.clear()
+        onPauseOrDispose { }
+    }
 
     val albumFastScrollLabelProvider = remember(albums, currentAlbumSortOption) {
         { index: Int ->
@@ -209,7 +218,11 @@ fun LibraryAlbumsTab(
                             )
                         )
                         .fillMaxSize(),
-                    columns = GridCells.Adaptive(minSize = windowInfo.mediaGridMinCellSize),
+                    columns = if (windowInfo.useNavigationRail) {
+                        GridCells.Fixed(windowInfo.tabletMediaGridColumns)
+                    } else {
+                        GridCells.Adaptive(minSize = windowInfo.mediaGridMinCellSize)
+                    },
                     contentPadding = PaddingValues(bottom = bottomBarHeight + MiniPlayerHeight + ListExtraBottomGap + 4.dp),
                     verticalArrangement = Arrangement.spacedBy(14.dp),
                     horizontalArrangement = Arrangement.spacedBy(14.dp)
@@ -348,7 +361,11 @@ fun LibraryAlbumsTab(
                                         )
                                     ),
                                 state = activeGridState,
-                                columns = GridCells.Adaptive(minSize = windowInfo.mediaGridMinCellSize),
+                                columns = if (windowInfo.useNavigationRail) {
+                        GridCells.Fixed(windowInfo.tabletMediaGridColumns)
+                    } else {
+                        GridCells.Adaptive(minSize = windowInfo.mediaGridMinCellSize)
+                    },
                                 contentPadding = PaddingValues(bottom = bottomBarHeight + MiniPlayerHeight + ListExtraBottomGap + 4.dp),
                                 verticalArrangement = Arrangement.spacedBy(gridSpacing),
                                 horizontalArrangement = Arrangement.spacedBy(gridSpacing)
@@ -366,8 +383,11 @@ fun LibraryAlbumsTab(
                                                 eager = false
                                             )
                                         }
-                                        val rememberedOnClick = remember(album.id, onAlbumClick) {
-                                            { onAlbumClick(album.id) }
+                                        val rememberedOnClick = remember(album, onAlbumClick, albumHeroHandoff) {
+                                            {
+                                                albumHeroHandoff?.offer(album)
+                                                onAlbumClick(album.id)
+                                            }
                                         }
                                         val rememberedOnLongPress = remember(album.id, onAlbumLongPress) {
                                             { onAlbumLongPress(album) }

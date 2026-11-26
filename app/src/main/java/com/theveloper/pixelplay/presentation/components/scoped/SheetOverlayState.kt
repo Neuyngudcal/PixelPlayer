@@ -23,9 +23,11 @@ internal data class SheetOverlayState(
     val internalIsKeyboardVisible: Boolean,
     val actuallyShowSheetContent: Boolean,
     val isQueueVisible: Boolean,
-    val queueVisualOpenFraction: Float,
-    val bottomSheetOpenFraction: Float,
-    val queueScrimAlpha: Float
+    val isQueueScrimVisible: Boolean,
+    /** Draw/layout-phase providers to avoid per-frame parent recomposition during sheet open/close. */
+    val queueVisualOpenFractionProvider: () -> Float,
+    val bottomSheetOpenFractionProvider: () -> Float,
+    val queueScrimAlphaProvider: () -> Float
 )
 
 @Composable
@@ -37,7 +39,7 @@ internal fun rememberSheetOverlayState(
     isQueueCollapsing: Boolean,
     queueHiddenOffsetPx: Float,
     screenHeightPx: Float,
-    castSheetOpenFraction: Float,
+    castSheetOpenFractionProvider: () -> Float,
     queueSheetOffset: Animatable<Float, AnimationVector1D>,
     queuePredictiveBackProgress: Animatable<Float, AnimationVector1D>
 ): SheetOverlayState {
@@ -89,26 +91,41 @@ internal fun rememberSheetOverlayState(
             }
         }
     }
-    val queueVisualOpenFraction by queueVisualOpenFractionState
- 
-    val bottomSheetOpenFractionState = remember(queueVisualOpenFractionState, castSheetOpenFraction) {
-        derivedStateOf { max(queueVisualOpenFractionState.value, castSheetOpenFraction) }
+
+    val bottomSheetOpenFractionState = remember(
+        queueVisualOpenFractionState,
+        castSheetOpenFractionProvider
+    ) {
+        derivedStateOf { max(queueVisualOpenFractionState.value, castSheetOpenFractionProvider()) }
     }
-    val bottomSheetOpenFraction by bottomSheetOpenFractionState
- 
+
     val queueScrimAlphaState = remember(queueVisualOpenFractionState) {
         derivedStateOf {
             (queueVisualOpenFractionState.value * 0.45f).coerceIn(0f, 0.45f)
         }
     }
-    val queueScrimAlpha by queueScrimAlphaState
+
+    val isQueueScrimVisible by remember(queueScrimAlphaState) {
+        derivedStateOf { queueScrimAlphaState.value > 0.001f }
+    }
+
+    val queueVisualOpenFractionProvider = remember(queueVisualOpenFractionState) {
+        { queueVisualOpenFractionState.value }
+    }
+    val bottomSheetOpenFractionProvider = remember(bottomSheetOpenFractionState) {
+        { bottomSheetOpenFractionState.value }
+    }
+    val queueScrimAlphaProvider = remember(queueScrimAlphaState) {
+        { queueScrimAlphaState.value }
+    }
 
     return SheetOverlayState(
         internalIsKeyboardVisible = internalIsKeyboardVisible,
         actuallyShowSheetContent = actuallyShowSheetContent,
         isQueueVisible = isQueueVisible,
-        queueVisualOpenFraction = queueVisualOpenFraction,
-        bottomSheetOpenFraction = bottomSheetOpenFraction,
-        queueScrimAlpha = queueScrimAlpha
+        isQueueScrimVisible = isQueueScrimVisible,
+        queueVisualOpenFractionProvider = queueVisualOpenFractionProvider,
+        bottomSheetOpenFractionProvider = bottomSheetOpenFractionProvider,
+        queueScrimAlphaProvider = queueScrimAlphaProvider
     )
 }

@@ -299,6 +299,7 @@ fun AlbumCarouselSection(
                             }
                         )
                 ) { // Enforce 1:1 aspect ratio for the item itself
+                    val playerScheme = LocalMaterialTheme.current
                     OptimizedAlbumArt(
                         uri = song.albumArtUriString,
                         title = song.title,
@@ -308,7 +309,9 @@ fun AlbumCarouselSection(
                             "${song.albumArtUriString}?quality=thumb"
                         } else null,
                         crossfadeDurationMillis = if (isTelegramArt) 350 else 0,
-                        useSubcomposition = false
+                        useSubcomposition = false,
+                        placeholderContainerColor = playerScheme.surfaceContainerHigh,
+                        placeholderContentColor = playerScheme.onSurfaceVariant
                     )
                 }
             }

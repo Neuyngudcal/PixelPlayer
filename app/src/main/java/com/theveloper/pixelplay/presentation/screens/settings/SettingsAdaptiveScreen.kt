@@ -4,8 +4,6 @@ import DelimiterConfigScreen
 import androidx.annotation.StringRes
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -99,6 +97,8 @@ import com.theveloper.pixelplay.presentation.components.TabletPaneTokens
 import com.theveloper.pixelplay.presentation.components.resolveTabletPaneBottomMargin
 import com.theveloper.pixelplay.presentation.components.resolveTabletPaneTopMargin
 import com.theveloper.pixelplay.presentation.model.SettingsCategory
+import com.theveloper.pixelplay.presentation.navigation.topLevelFadeThroughEnter
+import com.theveloper.pixelplay.presentation.navigation.topLevelFadeThroughExit
 import com.theveloper.pixelplay.presentation.screens.AboutScreen
 import com.theveloper.pixelplay.presentation.screens.ArtistSettingsScreen
 import com.theveloper.pixelplay.presentation.screens.DeviceCapabilitiesScreen
@@ -290,9 +290,7 @@ fun SettingsAdaptiveScreen(
                 )
             },
             listPane = {
-                AnimatedPane(
-                    modifier = Modifier.preferredWidth(listPreferredWidth)
-                ) {
+                val listContent: @Composable () -> Unit = {
                     SettingsListPane(
                         isTwoPane = isTwoPane,
                         showBackButton = !windowInfo.useNavigationRail,
@@ -310,9 +308,26 @@ fun SettingsAdaptiveScreen(
                         }
                     )
                 }
+                if (isTwoPane) {
+                    // In 2-pane tablet mode, avoid AnimatedPane's internal LookaheadScope
+                    // animateBounds spring so it never fights the outer Side-Docked Card resize.
+                    Box(
+                        modifier = Modifier
+                            .preferredWidth(listPreferredWidth)
+                            .fillMaxSize()
+                    ) {
+                        listContent()
+                    }
+                } else {
+                    AnimatedPane(
+                        modifier = Modifier.preferredWidth(listPreferredWidth)
+                    ) {
+                        listContent()
+                    }
+                }
             },
             detailPane = {
-                AnimatedPane {
+                val detailContent: @Composable () -> Unit = {
                     SettingsDetailPane(
                         destination = currentDestination,
                         isTwoPane = isTwoPane,
@@ -349,6 +364,15 @@ fun SettingsAdaptiveScreen(
                             openDestination(subDest)
                         }
                     )
+                }
+                if (isTwoPane) {
+                    Box(modifier = Modifier.fillMaxSize()) {
+                        detailContent()
+                    }
+                } else {
+                    AnimatedPane {
+                        detailContent()
+                    }
                 }
             }
         )
@@ -802,7 +826,6 @@ private fun SettingsDetailPane(
     onOpenSubDestination: (SettingsDetailDestination) -> Unit
 ) {
     val spacing = LocalSpacing.current
-    val effectsSpec = MaterialTheme.motionScheme.fastEffectsSpec<Float>()
 
     val detailTitle = when (destination) {
         is SettingsDetailDestination.Category -> {
@@ -956,7 +979,7 @@ private fun SettingsDetailPane(
                 AnimatedContent(
                     targetState = destination,
                     transitionSpec = {
-                        fadeIn(effectsSpec) togetherWith fadeOut(effectsSpec)
+                        topLevelFadeThroughEnter() togetherWith topLevelFadeThroughExit()
                     },
                     label = "SettingsDetailPaneContent"
                 ) { targetDestination ->

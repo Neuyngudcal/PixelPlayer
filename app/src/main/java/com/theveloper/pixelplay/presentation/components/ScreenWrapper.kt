@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -33,6 +34,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.navigation.compose.currentBackStackEntryAsState
 import com.theveloper.pixelplay.presentation.viewmodel.PlayerViewModel
 import com.theveloper.pixelplay.presentation.navigation.AOSP_TRANSITION_DURATION
+import com.theveloper.pixelplay.presentation.navigation.LocalNavAnimatedVisibilityScope
 import com.theveloper.pixelplay.presentation.navigation.M3EmphasizedEasing
 import com.theveloper.pixelplay.presentation.navigation.isMainRootRoute
 import com.theveloper.pixelplay.ui.theme.LocalPixelPlayWindowInfo
@@ -198,7 +200,7 @@ fun ScreenWrapper(
             // Offscreen mid-transition (when cornerRadius crosses the threshold) causes the
             // RenderNode's rendering mode to flip for one frame, producing a subtle flash on
             // the outgoing screen right as the animation starts. Main root tab switches are
-            // the exception: Home/Search/Library keep the same slide/fade transition, but skip
+            // the exception: Home/Search/Library use the M3 top-level fade through and skip
             // the expensive offscreen depth layer while no deeper screen is visible.
             .graphicsLayer {
                 compositingStrategy = if (shouldRunDepthEffects) {
@@ -222,12 +224,14 @@ fun ScreenWrapper(
                 }
             )
     ) {
-        if (useNavigationRail && wrapInTabletFloatingPane) {
-            AdaptiveFloatingPane {
+        CompositionLocalProvider(LocalNavAnimatedVisibilityScope provides animatedVisibilityScope) {
+            if (useNavigationRail && wrapInTabletFloatingPane) {
+                AdaptiveFloatingPane {
+                    content()
+                }
+            } else {
                 content()
             }
-        } else {
-            content()
         }
 
         // Dim Layer Overlay

@@ -1,7 +1,6 @@
 package com.theveloper.pixelplay.presentation.components
 
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -10,12 +9,16 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.BiasAlignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
@@ -86,52 +89,84 @@ fun ExpressiveTopBarContent(
     val currentMinWidthAxis = lerp(expandedMinWidthAxis, collapsedMinWidthAxis, clampedFraction)
     val titleFontWeight = FontWeight.Bold
 
-    BoxWithConstraints(modifier = modifier.fillMaxSize()) {
-        val availableTitleWidthPx = with(density) {
-            (maxWidth - titlePaddingStart - titlePaddingEnd).coerceAtLeast(0.dp).roundToPx()
-        }
-        val thresholdWidthPx = with(density) {
-            titleWidthCompressionThreshold?.coerceAtLeast(0.dp)?.roundToPx()
-        }
-        val compressionTargetWidthPx = thresholdWidthPx
-            ?.coerceAtMost(availableTitleWidthPx)
-            ?: availableTitleWidthPx
-        val baseTitleStyle = titleStyle.copy(
+    // Measure natural title width ONCE at the stable unscaled reference font size and avoid
+    // BoxWithConstraints (SubcomposeLayout) during scroll and Side-Docked width transitions.
+    val referenceFontSize = titleStyle.fontSize
+    val referenceFontFamily = rememberGoogleSansFlexFontFamily(
+        fontWeight = titleFontWeight,
+        widthAxis = DefaultTopBarTitleWidthAxis
+    )
+    val referenceTitleStyle = remember(titleStyle, referenceFontSize, titleFontWeight, referenceFontFamily) {
+        titleStyle.copy(
+            fontSize = referenceFontSize,
+            lineHeight = referenceFontSize * 1.1f,
+            fontWeight = titleFontWeight,
+            fontFamily = referenceFontFamily
+        )
+    }
+    val referenceTitleWidthPx = remember(title, referenceTitleStyle, density) {
+        textMeasurer.measure(
+            text = AnnotatedString(title),
+            style = referenceTitleStyle,
+            overflow = TextOverflow.Clip,
+            softWrap = false,
+            maxLines = 1
+        ).size.width
+    }
+    val fontScaleRatio = if (referenceFontSize.value > 0f) {
+        titleFontSize.value / referenceFontSize.value
+    } else {
+        titleScale
+    }
+    val naturalTitleWidthPx = (referenceTitleWidthPx * fontScaleRatio).roundToInt()
+
+    var quantizedContainerWidthPx by remember { mutableIntStateOf(0) }
+    val titlePaddingHorizontalPx = with(density) { (titlePaddingStart + titlePaddingEnd).roundToPx() }
+    val availableTitleWidthPx = (quantizedContainerWidthPx - titlePaddingHorizontalPx).coerceAtLeast(0)
+    val thresholdWidthPx = with(density) {
+        titleWidthCompressionThreshold?.coerceAtLeast(0.dp)?.roundToPx()
+    }
+    val compressionTargetWidthPx = if (availableTitleWidthPx > 0) {
+        thresholdWidthPx?.coerceAtMost(availableTitleWidthPx) ?: availableTitleWidthPx
+    } else {
+        thresholdWidthPx ?: 0
+    }
+    val shouldCompressTitle = currentMinWidthAxis < DefaultTopBarTitleWidthAxis &&
+            compressionTargetWidthPx > 0 &&
+            naturalTitleWidthPx > compressionTargetWidthPx
+    val resolvedWidthAxis = if (shouldCompressTitle && naturalTitleWidthPx > 0) {
+        (DefaultTopBarTitleWidthAxis * compressionTargetWidthPx.toFloat() / naturalTitleWidthPx.toFloat())
+            .coerceIn(currentMinWidthAxis, DefaultTopBarTitleWidthAxis)
+            .roundToInt()
+            .toFloat()
+    } else {
+        DefaultTopBarTitleWidthAxis
+    }
+    val resolvedFontFamily = rememberGoogleSansFlexFontFamily(
+        fontWeight = titleFontWeight,
+        widthAxis = resolvedWidthAxis
+    )
+    val resolvedTitleStyle = remember(titleStyle, titleFontSize, titleFontWeight, resolvedFontFamily) {
+        titleStyle.copy(
             fontSize = titleFontSize,
             lineHeight = titleFontSize * 1.1f,
             fontWeight = titleFontWeight,
-            fontFamily = rememberGoogleSansFlexFontFamily(
-                fontWeight = titleFontWeight,
-                widthAxis = DefaultTopBarTitleWidthAxis
-            )
+            fontFamily = resolvedFontFamily
         )
-        val naturalTitleWidthPx = remember(title, baseTitleStyle) {
-            textMeasurer.measure(
-                text = AnnotatedString(title),
-                style = baseTitleStyle,
-                overflow = TextOverflow.Clip,
-                softWrap = false,
-                maxLines = 1
-            ).size.width
-        }
-        val shouldCompressTitle = currentMinWidthAxis < DefaultTopBarTitleWidthAxis &&
-                availableTitleWidthPx > 0 &&
-                naturalTitleWidthPx > compressionTargetWidthPx
-        val resolvedWidthAxis = if (shouldCompressTitle && naturalTitleWidthPx > 0) {
-            (DefaultTopBarTitleWidthAxis * compressionTargetWidthPx.toFloat() / naturalTitleWidthPx.toFloat())
-                .coerceIn(currentMinWidthAxis, DefaultTopBarTitleWidthAxis)
-                .roundToInt()
-                .toFloat()
-        } else {
-            DefaultTopBarTitleWidthAxis
-        }
-        val resolvedTitleStyle = baseTitleStyle.copy(
-            fontFamily = rememberGoogleSansFlexFontFamily(
-                fontWeight = titleFontWeight,
-                widthAxis = resolvedWidthAxis
-            )
-        )
+    }
 
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .onSizeChanged { size ->
+                if (size.width > 0) {
+                    val quantized = ((size.width + 8) / 16) * 16
+                    if (quantized != quantizedContainerWidthPx) {
+                        quantizedContainerWidthPx = quantized
+                    }
+                }
+            }
+    ) {
         Box(
             modifier = Modifier
                 .align(animatedTitleAlignment)
@@ -174,27 +209,35 @@ fun ExpressiveTopBarContent(
     }
 }
 
+private val GoogleSansFlexFontFamilyCache =
+    java.util.concurrent.ConcurrentHashMap<Pair<Int, Int>, FontFamily>()
+
 @OptIn(ExperimentalTextApi::class)
 @Composable
 private fun rememberGoogleSansFlexFontFamily(
     fontWeight: FontWeight,
     widthAxis: Float
 ): FontFamily {
-    val sanitizedWidthAxis = widthAxis.coerceIn(1f, DefaultTopBarTitleWidthAxis).roundToInt().toFloat()
-    return remember(fontWeight, sanitizedWidthAxis) {
-        FontFamily(
-            Font(
-                resId = R.font.gflex_variable,
-                weight = fontWeight,
-                variationSettings = FontVariation.Settings(
-                    FontVariation.weight(fontWeight.weight),
-                    FontVariation.width(sanitizedWidthAxis),
-                    FontVariation.Setting("ROND", TopBarTitleRoundedAxis),
-                    FontVariation.Setting("XTRA", TopBarTitleXtraAxis),
-                    FontVariation.Setting("YOPQ", TopBarTitleYopqAxis),
-                    FontVariation.Setting("YTLC", TopBarTitleYtlcAxis)
+    // Quantize width axis to 2-unit steps and cache process-wide so animations never allocate
+    // FontFamily/Font instances or resolve variable typefaces on the UI thread per frame.
+    val quantizedWidthAxis =
+        ((widthAxis.coerceIn(1f, DefaultTopBarTitleWidthAxis).roundToInt() + 1) / 2) * 2
+    return remember(fontWeight.weight, quantizedWidthAxis) {
+        GoogleSansFlexFontFamilyCache.getOrPut(fontWeight.weight to quantizedWidthAxis) {
+            FontFamily(
+                Font(
+                    resId = R.font.gflex_variable,
+                    weight = fontWeight,
+                    variationSettings = FontVariation.Settings(
+                        FontVariation.weight(fontWeight.weight),
+                        FontVariation.width(quantizedWidthAxis.toFloat()),
+                        FontVariation.Setting("ROND", TopBarTitleRoundedAxis),
+                        FontVariation.Setting("XTRA", TopBarTitleXtraAxis),
+                        FontVariation.Setting("YOPQ", TopBarTitleYopqAxis),
+                        FontVariation.Setting("YTLC", TopBarTitleYtlcAxis)
+                    )
                 )
             )
-        )
+        }
     }
 }

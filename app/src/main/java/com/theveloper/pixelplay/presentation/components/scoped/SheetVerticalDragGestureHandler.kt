@@ -110,7 +110,7 @@ internal class SheetVerticalDragGestureHandler(
         scope.launch {
             if (targetState == PlayerSheetState.EXPANDED) {
                 launch {
-                    onAnimateSheet(true, null, 0f)
+                    onAnimateSheet(true, null, verticalVelocity)
                 }
                 onExpandSheetState()
             } else {

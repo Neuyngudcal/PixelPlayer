@@ -16,6 +16,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -31,6 +32,7 @@ import androidx.compose.ui.unit.dp
 import com.theveloper.pixelplay.presentation.components.LocalMaterialTheme
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import kotlin.math.roundToInt
 
 @Composable
 fun ToggleSegmentButton(
@@ -216,12 +218,14 @@ private fun ToggleSegmentButtonContainer(
     val latestActiveColor = rememberUpdatedState(activeColor)
     val latestInactiveColor = rememberUpdatedState(inactiveColor)
     val latestEnabled = rememberUpdatedState(enabled)
+    val shapeCache = remember { HashMap<Int, RoundedCornerShape>(32) }
 
     Box(
         modifier = modifier
             .fillMaxSize()
             .graphicsLayer {
-                shape = RoundedCornerShape(cornerRadiusState.value.toPx())
+                val quantizedHalfDp = (cornerRadiusState.value.value.coerceAtLeast(0f) * 2f).roundToInt()
+                shape = shapeCache.getOrPut(quantizedHalfDp) { RoundedCornerShape((quantizedHalfDp / 2f).dp) }
                 clip = true
             }
             .drawBehind {

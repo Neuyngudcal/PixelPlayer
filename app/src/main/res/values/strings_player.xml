@@ -8,7 +8,13 @@
     <string name="player_cd_bluetooth">Bluetooth</string>
     <string name="player_cd_local_playback">Local playback</string>
     <string name="player_connecting">Connecting…</string>
-    <string name="player_cd_open_queue">Open Queue</string>    
+    <string name="player_connecting_device">Connecting to device…</string>
+    <string name="player_preparing_playback">Preparing playback…</string>
+    <string name="player_loading_audio">Loading audio…</string>
+    <string name="player_cd_open_queue">Open Queue</string>
+    <string name="player_cd_playback_position">Playback position</string>
+    <string name="player_toast_no_song_for_lyrics">No song selected for lyrics import.</string>
+    <string name="player_toast_error_reading_file">Error reading file.</string>
 
     <!-- CastBottomSheet -->
     <string name="cast_perm_title">Get ready to connect</string>
@@ -219,4 +225,11 @@
     <string name="player_lyrics_empty_title">No lyrics available yet</string>
     <string name="player_lyrics_fetch_action">Find lyrics</string>
     <string name="player_queue_empty_title">Your queue is empty</string>
+    <string name="lyrics_provider_button_single">Source: %1$s</string>
+    <string name="lyrics_provider_button_multi">Source: %1$s (+%2$d)</string>
+    <string name="lyrics_inline_empty_title">No lyrics for this track yet</string>
+    <string name="lyrics_inline_empty_description">Search lyrics online directly from the player using Zarz-LRC, Apple Music, lrc.red, LyricsPlus, BetterLyrics, LRCLIB, NetEase, Kugou &amp; QQ Music.</string>
+    <string name="lyrics_inline_auto_search">Auto-search lyrics online</string>
+    <string name="lyrics_inline_manual_search">Manual search / Pick lyrics</string>
+    <string name="lyrics_inline_import_file">Import LRC/TTML</string>
 </resources>

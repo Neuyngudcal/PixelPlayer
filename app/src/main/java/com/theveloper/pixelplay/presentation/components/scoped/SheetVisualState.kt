@@ -40,7 +40,7 @@ internal fun rememberSheetVisualState(
     collapsedStateHorizontalPadding: Dp,
     collapsedStartHorizontalPadding: Dp = collapsedStateHorizontalPadding,
     collapsedEndHorizontalPadding: Dp = collapsedStateHorizontalPadding,
-    predictiveBackCollapseProgress: Float,
+    predictiveBackCollapseProgressProvider: () -> Float,
     predictiveBackSwipeEdge: Int?,
     currentSheetContentState: PlayerSheetState,
     playerContentExpansionFraction: Animatable<Float, AnimationVector1D>,
@@ -52,7 +52,7 @@ internal fun rememberSheetVisualState(
     isNavBarHidden: Boolean,
     isPlaying: Boolean,
     hasCurrentSong: Boolean,
-    swipeDismissProgress: Float,
+    swipeDismissProgressProvider: () -> Float,
     containerWidth: Dp = Dp.Unspecified,
     supportsSideDockedMode: Boolean = false,
     sideDockedWidth: Dp = 408.dp,
@@ -84,26 +84,30 @@ internal fun rememberSheetVisualState(
     val sideDockedTopMarginPx = remember(sideDockedTopMargin, density) { with(density) { sideDockedTopMargin.toPx() } }
     val sideDockedBottomMarginPx = remember(sideDockedBottomMargin, density) { with(density) { sideDockedBottomMargin.toPx() } }
 
-    val predictiveBackCollapseProgressState = rememberUpdatedState(predictiveBackCollapseProgress)
     val visualSheetTranslationYProvider: () -> Float = remember(
         currentSheetTranslationY,
         sheetCollapsedTargetY,
         supportsSideDockedMode,
         sideDockedTopMarginPx,
         playerContentExpansionFraction,
+        predictiveBackCollapseProgressProvider,
         fullScreenFractionProvider
     ) {
         {
-            val progress = predictiveBackCollapseProgressState.value
-            val baseTranslationY = currentSheetTranslationY.value * (1f - progress) +
-                (sheetCollapsedTargetY * progress)
+            val progress = predictiveBackCollapseProgressProvider().coerceIn(0f, 1f)
             if (!supportsSideDockedMode) {
-                baseTranslationY
+                currentSheetTranslationY.value * (1f - progress) +
+                    (sheetCollapsedTargetY * progress)
             } else {
                 val fullScreenFraction = fullScreenFractionProvider().coerceIn(0f, 1f)
                 val expandedTopY = androidx.compose.ui.util.lerp(sideDockedTopMarginPx, 0f, fullScreenFraction)
                 val effectiveExpansion = (playerContentExpansionFraction.value * (1f - progress)).coerceIn(0f, 1f)
-                baseTranslationY + expandedTopY * effectiveExpansion
+                val topOvershootY = currentSheetTranslationY.value.coerceAtMost(0f) * (1f - progress)
+                val bottomOvershootY = (currentSheetTranslationY.value - sheetCollapsedTargetY)
+                    .coerceAtLeast(0f) * (1f - progress)
+                androidx.compose.ui.util.lerp(sheetCollapsedTargetY, expandedTopY, effectiveExpansion) +
+                    topOvershootY +
+                    bottomOvershootY
             }
         }
     }
@@ -151,7 +155,7 @@ internal fun rememberSheetVisualState(
     val playerContentAreaHeightPxProvider: () -> Float = remember(
         showPlayerContentArea,
         playerContentExpansionFraction,
-        predictiveBackCollapseProgress,
+        predictiveBackCollapseProgressProvider,
         miniHeightPx,
         containerHeightPx,
         visualSheetTranslationYProvider,
@@ -163,7 +167,8 @@ internal fun rememberSheetVisualState(
     ) {
         {
             if (showPlayerContentArea) {
-                val effectiveFraction = playerContentExpansionFraction.value * (1f - predictiveBackCollapseProgress)
+                val effectiveFraction = playerContentExpansionFraction.value *
+                    (1f - predictiveBackCollapseProgressProvider())
                 val safeFraction = effectiveFraction.coerceIn(0f, 1f)
                 val fullScreenFraction = if (supportsSideDockedMode) {
                     fullScreenFractionProvider().coerceIn(0f, 1f)
@@ -197,11 +202,11 @@ internal fun rememberSheetVisualState(
     val overallSheetTopCornerRadiusProvider: () -> Dp = remember(
         showPlayerContentArea,
         playerContentExpansionFraction,
-        predictiveBackCollapseProgress,
+        predictiveBackCollapseProgressProvider,
         navBarStyle,
         navBarCornerRadiusDp,
         isNavBarHidden,
-        swipeDismissProgress,
+        swipeDismissProgressProvider,
         currentSheetContentState,
         supportsSideDockedMode,
         sideDockedCornerRadius,
@@ -218,7 +223,8 @@ internal fun rememberSheetVisualState(
                 navBarCornerRadiusDp
             }
 
-            val effectiveFraction = playerContentExpansionFraction.value * (1f - predictiveBackCollapseProgress)
+            val effectiveFraction = playerContentExpansionFraction.value *
+                (1f - predictiveBackCollapseProgressProvider())
             val safeFraction = effectiveFraction.coerceIn(0f, 1f)
             val fullScreenFraction = if (supportsSideDockedMode) {
                 fullScreenFractionProvider().coerceIn(0f, 1f)
@@ -255,8 +261,8 @@ internal fun rememberSheetVisualState(
         navBarStyle,
         showPlayerContentArea,
         playerContentExpansionFraction,
-        predictiveBackCollapseProgress,
-        swipeDismissProgress,
+        predictiveBackCollapseProgressProvider,
+        swipeDismissProgressProvider,
         isNavBarHidden,
         navBarCornerRadiusDp,
         currentSheetContentState,
@@ -275,7 +281,8 @@ internal fun rememberSheetVisualState(
                 navBarCornerRadiusDp
             }
 
-            val effectiveFraction = playerContentExpansionFraction.value * (1f - predictiveBackCollapseProgress)
+            val effectiveFraction = playerContentExpansionFraction.value *
+                (1f - predictiveBackCollapseProgressProvider())
             val safeFraction = effectiveFraction.coerceIn(0f, 1f)
             val fullScreenFraction = if (supportsSideDockedMode) {
                 fullScreenFractionProvider().coerceIn(0f, 1f)
@@ -300,6 +307,7 @@ internal fun rememberSheetVisualState(
                     }
                 }
 
+            val swipeDismissProgress = swipeDismissProgressProvider()
             if (isNavBarHidden) {
                 calculatedNormally
             } else if (currentSheetContentState == PlayerSheetState.COLLAPSED &&
@@ -352,7 +360,7 @@ internal fun rememberSheetVisualState(
         showPlayerContentArea,
         collapsedStartHorizontalPaddingPx,
         playerContentExpansionFraction,
-        predictiveBackCollapseProgress,
+        predictiveBackCollapseProgressProvider,
         supportsSideDockedMode,
         containerWidthPx,
         sideDockedWidthPx,
@@ -361,7 +369,8 @@ internal fun rememberSheetVisualState(
     ) {
         {
             if (showPlayerContentArea) {
-                val effectiveFraction = playerContentExpansionFraction.value * (1f - predictiveBackCollapseProgress)
+                val effectiveFraction = playerContentExpansionFraction.value *
+                    (1f - predictiveBackCollapseProgressProvider())
                 val safeFraction = effectiveFraction.coerceIn(0f, 1f)
                 val expandedStartPx = if (!supportsSideDockedMode || containerWidthPx <= 0f) {
                     0f
@@ -382,14 +391,15 @@ internal fun rememberSheetVisualState(
         showPlayerContentArea,
         collapsedEndHorizontalPaddingPx,
         playerContentExpansionFraction,
-        predictiveBackCollapseProgress,
+        predictiveBackCollapseProgressProvider,
         supportsSideDockedMode,
         sideDockedEndMarginPx,
         fullScreenFractionProvider
     ) {
         {
             if (showPlayerContentArea) {
-                val effectiveFraction = playerContentExpansionFraction.value * (1f - predictiveBackCollapseProgress)
+                val effectiveFraction = playerContentExpansionFraction.value *
+                    (1f - predictiveBackCollapseProgressProvider())
                 val safeFraction = effectiveFraction.coerceIn(0f, 1f)
                 val expandedEndPx = if (!supportsSideDockedMode) {
                     0f

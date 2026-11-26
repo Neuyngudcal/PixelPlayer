@@ -17,11 +17,13 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -42,7 +44,7 @@ fun PlayerSeekBar(
     backgroundColor: Color,
     onBackgroundColor: Color,
     primaryColor: Color,
-    currentPosition: Long,
+    currentPositionProvider: () -> Long,
     totalDuration: Long,
     onSeek: (Long) -> Unit,
     onSeekPreview: ((Long?) -> Unit)? = null,
@@ -50,22 +52,25 @@ fun PlayerSeekBar(
     modifier: Modifier = Modifier
 ) {
     val hapticFeedback = LocalHapticFeedback.current
-    val progressFraction = remember(currentPosition, totalDuration) {
-        if (totalDuration > 0) {
-            (currentPosition.toFloat() / totalDuration.toFloat()).coerceIn(0f, 1f)
-        } else {
-            0f
+    val progressFractionState = remember(currentPositionProvider, totalDuration) {
+        derivedStateOf {
+            if (totalDuration > 0) {
+                (currentPositionProvider().toFloat() / totalDuration.toFloat()).coerceIn(0f, 1f)
+            } else {
+                0f
+            }
         }
     }
 
     var isUserSeeking by remember { mutableStateOf(false) }
     var lastSeekFinishedTime by remember { mutableStateOf(0L) }
     var targetSeekFraction by remember { mutableFloatStateOf(-1f) }
-    var seekFraction by remember { mutableFloatStateOf(progressFraction) }
+    var seekFraction by remember { mutableFloatStateOf(progressFractionState.value) }
     val lastHapticStep = remember { intArrayOf(-1) }
 
-    LaunchedEffect(progressFraction, isUserSeeking) {
-        if (!isUserSeeking) {
+    LaunchedEffect(totalDuration, isUserSeeking) {
+        if (isUserSeeking) return@LaunchedEffect
+        snapshotFlow { progressFractionState.value }.collect { progressFraction ->
             val now = System.currentTimeMillis()
             val timeSinceSeek = now - lastSeekFinishedTime
             val diffFraction = kotlin.math.abs(progressFraction - targetSeekFraction)

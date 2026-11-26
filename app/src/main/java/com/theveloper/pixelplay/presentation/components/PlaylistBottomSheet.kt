@@ -44,6 +44,7 @@ import com.theveloper.pixelplay.R
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.media3.common.util.UnstableApi
 import com.theveloper.pixelplay.data.model.Song
+import com.theveloper.pixelplay.presentation.components.player.PlayerCardOverlaySheet
 import com.theveloper.pixelplay.presentation.components.subcomps.LibraryActionRow
 import com.theveloper.pixelplay.presentation.viewmodel.PlayerViewModel
 import com.theveloper.pixelplay.presentation.viewmodel.PlaylistUiState
@@ -60,7 +61,8 @@ fun PlaylistBottomSheet(
     bottomBarHeight: Dp,
     playerViewModel: PlayerViewModel,
     playlistViewModel: PlaylistViewModel = hiltViewModel(),
-    currentPlaylistId: String? = null
+    currentPlaylistId: String? = null,
+    isContainedInCard: Boolean = false
 ) {
     val playlistCreatedAndSongsAddedMessage = stringResource(R.string.playlist_sheet_created_and_songs_added)
     val setAiProviderApiKeyFirstMessage = stringResource(R.string.library_toast_set_ai_provider_api_key_first)
@@ -107,18 +109,17 @@ fun PlaylistBottomSheet(
         label = "fab_alpha"
     )
 
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = sheetState,
-        contentWindowInsets = { BottomSheetDefaults.modalWindowInsets } // Manejo de insets como el teclado
-    ) {
+    val sheetBody: @Composable () -> Unit = {
         Box(modifier = Modifier.fillMaxSize()) {
 
             Column {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 26.dp, vertical = 8.dp),
+                        .padding(
+                            horizontal = if (isContainedInCard) 18.dp else 26.dp,
+                            vertical = 8.dp
+                        ),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
@@ -128,7 +129,11 @@ fun PlaylistBottomSheet(
                         } else {
                             stringResource(R.string.playlist_sheet_select_playlists)
                         },
-                        style = MaterialTheme.typography.displaySmall,
+                        style = if (isContainedInCard) {
+                            MaterialTheme.typography.headlineSmall
+                        } else {
+                            MaterialTheme.typography.displaySmall
+                        },
                         fontFamily = GoogleSansRounded
                     )
                 }
@@ -255,6 +260,30 @@ fun PlaylistBottomSheet(
                 icon = { Icon(Icons.Rounded.Save, saveActionText) },
                 text = { Text(if (songs.size > 1) stringResource(R.string.common_add) else saveActionText) },
             )
+        }
+    }
+
+    if (isContainedInCard) {
+        PlayerCardOverlaySheet(
+            onDismissRequest = onDismiss,
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+            maxHeightFraction = 0.92f
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(480.dp)
+            ) {
+                sheetBody()
+            }
+        }
+    } else {
+        ModalBottomSheet(
+            onDismissRequest = onDismiss,
+            sheetState = sheetState,
+            contentWindowInsets = { BottomSheetDefaults.modalWindowInsets } // Manejo de insets como el teclado
+        ) {
+            sheetBody()
         }
     }
 }

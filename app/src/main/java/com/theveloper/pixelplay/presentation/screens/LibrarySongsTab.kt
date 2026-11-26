@@ -289,7 +289,11 @@ fun LibrarySongsTab(
                             )
                         )
                         .fillMaxSize(),
-                    columns = GridCells.Adaptive(minSize = windowInfo.mediaGridMinCellSize),
+                    columns = if (windowInfo.useNavigationRail) {
+                        GridCells.Fixed(windowInfo.tabletMediaGridColumns)
+                    } else {
+                        GridCells.Adaptive(minSize = windowInfo.mediaGridMinCellSize)
+                    },
                     contentPadding = PaddingValues(bottom = bottomBarHeight + MiniPlayerHeight + ListExtraBottomGap + 4.dp),
                     verticalArrangement = Arrangement.spacedBy(gridSpacing),
                     horizontalArrangement = Arrangement.spacedBy(gridSpacing)
@@ -396,7 +400,11 @@ fun LibrarySongsTab(
                                         )
                                     ),
                                 state = activeGridState,
-                                columns = GridCells.Adaptive(minSize = windowInfo.mediaGridMinCellSize),
+                                columns = if (windowInfo.useNavigationRail) {
+                        GridCells.Fixed(windowInfo.tabletMediaGridColumns)
+                    } else {
+                        GridCells.Adaptive(minSize = windowInfo.mediaGridMinCellSize)
+                    },
                                 contentPadding = PaddingValues(bottom = bottomBarHeight + MiniPlayerHeight + ListExtraBottomGap + 4.dp),
                                 verticalArrangement = Arrangement.spacedBy(gridSpacing),
                                 horizontalArrangement = Arrangement.spacedBy(gridSpacing)

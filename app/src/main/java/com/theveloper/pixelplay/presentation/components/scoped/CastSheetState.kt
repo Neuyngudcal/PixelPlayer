@@ -4,14 +4,15 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 
 internal data class CastSheetState(
     val showCastSheet: Boolean,
-    val castSheetOpenFraction: Float,
+    /** Draw/overlay-phase provider so cast sheet animations never recompose parent sheet layers. */
+    val castSheetOpenFractionProvider: () -> Float,
     val openCastSheet: () -> Unit,
     val dismissCastSheet: () -> Unit,
     val onCastExpansionChanged: (Float) -> Unit
@@ -22,11 +23,14 @@ internal data class CastSheetState(
 internal fun rememberCastSheetState(): CastSheetState {
     var showCastSheet by remember { mutableStateOf(false) }
     val motionScheme = MaterialTheme.motionScheme
-    val castSheetOpenFraction by animateFloatAsState(
+    val castSheetOpenFractionState = animateFloatAsState(
         targetValue = if (showCastSheet) 1f else 0f,
         animationSpec = motionScheme.defaultSpatialSpec(),
         label = "castSheetOpenFraction"
     )
+    val castSheetOpenFractionProvider = remember {
+        { castSheetOpenFractionState.value }
+    }
 
     val openCastSheet = remember {
         { showCastSheet = true }
@@ -40,7 +44,7 @@ internal fun rememberCastSheetState(): CastSheetState {
 
     return CastSheetState(
         showCastSheet = showCastSheet,
-        castSheetOpenFraction = castSheetOpenFraction,
+        castSheetOpenFractionProvider = castSheetOpenFractionProvider,
         openCastSheet = openCastSheet,
         dismissCastSheet = dismissCastSheet,
         onCastExpansionChanged = onCastExpansionChanged

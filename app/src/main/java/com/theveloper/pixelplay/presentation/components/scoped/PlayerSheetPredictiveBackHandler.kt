@@ -27,7 +27,8 @@ internal fun PlayerSheetPredictiveBackHandler(
     sheetMotionController: SheetMotionController,
     animationDurationMs: Int,
     onSwipeEdgeChanged: (Int?) -> Unit,
-    registrationKey: Any?
+    registrationKey: Any?,
+    expandedVisualYProvider: () -> Float = { sheetExpandedTargetY }
 ) {
     val scope = rememberCoroutineScope()
     key(registrationKey) {
@@ -40,7 +41,7 @@ internal fun PlayerSheetPredictiveBackHandler(
                     }
                     scope.launch {
                         val progressAtRelease = playerViewModel.predictiveBackCollapseFraction.value
-                        val currentVisualY = lerp(sheetExpandedTargetY, sheetCollapsedTargetY, progressAtRelease)
+                        val currentVisualY = lerp(expandedVisualYProvider(), sheetCollapsedTargetY, progressAtRelease)
                         val currentVisualExpansionFraction = (1f - progressAtRelease).coerceIn(0f, 1f)
                         sheetMotionController.snapTo(
                             translationYValue = currentVisualY,

@@ -56,7 +56,8 @@ internal fun PlayerArtistPickerBottomSheet(
     artists: List<Artist>,
     sheetState: SheetState,
     onDismiss: () -> Unit,
-    onArtistClick: (Artist) -> Unit
+    onArtistClick: (Artist) -> Unit,
+    isContainedInCard: Boolean = false
 ) {
     val colorScheme = MaterialTheme.colorScheme
     val shortcutItems = remember(song.id, song.artistId, song.artists, artists) {
@@ -89,27 +90,24 @@ internal fun PlayerArtistPickerBottomSheet(
         else -> stringResource(R.string.artist_picker_count_multiple, shortcutItems.size)
     }
 
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = sheetState,
-        dragHandle = {
-            BottomSheetDefaults.DragHandle(
-                color = colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
-            )
-        },
-        containerColor = colorScheme.surfaceContainerHigh,
-        tonalElevation = 8.dp
-    ) {
+    val sheetContent: @Composable () -> Unit = {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 24.dp, vertical = 16.dp)
+                .padding(
+                    horizontal = if (isContainedInCard) 16.dp else 24.dp,
+                    vertical = if (isContainedInCard) 12.dp else 16.dp
+                )
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Text(
                 text = stringResource(R.string.artist_picker_title),
-                style = MaterialTheme.typography.headlineMedium,
+                style = if (isContainedInCard) {
+                    MaterialTheme.typography.headlineSmall
+                } else {
+                    MaterialTheme.typography.headlineMedium
+                },
                 fontFamily = GoogleSansRounded,
                 fontWeight = FontWeight.Bold,
                 color = colorScheme.onSurface
@@ -134,7 +132,32 @@ internal fun PlayerArtistPickerBottomSheet(
                 }
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(if (isContainedInCard) 8.dp else 12.dp))
+        }
+    }
+
+    if (isContainedInCard) {
+        PlayerCardOverlaySheet(
+            onDismissRequest = onDismiss,
+            containerColor = colorScheme.surfaceContainerHigh,
+            tonalElevation = 8.dp,
+            maxHeightFraction = 0.85f
+        ) {
+            sheetContent()
+        }
+    } else {
+        ModalBottomSheet(
+            onDismissRequest = onDismiss,
+            sheetState = sheetState,
+            dragHandle = {
+                BottomSheetDefaults.DragHandle(
+                    color = colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
+                )
+            },
+            containerColor = colorScheme.surfaceContainerHigh,
+            tonalElevation = 8.dp
+        ) {
+            sheetContent()
         }
     }
 }

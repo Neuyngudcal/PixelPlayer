@@ -68,13 +68,13 @@ fun AlbumArtCollage(
         }.toImmutableList()
     }
 
-    BoxWithConstraints(
+    val boxMaxHeight = (height - padding * 2).coerceAtLeast(0.dp)
+    Box(
         modifier = modifier
             .fillMaxWidth()
             .height(height)
             .padding(padding)
     ) {
-        val boxMaxHeight = maxHeight
         val shapeConfigs by produceState<List<Config>>(initialValue = emptyList(), songsToShow, boxMaxHeight, pattern) {
             value = withContext(Dispatchers.Default) {
                 val min = minOf(300.dp, height)

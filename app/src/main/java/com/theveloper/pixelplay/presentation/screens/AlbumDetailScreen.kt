@@ -102,9 +102,13 @@ import com.theveloper.pixelplay.presentation.components.MiniPlayerHeight
 import com.theveloper.pixelplay.presentation.components.PlaylistBottomSheet
 import com.theveloper.pixelplay.presentation.components.SmartImage
 import com.theveloper.pixelplay.presentation.components.SongInfoBottomSheet
+import com.theveloper.pixelplay.presentation.components.rememberGridThumbnailPlaceholder
 import com.theveloper.pixelplay.presentation.components.resolveNavBarOccupiedHeight
 import com.theveloper.pixelplay.presentation.components.subcomps.EnhancedSongListItem
+import com.theveloper.pixelplay.presentation.navigation.AlbumHeroRole
+import com.theveloper.pixelplay.presentation.navigation.LocalAlbumHeroHandoff
 import com.theveloper.pixelplay.presentation.navigation.Screen
+import com.theveloper.pixelplay.presentation.navigation.albumHeroBounds
 import com.theveloper.pixelplay.presentation.viewmodel.AlbumDetailViewModel
 import com.theveloper.pixelplay.presentation.viewmodel.PlayerViewModel
 import com.theveloper.pixelplay.presentation.viewmodel.PlaylistViewModel
@@ -138,7 +142,14 @@ fun AlbumDetailScreen(
     var showPlaylistBottomSheet by remember { mutableStateOf(false) }
     val isDarkTheme = LocalPixelPlayDarkTheme.current
     val baseColorScheme = MaterialTheme.colorScheme
-    val albumArtUri = uiState.album?.albumArtUriString?.takeIf { it.isNotBlank() }
+    val albumHeroHandoff = LocalAlbumHeroHandoff.current
+    val heroSeedAlbum = remember(albumId, albumHeroHandoff) {
+        albumId.toLongOrNull()?.let { id -> albumHeroHandoff?.seedFor(id) }
+    }
+    // M3 container transform: until Room answers, draw the header from the Album the Library card
+    // handed over, so the shared header exists on the first frame of the transition.
+    val displayAlbum = uiState.album ?: heroSeedAlbum
+    val albumArtUri = displayAlbum?.albumArtUriString?.takeIf { it.isNotBlank() }
     val albumColorSchemeFlow = remember(albumArtUri) {
         albumArtUri?.let { playerViewModel.themeStateHolder.getAlbumColorSchemeFlow(it, eager = false) }
     }
@@ -174,7 +185,7 @@ fun AlbumDetailScreen(
         )
 
         when {
-            uiState.isLoading && uiState.album == null -> {
+            uiState.isLoading && displayAlbum == null -> {
                 AdaptiveFloatingPane(
                     enabled = windowInfo.useNavigationRail,
                     containerColor = MaterialTheme.colorScheme.surfaceContainerLowest
@@ -205,8 +216,8 @@ fun AlbumDetailScreen(
                 }
             }
 
-            uiState.album != null -> {
-                val album = uiState.album!!
+            displayAlbum != null -> {
+                val album = displayAlbum
                 val songs = uiState.songs
                 val songsByDisc = remember(songs) {
                     songs.groupBy { it.discNumber ?: 1 }
@@ -452,7 +463,8 @@ fun AlbumDetailScreen(
                             if (UseSharedCollapsibleTopBarProbe) {
                                 SharedAlbumTopBarProbe(
                                     album = album,
-                                    songsCount = songs.size,
+                                    songsCount = if (uiState.album != null) songs.size else album.songCount,
+                                    isHeroHeader = heroSeedAlbum != null,
                                     collapseFraction = collapseFraction,
                                     headerHeight = currentTopBarHeightDp,
                                     headerImageRequestSize = headerImageRequestSize,
@@ -596,6 +608,7 @@ fun AlbumDetailScreen(
 private fun SharedAlbumTopBarProbe(
     album: Album,
     songsCount: Int,
+    isHeroHeader: Boolean = false,
     collapseFraction: Float,
     headerHeight: Dp,
     headerImageRequestSize: Size,
@@ -640,6 +653,13 @@ private fun SharedAlbumTopBarProbe(
         modifier = Modifier
             .fillMaxWidth()
             .height(headerHeight)
+            .then(
+                if (isHeroHeader) {
+                    Modifier.albumHeroBounds(album.id, AlbumHeroRole.DetailHeader)
+                } else {
+                    Modifier
+                }
+            )
             .clipToBounds()
     ) {
         if (expandedContentAlpha > 0.01f) {
@@ -651,6 +671,13 @@ private fun SharedAlbumTopBarProbe(
                 allowHardware = true,
                 crossfadeDurationMillis = 0,
                 alpha = expandedContentAlpha,
+                // Only the hero header (opened from a Library grid card) has the grid thumbnail in
+                // memory; other entry points keep SmartImage's normal placeholder.
+                placeholderModel = if (isHeroHeader) {
+                    rememberGridThumbnailPlaceholder(album.albumArtUriString)
+                } else {
+                    null
+                },
                 onState = onHeaderArtworkState,
                 modifier = Modifier.fillMaxSize()
             )

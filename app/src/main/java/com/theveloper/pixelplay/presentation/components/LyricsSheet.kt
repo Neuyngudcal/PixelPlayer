@@ -474,9 +474,9 @@ fun LyricsSheet(
     val topProviderName = enabledProviderConfigs.firstOrNull()?.provider?.displayName
         ?: LyricsProviderType.ZARZ_LRC.displayName
     val providerButtonLabel = if (enabledProviderConfigs.size > 1) {
-        "Nguồn: $topProviderName (+${enabledProviderConfigs.size - 1})"
+        stringResource(R.string.lyrics_provider_button_multi, topProviderName, enabledProviderConfigs.size - 1)
     } else {
-        "Nguồn: $topProviderName"
+        stringResource(R.string.lyrics_provider_button_single, topProviderName)
     }
 
     LaunchedEffect(lyricsSearchUiState) {
@@ -690,7 +690,7 @@ fun LyricsSheet(
                                                     modifier = Modifier.size(36.dp)
                                                 )
                                                 Text(
-                                                    text = "Tệp này chưa có lời bài hát",
+                                                    text = stringResource(R.string.lyrics_inline_empty_title),
                                                     style = MaterialTheme.typography.titleMedium,
                                                     fontFamily = GoogleSansRounded,
                                                     fontWeight = FontWeight.Bold,
@@ -698,7 +698,7 @@ fun LyricsSheet(
                                                     textAlign = TextAlign.Center
                                                 )
                                                 Text(
-                                                    text = "Tìm lời trực tuyến ngay từ trình phát qua chuỗi nguồn Zarz-LRC, Apple Music, lrc.red, LyricsPlus, BetterLyrics, LRCLIB, NetEase, Kugou & QQ Music.",
+                                                    text = stringResource(R.string.lyrics_inline_empty_description),
                                                     style = MaterialTheme.typography.bodySmall,
                                                     color = onBackgroundColor.copy(alpha = 0.75f),
                                                     textAlign = TextAlign.Center
@@ -726,7 +726,7 @@ fun LyricsSheet(
                                                     )
                                                     Spacer(modifier = Modifier.width(8.dp))
                                                     Text(
-                                                        text = "Tìm lời trực tuyến tự động",
+                                                        text = stringResource(R.string.lyrics_inline_auto_search),
                                                         fontFamily = GoogleSansRounded,
                                                         fontWeight = FontWeight.SemiBold
                                                     )
@@ -748,7 +748,7 @@ fun LyricsSheet(
                                                     )
                                                     Spacer(modifier = Modifier.width(8.dp))
                                                     Text(
-                                                        text = "Tìm thủ công / Chọn bản lời",
+                                                        text = stringResource(R.string.lyrics_inline_manual_search),
                                                         fontFamily = GoogleSansRounded
                                                     )
                                                 }
@@ -785,7 +785,7 @@ fun LyricsSheet(
                                                         )
                                                         Spacer(modifier = Modifier.width(4.dp))
                                                         Text(
-                                                            text = "Nhập LRC/TTML",
+                                                            text = stringResource(R.string.lyrics_inline_import_file),
                                                             maxLines = 1,
                                                             overflow = TextOverflow.Ellipsis
                                                         )
@@ -911,17 +911,27 @@ fun LyricsSheet(
                     }
                 }
                 
-                // Top Gradient for fade
+                val topGradientBrush = remember(containerColor) {
+                    Brush.verticalGradient(
+                        0.0f to containerColor,
+                        0.68f to containerColor,
+                        1.0f to Color.Transparent
+                    )
+                }
+                val bottomGradientBrush = remember(containerColor) {
+                    Brush.verticalGradient(
+                        colors = listOf(Color.Transparent, containerColor)
+                    )
+                }
+
+                // Top Gradient for fade (solid behind LyricsTrackInfo header pill so scrolled lyrics never peek through)
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(if (isContainedInCard) 96.dp else 130.dp)
                         .align(Alignment.TopCenter)
-                        .background(
-                            brush = Brush.verticalGradient(
-                                colors = listOf(containerColor, Color.Transparent)
-                            )
-                        )
+                        .zIndex(1f)
+                        .background(brush = topGradientBrush)
                 )
 
                 // Bottom Gradient for fade
@@ -930,11 +940,8 @@ fun LyricsSheet(
                         .fillMaxWidth()
                         .height(80.dp)
                         .align(Alignment.BottomCenter)
-                        .background(
-                            brush = Brush.verticalGradient(
-                                colors = listOf(Color.Transparent, containerColor)
-                            )
-                        )
+                        .zIndex(1f)
+                        .background(brush = bottomGradientBrush)
                 )
             }
 
@@ -994,7 +1001,7 @@ fun LyricsSheet(
                     // Play/Pause Button (Smaller)
                     val playPauseCornerRadius by animateDpAsState(
                         targetValue = if (isPlaying) 18.dp else 50.dp,
-                        animationSpec = spring(stiffness = Spring.StiffnessLow),
+                        animationSpec = MaterialTheme.motionScheme.fastSpatialSpec(),
                         label = "playPauseShape"
                     )
 
@@ -1017,7 +1024,7 @@ fun LyricsSheet(
                                 Icon(
                                     modifier = Modifier.size(if (isContainedInCard) 26.dp else 32.dp),
                                     imageVector = Icons.Rounded.Pause,
-                                    contentDescription = "Pause",
+                                    contentDescription = stringResource(R.string.common_pause),
                                     tint = onPlayPauseColor
                                 )
                             } else {
@@ -1467,13 +1474,16 @@ private fun LyricsPlaybackSeekBar(
     isPlaying: Boolean,
     modifier: Modifier = Modifier
 ) {
-    val playbackPosition by playbackPositionFlow.collectAsStateWithLifecycle()
+    val playbackPositionState = playbackPositionFlow.collectAsStateWithLifecycle()
+    val currentPositionProvider = remember(playbackPositionState) {
+        { playbackPositionState.value }
+    }
 
     PlayerSeekBar(
         backgroundColor = backgroundColor,
         onBackgroundColor = onBackgroundColor,
         primaryColor = accentColor,
-        currentPosition = playbackPosition,
+        currentPositionProvider = currentPositionProvider,
         totalDuration = totalDuration,
         onSeek = onSeekTo,
         onSeekPreview = onSeekPreviewChange,
@@ -1510,12 +1520,14 @@ fun SyncedLyricsList(
     footer: LazyListScope.() -> Unit = {}
 ) {
     val density = LocalDensity.current
+    val hasWordTimings = remember(lines) { lines.any { !it.words.isNullOrEmpty() } }
     // 60/120fps monotonic clock interpolation + 25% proportional drift damping (Mornye port)
     val positionState = rememberInterpolatedLyricsPosition(
         playbackPositionFlow = playbackPositionFlow,
         isPlaying = isPlaying,
         lyricsSyncOffsetMs = lyricsSyncOffset,
-        positionOverrideMs = positionOverrideMs
+        positionOverrideMs = positionOverrideMs,
+        highFrequencyInterpolation = hasWordTimings
     )
     val adjustedPositionFlow = remember(playbackPositionFlow, lyricsSyncOffset, positionOverrideMs) {
         playbackPositionFlow.map { rawPos ->
@@ -1934,13 +1946,21 @@ fun LyricLineRow(
         }
     } else {
         val allWords = requireNotNull(sanitizedWords)
-        // Only subscribe to per-frame position when this word-synced line is actively being sung
-        val activeWordPositionMs = if (isLineTimeActive) {
-            effectivePositionState.value
-        } else if (isLineTimePast) {
+        val wordPositionProvider = remember(
+            effectivePositionState,
+            isLineTimeActive,
+            isLineTimePast,
             lineEndTime
-        } else {
-            0L
+        ) {
+            {
+                if (isLineTimeActive) {
+                    effectivePositionState.value
+                } else if (isLineTimePast) {
+                    lineEndTime
+                } else {
+                    0L
+                }
+            }
         }
 
         Column(
@@ -1978,7 +1998,7 @@ fun LyricLineRow(
                                     endMs = word.endTime ?: nextWordStartMs ?: lineEndTime.toInt(),
                                     nextWordStartMs = nextWordStartMs,
                                     lineEndMs = lineEndTime.toInt(),
-                                    currentPositionMs = activeWordPositionMs,
+                                    currentPositionProvider = wordPositionProvider,
                                     isCurrentLine = isLineTimeActive,
                                     isPastLine = isLineTimePast,
                                     activeColor = accentColor,

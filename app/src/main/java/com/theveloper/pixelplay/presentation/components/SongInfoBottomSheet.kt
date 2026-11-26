@@ -84,6 +84,8 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import com.theveloper.pixelplay.R
 import com.theveloper.pixelplay.data.model.Song
+import com.theveloper.pixelplay.presentation.components.player.PlayerCardOverlayDialog
+import com.theveloper.pixelplay.presentation.components.player.PlayerCardOverlaySheet
 import com.theveloper.pixelplay.presentation.components.subcomps.AutoSizingTextToFill
 import com.theveloper.pixelplay.utils.formatDuration
 import com.theveloper.pixelplay.utils.shapes.RoundedStarShape
@@ -142,7 +144,8 @@ fun SongInfoBottomSheet(
         coverArtUpdate: CoverArtUpdate?
     ) -> Unit,
     removeFromListTrigger: () -> Unit,
-    songInfoViewModel: SongInfoBottomSheetViewModel = hiltViewModel()
+    songInfoViewModel: SongInfoBottomSheetViewModel = hiltViewModel(),
+    isContainedInCard: Boolean = false
 ) {
     val context = LocalContext.current
     val ringtonePermissionMissingMsg = stringResource(R.string.song_info_ringtone_permission_missing)
@@ -296,12 +299,17 @@ fun SongInfoBottomSheet(
 
     val configuration = LocalConfiguration.current
     val safeInsets = WindowInsets.safeDrawing.asPaddingValues()
-    val maxPagerHeight = (
+    val rawMaxPagerHeight = (
         configuration.screenHeightDp.dp -
             safeInsets.calculateTopPadding() -
             safeInsets.calculateBottomPadding() -
             180.dp
         ).coerceAtLeast(280.dp)
+    val maxPagerHeight = if (isContainedInCard) {
+        rawMaxPagerHeight.coerceAtMost(340.dp)
+    } else {
+        rawMaxPagerHeight
+    }
 
     var heightAnimationEnabled by remember { mutableStateOf(false) }
 
@@ -311,15 +319,7 @@ fun SongInfoBottomSheet(
         heightAnimationEnabled = true
     }
 
-    ModalBottomSheet(
-        onDismissRequest = {
-            android.util.Log.d("PixelPlayerDebug", "ModalBottomSheet: onDismissRequest called, showEditSheet=$showEditSheet")
-            if (!showEditSheet) {
-                onDismiss()
-            }
-        },
-        sheetState = sheetState,
-    ) {
+    val sheetBody: @Composable () -> Unit = {
         Box(
             modifier = Modifier
                 .fillMaxWidth(),
@@ -655,6 +655,32 @@ fun SongInfoBottomSheet(
             }
     }
 
+    if (isContainedInCard) {
+        PlayerCardOverlaySheet(
+            onDismissRequest = {
+                if (!showEditSheet) {
+                    onDismiss()
+                }
+            },
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+            maxHeightFraction = 0.94f
+        ) {
+            sheetBody()
+        }
+    } else {
+        ModalBottomSheet(
+            onDismissRequest = {
+                android.util.Log.d("PixelPlayerDebug", "ModalBottomSheet: onDismissRequest called, showEditSheet=$showEditSheet")
+                if (!showEditSheet) {
+                    onDismiss()
+                }
+            },
+            sheetState = sheetState,
+        ) {
+            sheetBody()
+        }
+    }
+
     EditSongSheet(
         visible = showEditSheet,
         song = song,
@@ -688,7 +714,8 @@ fun SongInfoBottomSheet(
             onArtistClick = { artist ->
                 showArtistPicker = false
                 onNavigateToArtistById(artist.id)
-            }
+            },
+            isContainedInCard = isContainedInCard
         )
     }
 
@@ -698,7 +725,8 @@ fun SongInfoBottomSheet(
             onTargetSelected = { target ->
                 showTonePickerDialog = false
                 toneConfirmationTarget = target
-            }
+            },
+            isContainedInCard = isContainedInCard
         )
     }
 
@@ -710,7 +738,8 @@ fun SongInfoBottomSheet(
             onConfirm = {
                 toneConfirmationTarget = null
                 setCurrentSongAsTone(target)
-            }
+            },
+            isContainedInCard = isContainedInCard
         )
     }
 }
@@ -720,64 +749,79 @@ fun SongInfoBottomSheet(
 private fun ToneTargetPickerDialog(
     onDismiss: () -> Unit,
     onTargetSelected: (ToneTarget) -> Unit,
+    isContainedInCard: Boolean = false
 ) {
-    BasicAlertDialog(onDismissRequest = onDismiss) {
-        Surface(
-            shape = AbsoluteSmoothCornerShape(
-                cornerRadiusTR = 32.dp,
-                smoothnessAsPercentBR = 60,
-                cornerRadiusBR = 32.dp,
-                smoothnessAsPercentTL = 60,
-                cornerRadiusTL = 32.dp,
-                smoothnessAsPercentBL = 60,
-                cornerRadiusBL = 32.dp,
-                smoothnessAsPercentTR = 60,
-            ),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            tonalElevation = 6.dp,
+    val dialogBody: @Composable () -> Unit = {
+        Column(
+            modifier = Modifier.padding(if (isContainedInCard) 0.dp else 24.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            Column(
-                modifier = Modifier.padding(24.dp),
-                verticalArrangement = Arrangement.spacedBy(18.dp),
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(16.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    ToneDialogIcon(target = null)
-                    Text(
-                        text = stringResource(R.string.song_info_tone_picker_title),
-                        style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.Bold,
+                ToneDialogIcon(target = null)
+                Text(
+                    text = stringResource(R.string.song_info_tone_picker_title),
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+            Text(
+                text = stringResource(R.string.song_info_tone_picker_body),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+
+            Column(
+                modifier = Modifier.clip(RoundedCornerShape(22.dp)),
+                verticalArrangement = Arrangement.spacedBy(3.dp),
+            ) {
+                ToneTarget.values().forEach { target ->
+                    ToneTargetOption(
+                        target = target,
+                        onClick = { onTargetSelected(target) },
                     )
                 }
-                Text(
-                    text = stringResource(R.string.song_info_tone_picker_body),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+            }
 
-                Column(
-                    modifier = Modifier.clip(RoundedCornerShape(22.dp)),
-                    verticalArrangement = Arrangement.spacedBy(3.dp),
-                ) {
-                    ToneTarget.values().forEach { target ->
-                        ToneTargetOption(
-                            target = target,
-                            onClick = { onTargetSelected(target) },
-                        )
-                    }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+            ) {
+                TextButton(onClick = onDismiss) {
+                    Text(stringResource(R.string.common_cancel))
                 }
+            }
+        }
+    }
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End,
-                ) {
-                    TextButton(onClick = onDismiss) {
-                        Text(stringResource(R.string.common_cancel))
-                    }
-                }
+    if (isContainedInCard) {
+        PlayerCardOverlayDialog(
+            onDismissRequest = onDismiss,
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+            tonalElevation = 6.dp
+        ) {
+            dialogBody()
+        }
+    } else {
+        BasicAlertDialog(onDismissRequest = onDismiss) {
+            Surface(
+                shape = AbsoluteSmoothCornerShape(
+                    cornerRadiusTR = 32.dp,
+                    smoothnessAsPercentBR = 60,
+                    cornerRadiusBR = 32.dp,
+                    smoothnessAsPercentTL = 60,
+                    cornerRadiusTL = 32.dp,
+                    smoothnessAsPercentBL = 60,
+                    cornerRadiusBL = 32.dp,
+                    smoothnessAsPercentTR = 60,
+                ),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                tonalElevation = 6.dp,
+            ) {
+                dialogBody()
             }
         }
     }
@@ -822,60 +866,75 @@ private fun ToneConfirmationDialog(
     target: ToneTarget,
     onDismiss: () -> Unit,
     onConfirm: () -> Unit,
+    isContainedInCard: Boolean = false
 ) {
-    BasicAlertDialog(onDismissRequest = onDismiss) {
-        Surface(
-            shape = AbsoluteSmoothCornerShape(
-                cornerRadiusTR = 32.dp,
-                smoothnessAsPercentBR = 60,
-                cornerRadiusBR = 32.dp,
-                smoothnessAsPercentTL = 60,
-                cornerRadiusTL = 32.dp,
-                smoothnessAsPercentBL = 60,
-                cornerRadiusBL = 32.dp,
-                smoothnessAsPercentTR = 60,
-            ),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            tonalElevation = 6.dp,
+    val dialogBody: @Composable () -> Unit = {
+        Column(
+            modifier = Modifier.padding(if (isContainedInCard) 0.dp else 24.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            Column(
-                modifier = Modifier.padding(24.dp),
-                verticalArrangement = Arrangement.spacedBy(18.dp),
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(16.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    ToneDialogIcon(target = target)
-                    Text(
-                        text = stringResource(R.string.song_info_tone_confirm_title),
-                        style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.Bold,
-                    )
-                }
+                ToneDialogIcon(target = target)
                 Text(
-                    text = stringResource(
-                        R.string.song_info_tone_confirm_body,
-                        song.title,
-                        stringResource(target.confirmLabelResId),
-                    ),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    text = stringResource(R.string.song_info_tone_confirm_title),
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold,
                 )
+            }
+            Text(
+                text = stringResource(
+                    R.string.song_info_tone_confirm_body,
+                    song.title,
+                    stringResource(target.confirmLabelResId),
+                ),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.End),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    TextButton(onClick = onDismiss) {
-                        Text(stringResource(R.string.common_cancel))
-                    }
-                    FilledTonalButton(onClick = onConfirm) {
-                        Text(stringResource(R.string.song_info_tone_confirm_action))
-                    }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.End),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                TextButton(onClick = onDismiss) {
+                    Text(stringResource(R.string.common_cancel))
                 }
+                FilledTonalButton(onClick = onConfirm) {
+                    Text(stringResource(R.string.song_info_tone_confirm_action))
+                }
+            }
+        }
+    }
+
+    if (isContainedInCard) {
+        PlayerCardOverlayDialog(
+            onDismissRequest = onDismiss,
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+            tonalElevation = 6.dp
+        ) {
+            dialogBody()
+        }
+    } else {
+        BasicAlertDialog(onDismissRequest = onDismiss) {
+            Surface(
+                shape = AbsoluteSmoothCornerShape(
+                    cornerRadiusTR = 32.dp,
+                    smoothnessAsPercentBR = 60,
+                    cornerRadiusBR = 32.dp,
+                    smoothnessAsPercentTL = 60,
+                    cornerRadiusTL = 32.dp,
+                    smoothnessAsPercentBL = 60,
+                    cornerRadiusBL = 32.dp,
+                    smoothnessAsPercentTR = 60,
+                ),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                tonalElevation = 6.dp,
+            ) {
+                dialogBody()
             }
         }
     }

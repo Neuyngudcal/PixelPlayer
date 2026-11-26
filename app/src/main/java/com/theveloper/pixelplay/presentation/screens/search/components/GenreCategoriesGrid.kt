@@ -5,7 +5,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.aspectRatio
@@ -29,13 +28,16 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
@@ -54,7 +56,6 @@ import com.theveloper.pixelplay.ui.theme.LocalPixelPlayWindowInfo
 import com.theveloper.pixelplay.ui.theme.LocalSpacing
 import androidx.compose.ui.res.stringResource
 import com.theveloper.pixelplay.R
-import racra.compose.smooth_corner_rect_library.AbsoluteSmoothCornerShape
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.draw.scale
@@ -107,21 +108,33 @@ fun GenreCategoriesGrid(
         28.dp + resolveNavBarOccupiedHeight(systemNavBarHeight, navBarCompactMode) + MiniPlayerHeight
     }
 
+    val density = LocalDensity.current
+    val initialEstimatedCardWidthPx = remember(
+        windowInfo.widthDp,
+        windowInfo.useNavigationRail,
+        windowInfo.tabletMediaGridColumns,
+        isGridView,
+        density
+    ) {
+        val cols = if (!isGridView) 1 else if (windowInfo.useNavigationRail) windowInfo.tabletMediaGridColumns else 2
+        val rawPx = with(density) { (windowInfo.widthDp.dp / cols).roundToPx() }
+        ((rawPx + 12) / 24) * 24
+    }
+
     LazyVerticalGrid(
-        columns = if (isGridView) GridCells.Adaptive(minSize = 180.dp) else GridCells.Fixed(1),
+        columns = if (isGridView) {
+            if (windowInfo.useNavigationRail) {
+                GridCells.Fixed(windowInfo.tabletMediaGridColumns)
+            } else {
+                GridCells.Adaptive(minSize = 180.dp)
+            }
+        } else {
+            GridCells.Fixed(1)
+        },
         modifier = modifier
             .fillMaxSize()
             .padding(horizontal = spacing.screenHorizontal)
-            .clip(AbsoluteSmoothCornerShape(
-                cornerRadiusTR = 24.dp,
-                smoothnessAsPercentTR = 70,
-                cornerRadiusTL = 24.dp,
-                smoothnessAsPercentTL = 70,
-                cornerRadiusBR = 0.dp,
-                smoothnessAsPercentBR = 70,
-                cornerRadiusBL = 0.dp,
-                smoothnessAsPercentBL = 70
-            )),
+            .clip(RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)),
         contentPadding = PaddingValues(
             top = spacing.sm,
             bottom = bottomClearance
@@ -170,6 +183,7 @@ fun GenreCategoriesGrid(
                 customIcons = customGenreIcons,
                 onClick = { onGenreClick(genre) },
                 isGridView = isGridView,
+                initialCardWidthPx = initialEstimatedCardWidthPx,
                 isSelectionMode = isSelectionMode,
                 isSelected = selectedGenreIds.contains(genre.id),
                 selectionIndex = getSelectionIndex(genre.id),
@@ -186,6 +200,7 @@ private fun GenreCard(
     customIcons: Map<String, Int>,
     onClick: () -> Unit,
     isGridView: Boolean,
+    initialCardWidthPx: Int,
     isSelectionMode: Boolean = false,
     isSelected: Boolean = false,
     selectionIndex: Int? = null,
@@ -256,9 +271,20 @@ private fun GenreCard(
         colors = CardDefaults.cardColors(containerColor = backgroundColor),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
-        BoxWithConstraints(
+        var quantizedCardWidthPx by remember(isGridView) {
+            mutableIntStateOf(initialCardWidthPx.coerceAtLeast(120))
+        }
+        Box(
             modifier = Modifier
                 .fillMaxSize()
+                .onSizeChanged { size ->
+                    if (size.width > 0) {
+                        val quantized = ((size.width + 12) / 24) * 24
+                        if (quantized != quantizedCardWidthPx) {
+                            quantizedCardWidthPx = quantized
+                        }
+                    }
+                }
                 .clip(RoundedCornerShape(20.dp))
                 .background(backgroundColor)
         ) {
@@ -270,7 +296,7 @@ private fun GenreCard(
                 genre.id,
                 genre.name,
                 isGridView,
-                maxWidth,
+                quantizedCardWidthPx,
                 density.density,
                 density.fontScale
             ) {
@@ -280,7 +306,7 @@ private fun GenreCard(
                     genreId = genre.id,
                     genreName = genre.name,
                     isGridView = isGridView,
-                    cardWidthPx = with(density) { maxWidth.roundToPx() },
+                    cardWidthPx = quantizedCardWidthPx,
                     horizontalPaddingPx = (startPaddingPx + endPaddingPx) / 2,
                     textMeasurer = textMeasurer
                 )

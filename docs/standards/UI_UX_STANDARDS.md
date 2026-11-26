@@ -91,11 +91,20 @@
 
 ## 6. Motion
 
-- **Điều hướng màn hình:** chỉ dùng helper trong `presentation/navigation/Transitions.kt`
-  (`aospSharedAxisEnter/Exit/PopEnter/PopExit`, `M3EmphasizedEasing`, `AOSP_TRANSITION_DURATION = 350`).
-  Không tự viết transition riêng cho từng route. Ngoại lệ duy nhất: đích top-level (Home/Search/Library;
-  trên navigation rail thêm Equalizer/Settings) dùng `mainRootEnter/Exit` trong `AppNavigation.kt`
-  — thêm đích top-level mới thì cập nhật `mainRootRouteIndex` trong `MainRootRoutes.kt`.
+- **Điều hướng màn hình:** chỉ dùng helper trong `presentation/navigation/Transitions.kt`, theo đúng
+  pattern chuyển cảnh của M3 (m3.material.io/styles/motion/transitions):
+  - *Forward/backward* (màn cha → con): `aospSharedAxisEnter/Exit/PopEnter/PopExit`
+    (`M3EmphasizedEasing`, `AOSP_TRANSITION_DURATION = 350`).
+  - *Top level* (đổi đích trên navigation bar/rail): `topLevelFadeThroughEnter/Exit` — fade out hết rồi
+    mới fade in (ngưỡng 35 %), **không** trượt ngang. Áp dụng qua `mainRootEnter/Exit` trong
+    `AppNavigation.kt`; thêm đích top-level mới thì cập nhật `isMainRootRoute` trong `MainRootRoutes.kt`.
+  - *Lateral* (tab trong cùng màn, carousel): pager trượt, không fade.
+  - Chuyển cảnh màn hình dùng `tween` + easing emphasized, **không** dùng spring nảy
+    (M3 vẫn dùng hệ easing/duration cho transitions; `MotionScheme` dành cho component).
+  Không tự viết transition riêng cho từng route.
+- **Container transform** (ảnh bìa album ở lưới Library → header `AlbumDetail`): chỉ dùng
+  `Modifier.albumHeroBounds` + `isAlbumHeroTransition` trong `presentation/navigation/SharedHeroTransitions.kt`.
+  Không gọi `sharedBounds`/`sharedElement` trực tiếp ở nơi khác. Tắt toàn bộ bằng `EnableAlbumHeroTransition = false`.
 - **Gọi điều hướng:** chỉ qua helper trong `NavControllerExtensions.kt` (`navigateSafely`,
   `navigateSafelyReplacing`, `navigateToTopLevelSafely`, `popBackStackSafely`) — không gọi
   `navController.navigate(...)`/`popBackStack()` trực tiếp. Nút Back trên toolbar bọc theo cách Google

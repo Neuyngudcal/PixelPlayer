@@ -86,8 +86,8 @@ fun AdaptiveMediaDetailSplitLayout(
         WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     )
 
-    BoxWithConstraints(modifier = modifier.fillMaxSize()) {
-        val heroWidth = minOf(windowInfo.detailHeroPaneWidth, maxWidth * 0.42f)
+    Box(modifier = modifier.fillMaxSize()) {
+        val heroWidth = windowInfo.detailHeroPaneWidth
 
         Row(
             modifier = Modifier

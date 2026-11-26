@@ -4,7 +4,7 @@ import androidx.compose.material3.adaptive.currentWindowAdaptiveInfo
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
@@ -40,13 +40,14 @@ data class PixelPlayWindowInfo(
     val heightDp: Int = 915,
     val widthTier: WindowWidthTier = WindowWidthTier.COMPACT,
     val heightTier: WindowHeightTier = WindowHeightTier.EXPANDED,
-    val hasNavigationRailOverride: Boolean? = null
+    val hasNavigationRailOverride: Boolean? = null,
+    val hostWidthTier: WindowWidthTier = widthTier
 ) {
     val isCompactWidth: Boolean
         get() = widthTier == WindowWidthTier.COMPACT
 
     val isTabletLayout: Boolean
-        get() = widthTier.ordinal >= WindowWidthTier.MEDIUM.ordinal
+        get() = hasNavigationRailOverride ?: (widthTier.ordinal >= WindowWidthTier.MEDIUM.ordinal)
 
     /** Use persistent start-edge Material 3 Navigation Rail instead of Floating Bottom Bar. */
     val useNavigationRail: Boolean
@@ -54,19 +55,23 @@ data class PixelPlayWindowInfo(
 
     /** Allow expanding the Navigation Rail into a Wide Navigation Rail (220dp) on Large+ screens. */
     val supportsExpandableWideRail: Boolean
-        get() = widthTier.ordinal >= WindowWidthTier.LARGE.ordinal
+        get() = hostWidthTier.ordinal >= WindowWidthTier.LARGE.ordinal
 
     /** Default to expanded Wide Navigation Rail on ExtraLarge (e.g. Samsung DeX external displays). */
     val startWithExpandedWideRail: Boolean
-        get() = widthTier == WindowWidthTier.EXTRA_LARGE
+        get() = hostWidthTier == WindowWidthTier.EXTRA_LARGE
 
     /** Show 2-pane Samsung x Google Play Settings List-Detail layout. */
     val useTwoPaneSettings: Boolean
-        get() = widthDp >= 720
+        get() = if (useNavigationRail) widthDp >= 580 else widthDp >= 720
 
     /** Show 2-column split (sticky hero + tracklist) on Album / Artist / Playlist / Genre detail screens. */
     val useTwoPaneDetail: Boolean
-        get() = widthTier.ordinal >= WindowWidthTier.EXPANDED.ordinal
+        get() = if (useNavigationRail) {
+            widthDp >= 580
+        } else {
+            widthTier.ordinal >= WindowWidthTier.EXPANDED.ordinal
+        }
 
     /**
      * Window-size-aware 2-column FullPlayer trigger.
@@ -77,15 +82,23 @@ data class PixelPlayWindowInfo(
 
     /** Show 2-column balanced Home dashboard (Hero Mix + Recently Played side by side). */
     val useTwoColumnHome: Boolean
-        get() = widthTier.ordinal >= WindowWidthTier.EXPANDED.ordinal
+        get() = if (useNavigationRail) {
+            widthDp >= 580
+        } else {
+            widthTier.ordinal >= WindowWidthTier.EXPANDED.ordinal
+        }
 
     /** Show 2-column Bento grid on Listening Stats screen. */
     val useTwoColumnStats: Boolean
-        get() = widthTier.ordinal >= WindowWidthTier.EXPANDED.ordinal
+        get() = if (useNavigationRail) {
+            widthDp >= 580
+        } else {
+            widthTier.ordinal >= WindowWidthTier.EXPANDED.ordinal
+        }
 
-    /** Adaptive minimum cell width for Album / Artist / Playlist grids. */
+    /** Adaptive minimum cell width for Album / Artist / Playlist grids on compact phones. */
     val mediaGridMinCellSize: Dp
-        get() = when (widthTier) {
+        get() = when (hostWidthTier) {
             WindowWidthTier.COMPACT -> 160.dp
             WindowWidthTier.MEDIUM -> 160.dp
             WindowWidthTier.EXPANDED -> 176.dp
@@ -93,24 +106,38 @@ data class PixelPlayWindowInfo(
             WindowWidthTier.EXTRA_LARGE -> 196.dp
         }
 
-    /** Preferred list-pane width in Settings 2-pane ListDetailPaneScaffold. */
+    /**
+     * Invariant column count for tablet media & genre grids keyed strictly on [hostWidthTier]
+     * so smoothly narrowing/widening the left pane for the Side-Docked Card scales cards
+     * in place without mid-spring integer column-count jumps.
+     */
+    val tabletMediaGridColumns: Int
+        get() = when (hostWidthTier) {
+            WindowWidthTier.COMPACT -> 2
+            WindowWidthTier.MEDIUM -> 2
+            WindowWidthTier.EXPANDED -> 3
+            WindowWidthTier.LARGE -> 4
+            WindowWidthTier.EXTRA_LARGE -> 5
+        }
+
+    /** Preferred list-pane width in Settings 2-pane ListDetailPaneScaffold (keyed on host tier so the left list pane stays stationary during side-docking). */
     val settingsListPanePreferredWidth: Dp
-        get() = when (widthTier) {
+        get() = when (hostWidthTier) {
             WindowWidthTier.COMPACT,
-            WindowWidthTier.MEDIUM -> 320.dp
-            WindowWidthTier.EXPANDED -> 340.dp
-            WindowWidthTier.LARGE -> 360.dp
-            WindowWidthTier.EXTRA_LARGE -> 380.dp
+            WindowWidthTier.MEDIUM -> 280.dp
+            WindowWidthTier.EXPANDED -> 296.dp
+            WindowWidthTier.LARGE -> 320.dp
+            WindowWidthTier.EXTRA_LARGE -> 340.dp
         }
 
     /** Fixed left hero column width on 2-pane Album / Artist / Playlist / Genre detail screens. */
     val detailHeroPaneWidth: Dp
-        get() = when (widthTier) {
+        get() = when (hostWidthTier) {
             WindowWidthTier.COMPACT,
-            WindowWidthTier.MEDIUM -> 320.dp
-            WindowWidthTier.EXPANDED -> 340.dp
-            WindowWidthTier.LARGE -> 380.dp
-            WindowWidthTier.EXTRA_LARGE -> 400.dp
+            WindowWidthTier.MEDIUM -> 264.dp
+            WindowWidthTier.EXPANDED -> 292.dp
+            WindowWidthTier.LARGE -> 324.dp
+            WindowWidthTier.EXTRA_LARGE -> 368.dp
         }
 
     /** Constrained floating pill width for MiniPlayer on Medium+ tablets (full width on Compact phones). */
@@ -159,7 +186,10 @@ fun computeEffectiveContentWindowInfo(
     return computePixelPlayWindowInfo(
         widthDp = remainingWidthDp,
         heightDp = windowInfo.heightDp
-    ).copy(hasNavigationRailOverride = windowInfo.useNavigationRail)
+    ).copy(
+        hasNavigationRailOverride = windowInfo.useNavigationRail,
+        hostWidthTier = windowInfo.widthTier
+    )
 }
 
 @Composable
@@ -190,4 +220,4 @@ fun rememberPixelPlayWindowInfo(): PixelPlayWindowInfo {
     }
 }
 
-val LocalPixelPlayWindowInfo = staticCompositionLocalOf { PixelPlayWindowInfo() }
+val LocalPixelPlayWindowInfo = compositionLocalOf { PixelPlayWindowInfo() }

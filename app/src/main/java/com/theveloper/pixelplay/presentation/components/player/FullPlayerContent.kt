@@ -10,6 +10,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
@@ -65,6 +66,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -85,21 +87,15 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.lerp
 import androidx.compose.ui.unit.sp
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
-import androidx.compose.foundation.gestures.drag
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.input.pointer.positionChange
-import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.style.TextOverflow
@@ -114,6 +110,7 @@ import androidx.compose.material.icons.rounded.OpenInFull
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.movableContentOf
 import androidx.compose.ui.res.stringResource
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
@@ -157,6 +154,8 @@ import com.theveloper.pixelplay.presentation.components.WavySliderExpressive
 import com.theveloper.pixelplay.presentation.components.ToggleSegmentButton
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 
 private const val PREVIOUS_TRACK_RESTART_THRESHOLD_MS = 10_000L
@@ -233,16 +232,15 @@ fun FullPlayerContent(
     onPrevious: () -> Unit,
     onCollapse: () -> Unit,
     onShowQueueClicked: () -> Unit,
-    onQueueDragStart: () -> Unit,
-    onQueueDrag: (Float) -> Unit,
-    onQueueRelease: (Float, Float) -> Unit,
     onShowCastClicked: () -> Unit,
     onShuffleToggle: () -> Unit,
     onRepeatToggle: () -> Unit,
     onFavoriteToggle: () -> Unit,
     onSwipePreviewChanged: (String?, () -> Float) -> Unit = { _, _ -> },
     tabletDisplayMode: TabletPlayerDisplayMode = TabletPlayerDisplayMode.FULLSCREEN,
-    onToggleTabletDisplayMode: () -> Unit = {}
+    onToggleTabletDisplayMode: () -> Unit = {},
+    fullScreenFractionProvider: () -> Float = { 1f },
+    onOverlayVisibilityChanged: (Boolean) -> Unit = {}
 ) {
     var retainedSong by remember { mutableStateOf(currentSong) }
     LaunchedEffect(currentSong?.id) {
@@ -273,15 +271,9 @@ fun FullPlayerContent(
     val selectedRouteName = fullPlayerSlice.selectedRouteName
     val isBluetoothEnabled = fullPlayerSlice.isBluetoothEnabled
     val bluetoothName = fullPlayerSlice.bluetoothName
-    val navigationBarBottomInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-    val queueGestureBottomExclusion = maxOf(20.dp, navigationBarBottomInset + 8.dp)
-    val queueGestureBottomExclusionPx = with(LocalDensity.current) {
-        queueGestureBottomExclusion.toPx()
-    }
 
     var showFetchLyricsDialog by remember { mutableStateOf(false) }
     var showProviderPrioritySheet by remember { mutableStateOf(false) }
-    var totalDrag by remember { mutableStateOf(0f) }
 
     val context = LocalContext.current
     val fileImportScope = rememberCoroutineScope()
@@ -304,7 +296,9 @@ fun FullPlayerContent(
 
                         val currentSongId = currentSong?.id?.toLongOrNull()
                         if (currentSongId == null) {
-                            playerViewModel.sendToast("No song selected for lyrics import.")
+                            playerViewModel.sendToast(
+                                context.getString(R.string.player_toast_no_song_for_lyrics)
+                            )
                             return@launch
                         }
 
@@ -313,7 +307,9 @@ fun FullPlayerContent(
                         showLyricsSheet = true
                     } catch (e: Exception) {
                         Timber.e(e, "Error reading imported lyrics file")
-                        playerViewModel.sendToast("Error reading file.")
+                        playerViewModel.sendToast(
+                            context.getString(R.string.player_toast_error_reading_file)
+                        )
                     }
                 }
             }
@@ -324,17 +320,80 @@ fun FullPlayerContent(
     // OPTIMIZATION: Use passed provider instead of collecting flow
     val totalDurationValue = totalDurationProvider()
 
-    // Window-size-aware 2-column & 3-mode layout (Mini <-> Side-Docked Phone Card <-> Fullscreen)
+    val hasInternalOverlayOpen =
+        showLyricsSheet || showFetchLyricsDialog || showProviderPrioritySheet || showArtistPicker
+    val latestOnOverlayVisibilityChanged by rememberUpdatedState(onOverlayVisibilityChanged)
+    LaunchedEffect(hasInternalOverlayOpen) {
+        latestOnOverlayVisibilityChanged(hasInternalOverlayOpen)
+    }
+    DisposableEffect(Unit) {
+        onDispose {
+            latestOnOverlayVisibilityChanged(false)
+        }
+    }
+    LaunchedEffect(playerViewModel) {
+        launch {
+            playerViewModel.albumNavigationRequests.collect {
+                showLyricsSheet = false
+                showFetchLyricsDialog = false
+                showProviderPrioritySheet = false
+                showArtistPicker = false
+            }
+        }
+        launch {
+            playerViewModel.artistNavigationRequests.collect {
+                showLyricsSheet = false
+                showFetchLyricsDialog = false
+                showProviderPrioritySheet = false
+                showArtistPicker = false
+            }
+        }
+    }
+
+    // Window-size-aware 2-column & 3-mode layout (Mini <-> Side-Docked Phone Card <-> Fullscreen).
+    // Gate the internal layout swap at 52% of fullScreenFraction so 2-column landscape UI never
+    // crushes into 408dp on Frame 1 of expand, and portrait card UI never floats in 1280dp on Frame 1 of collapse.
     val windowInfo = LocalPixelPlayWindowInfo.current
-    val layoutMetrics = remember(windowInfo, tabletDisplayMode) {
-        resolveNowPlayingLayoutMetrics(windowInfo, tabletDisplayMode)
+    val boundsSpec = remember(windowInfo) { resolveNowPlayingSheetBoundsSpec(windowInfo) }
+    val effectiveDisplayMode by remember(boundsSpec.supportsSideDockedMode, fullScreenFractionProvider) {
+        derivedStateOf {
+            if (!boundsSpec.supportsSideDockedMode) {
+                TabletPlayerDisplayMode.FULLSCREEN
+            } else if (fullScreenFractionProvider() >= 0.52f) {
+                TabletPlayerDisplayMode.FULLSCREEN
+            } else {
+                TabletPlayerDisplayMode.SIDE_DOCKED
+            }
+        }
+    }
+    val layoutMetrics = remember(windowInfo, effectiveDisplayMode) {
+        resolveNowPlayingLayoutMetrics(windowInfo, effectiveDisplayMode)
     }
     val isLandscape = layoutMetrics.mode == NowPlayingLayoutMode.TABLET_LANDSCAPE_FULLSCREEN ||
         layoutMetrics.mode == NowPlayingLayoutMode.COMPACT_LANDSCAPE
     val isSideDockedCardMode = layoutMetrics.mode == NowPlayingLayoutMode.SIDE_DOCKED_PORTRAIT
+    // In Side-Docked Card mode, FullPlayerContent is already pre-warmed at its fixed card bounds.
+    // Bypassing DelayedContent prevents uncomposing/recomposing all 4 player sections at 98.5%
+    // and lets the card morph smoothly with real artwork, metadata, seekbar, and controls.
+    val effectiveLoadingTweaks = remember(loadingTweaks, isSideDockedCardMode) {
+        if (isSideDockedCardMode) {
+            loadingTweaks.copy(
+                delayAll = false,
+                delayAlbumCarousel = false,
+                delaySongMetadata = false,
+                delayProgressBar = false,
+                delayControls = false,
+                showPlaceholders = false
+            )
+        } else {
+            loadingTweaks
+        }
+    }
     var activeSidePanel by rememberSaveable { mutableStateOf(NowPlayingSidePanel.NONE) }
-    LaunchedEffect(layoutMetrics.supportsInlineSidePanel) {
-        if (!layoutMetrics.supportsInlineSidePanel && activeSidePanel != NowPlayingSidePanel.NONE) {
+    LaunchedEffect(layoutMetrics.supportsInlineSidePanel, tabletDisplayMode) {
+        if ((!layoutMetrics.supportsInlineSidePanel || tabletDisplayMode != TabletPlayerDisplayMode.FULLSCREEN) &&
+            activeSidePanel != NowPlayingSidePanel.NONE
+        ) {
             activeSidePanel = NowPlayingSidePanel.NONE
         }
     }
@@ -535,7 +594,7 @@ fun FullPlayerContent(
         currentQueueIndex,
         currentMediaItemIndex,
         carouselStyle,
-        loadingTweaks,
+        effectiveLoadingTweaks,
         isSheetDragGestureActive,
         expansionFractionProvider,
         currentSheetState,
@@ -553,7 +612,7 @@ fun FullPlayerContent(
                 currentPlaybackQueue = currentPlaybackQueue,
                 currentMediaItemIndex = currentQueueIndex ?: currentMediaItemIndex,
                 carouselStyle = carouselStyle,
-                loadingTweaks = loadingTweaks,
+                loadingTweaks = effectiveLoadingTweaks,
                 isSheetDragGestureActive = isSheetDragGestureActive,
                 expansionFractionProvider = expansionFractionProvider,
                 currentSheetState = currentSheetState,
@@ -569,6 +628,8 @@ fun FullPlayerContent(
         }
     }
 
+    val effectiveAllowRealtimeUpdates = allowRealtimeUpdates && !showLyricsSheet
+
     val playerProgressSection: @Composable () -> Unit = remember(
         song,
         playbackAudioMetadata.mediaId,
@@ -582,9 +643,9 @@ fun FullPlayerContent(
         expansionFractionProvider,
         isPlayingProvider,
         currentSheetState,
-        allowRealtimeUpdates,
+        effectiveAllowRealtimeUpdates,
         isSheetDragGestureActive,
-        loadingTweaks
+        effectiveLoadingTweaks
     ) {
         {
             FullPlayerProgressSection(
@@ -600,15 +661,15 @@ fun FullPlayerContent(
                 expansionFractionProvider = expansionFractionProvider,
                 isPlayingProvider = isPlayingProvider,
                 currentSheetState = currentSheetState,
-                allowRealtimeUpdates = allowRealtimeUpdates,
+                allowRealtimeUpdates = effectiveAllowRealtimeUpdates,
                 isSheetDragGestureActive = isSheetDragGestureActive,
-                loadingTweaks = loadingTweaks
+                loadingTweaks = effectiveLoadingTweaks
             )
         }
     }
 
     val controlsSection: @Composable () -> Unit = remember(
-        loadingTweaks,
+        effectiveLoadingTweaks,
         isSheetDragGestureActive,
         expansionFractionProvider,
         currentSheetState,
@@ -630,7 +691,7 @@ fun FullPlayerContent(
     ) {
         {
             FullPlayerControlsSection(
-                loadingTweaks = loadingTweaks,
+                loadingTweaks = effectiveLoadingTweaks,
                 isSheetDragGestureActive = isSheetDragGestureActive,
                 expansionFractionProvider = expansionFractionProvider,
                 currentSheetState = currentSheetState,
@@ -656,7 +717,7 @@ fun FullPlayerContent(
     val portraitSongMetadataSection: @Composable () -> Unit = remember(
         song,
         currentSongArtists,
-        loadingTweaks,
+        effectiveLoadingTweaks,
         isSheetDragGestureActive,
         expansionFractionProvider,
         currentSheetState,
@@ -672,7 +733,7 @@ fun FullPlayerContent(
             FullPlayerSongMetadataSection(
                 song = song,
                 currentSongArtists = currentSongArtists,
-                loadingTweaks = loadingTweaks,
+                loadingTweaks = effectiveLoadingTweaks,
                 isSheetDragGestureActive = isSheetDragGestureActive,
                 expansionFractionProvider = expansionFractionProvider,
                 currentSheetState = currentSheetState,
@@ -702,7 +763,7 @@ fun FullPlayerContent(
     val landscapeSongMetadataSection: @Composable () -> Unit = remember(
         song,
         currentSongArtists,
-        loadingTweaks,
+        effectiveLoadingTweaks,
         isSheetDragGestureActive,
         expansionFractionProvider,
         currentSheetState,
@@ -724,7 +785,7 @@ fun FullPlayerContent(
             FullPlayerSongMetadataSection(
                 song = song,
                 currentSongArtists = currentSongArtists,
-                loadingTweaks = loadingTweaks,
+                loadingTweaks = effectiveLoadingTweaks,
                 isSheetDragGestureActive = isSheetDragGestureActive,
                 expansionFractionProvider = expansionFractionProvider,
                 currentSheetState = currentSheetState,
@@ -746,6 +807,34 @@ fun FullPlayerContent(
         }
     }
 
+    // Hoist movableContentOf slots above FullPlayerPortraitContent / FullPlayerLandscapeContent
+    // so AlbumCarouselSection's HorizontalPager and active controls survive SIDE_DOCKED <-> FULLSCREEN
+    // handoffs without tearing down and resetting carousel page state.
+    val latestAlbumCoverSection by rememberUpdatedState(albumCoverSection)
+    val latestPlayerProgressSection by rememberUpdatedState(playerProgressSection)
+    val latestControlsSection by rememberUpdatedState(controlsSection)
+    val latestPortraitSongMetadataSection by rememberUpdatedState(portraitSongMetadataSection)
+    val movableAlbumCover = remember {
+        movableContentOf<Modifier> { mod ->
+            latestAlbumCoverSection(mod)
+        }
+    }
+    val movablePlayerProgress = remember {
+        movableContentOf {
+            latestPlayerProgressSection()
+        }
+    }
+    val movableControls = remember {
+        movableContentOf {
+            latestControlsSection()
+        }
+    }
+    val movablePortraitSongMetadata = remember {
+        movableContentOf {
+            latestPortraitSongMetadataSection()
+        }
+    }
+
     val isDarkTheme = LocalPixelPlayDarkTheme.current
     val latestAmbientSchemeState = rememberUpdatedState(LocalMaterialTheme.current)
 
@@ -757,75 +846,21 @@ fun FullPlayerContent(
                 isDarkTheme = isDarkTheme,
                 focalCenterXFraction = if (isLandscape) 0.26f else 0.50f,
                 focalCenterYFraction = if (isLandscape) 0.50f else 0.32f
-            )
-            .pointerInput(currentSheetState, queueGestureBottomExclusionPx) {
-            val queueDragActivationThresholdPx = 4.dp.toPx()
-            val quickFlickVelocityThreshold = -520f
-
-            awaitEachGesture {
-                val down = awaitFirstDown(requireUnconsumed = false)
-                // Check condition AFTER the down event occurs
-                val isFullyExpanded = currentSheetState == PlayerSheetState.EXPANDED && expansionFractionProvider() >= 0.99f
-
-                if (!isFullyExpanded) {
-                    return@awaitEachGesture
-                }
-
-                val bottomGestureBoundaryY =
-                    (size.height.toFloat() - queueGestureBottomExclusionPx).coerceAtLeast(0f)
-                if (down.position.y >= bottomGestureBoundaryY) {
-                    // Let the system Home/back gesture win near the bottom edge.
-                    return@awaitEachGesture
-                }
-
-                // Proceed with gesture logic
-                var dragConsumedByQueue = false
-                val velocityTracker = VelocityTracker()
-                var totalDrag = 0f
-                velocityTracker.addPosition(down.uptimeMillis, down.position)
-
-                drag(down.id) { change ->
-                    val dragAmount = change.positionChange().y
-                    totalDrag += dragAmount
-                    velocityTracker.addPosition(change.uptimeMillis, change.position)
-                    val isDraggingUp = totalDrag < -queueDragActivationThresholdPx
-
-                    if (isDraggingUp && !dragConsumedByQueue) {
-                        dragConsumedByQueue = true
-                        onQueueDragStart()
-                    }
-
-                    if (dragConsumedByQueue) {
-                        change.consume()
-                        onQueueDrag(dragAmount)
-                    }
-                }
-
-                val velocity = velocityTracker.calculateVelocity().y
-                if (dragConsumedByQueue) {
-                    onQueueRelease(totalDrag, velocity)
-                } else if (
-                    totalDrag < -(queueDragActivationThresholdPx * 2f) &&
-                    velocity < quickFlickVelocityThreshold
-                ) {
-                    // Treat short/fast upward flick as queue-open intent.
-                    onQueueRelease(totalDrag, velocity)
-                }
-            }
-        },
+            ),
         topBar = {
+            val motionScheme = MaterialTheme.motionScheme
             AnimatedVisibility(
                 visible = layoutMetrics.showTopUtilityBar,
-                enter = fadeIn(animationSpec = tween(350, easing = FastOutSlowInEasing)) +
-                        slideInVertically(
-                            initialOffsetY = { -it / 2 },
-                            animationSpec = tween(350, easing = FastOutSlowInEasing)
-                        ),
-                exit = fadeOut(animationSpec = tween(220, easing = FastOutSlowInEasing)) +
-                       slideOutVertically(
-                           targetOffsetY = { -it / 2 },
-                           animationSpec = tween(220, easing = FastOutSlowInEasing)
-                       )
+                enter = fadeIn(animationSpec = motionScheme.defaultEffectsSpec()) +
+                    slideInVertically(
+                        initialOffsetY = { -it / 2 },
+                        animationSpec = motionScheme.fastSpatialSpec()
+                    ),
+                exit = fadeOut(animationSpec = motionScheme.fastEffectsSpec()) +
+                    slideOutVertically(
+                        targetOffsetY = { -it / 2 },
+                        animationSpec = motionScheme.fastSpatialSpec()
+                    )
             ) {
                 val isSideDockedCard = layoutMetrics.mode == NowPlayingLayoutMode.SIDE_DOCKED_PORTRAIT
                 TopAppBar(
@@ -914,27 +949,27 @@ fun FullPlayerContent(
                                 isBluetoothActive -> painterResource(R.drawable.rounded_bluetooth_24)
                                 else -> painterResource(R.drawable.rounded_mobile_speaker_24)
                             }
+                            val motionScheme = MaterialTheme.motionScheme
                             val castCornersExpanded = 50.dp
                             val castCornersCompact = 6.dp
                             val castTopStart = castCornersExpanded
                             val castTopEnd by animateDpAsState(
                                 targetValue = if (showCastLabel) castCornersExpanded else castCornersCompact,
-                                animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow)
+                                animationSpec = motionScheme.fastSpatialSpec(),
+                                label = "castTopEnd"
                             )
                             val castBottomStart = castCornersExpanded
                             val castBottomEnd by animateDpAsState(
                                 targetValue = if (showCastLabel) castCornersExpanded else castCornersCompact,
-                                animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow)
+                                animationSpec = motionScheme.fastSpatialSpec(),
+                                label = "castBottomEnd"
                             )
                             Box(
                                 modifier = Modifier
                                     .height(42.dp)
                                     .align(Alignment.CenterVertically)
                                     .animateContentSize(
-                                        animationSpec = spring(
-                                            dampingRatio = Spring.DampingRatioMediumBouncy,
-                                            stiffness = Spring.StiffnessLow
-                                        )
+                                        animationSpec = motionScheme.fastSpatialSpec()
                                     )
                                     .widthIn(
                                         min = 46.dp,
@@ -977,7 +1012,8 @@ fun FullPlayerContent(
                                                     else -> ""
                                                 },
                                                 transitionSpec = {
-                                                    fadeIn(animationSpec = tween(150)) togetherWith fadeOut(animationSpec = tween(120))
+                                                    fadeIn(animationSpec = motionScheme.fastEffectsSpec()) togetherWith
+                                                        fadeOut(animationSpec = motionScheme.fastEffectsSpec())
                                                 },
                                                 label = "castButtonLabel"
                                             ) { label ->
@@ -1084,18 +1120,20 @@ fun FullPlayerContent(
             }
         }
     ) { paddingValues ->
-        val stablePlayerState by playerViewModel.stablePlayerState.collectAsStateWithLifecycle()
-        var contentVisible by remember(isLandscape) { mutableStateOf(false) }
-        LaunchedEffect(isLandscape) { contentVisible = true }
-        val contentAlpha by animateFloatAsState(
-            targetValue = if (contentVisible) 1f else 0f,
-            animationSpec = tween(durationMillis = 380, easing = FastOutSlowInEasing),
-            label = "orientationAlpha"
-        )
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .graphicsLayer { alpha = contentAlpha }
+                .graphicsLayer {
+                    // Subtle M3 fade-through dip centered at the 52% deck swap threshold so the
+                    // portrait-card <-> 2-column-landscape handoff never snaps abruptly.
+                    if (boundsSpec.supportsSideDockedMode) {
+                        val f = fullScreenFractionProvider().coerceIn(0f, 1f)
+                        if (f > 0.005f && f < 0.995f) {
+                            val distFromSwap = kotlin.math.abs(f - 0.52f)
+                            alpha = (distFromSwap / 0.16f).coerceIn(0f, 1f)
+                        }
+                    }
+                }
         ) {
             if (isLandscape) {
                 FullPlayerLandscapeContent(
@@ -1116,11 +1154,17 @@ fun FullPlayerContent(
                     } else {
                         null
                     },
-                    albumCoverSection = albumCoverSection,
+                    albumCoverSection = movableAlbumCover,
                     songMetadataSection = landscapeSongMetadataSection,
-                    playerProgressSection = playerProgressSection,
-                    controlsSection = controlsSection,
+                    playerProgressSection = movablePlayerProgress,
+                    controlsSection = movableControls,
                     sidePanelContent = { panelModifier ->
+                        val isLoadingLyrics by remember(playerViewModel) {
+                            playerViewModel.stablePlayerState
+                                .map { it.isLoadingLyrics }
+                                .distinctUntilChanged()
+                        }.collectAsStateWithLifecycle(initialValue = false)
+
                         TabletNowPlayingSidePanel(
                             activePanel = activeSidePanel,
                             onSelectPanel = { activeSidePanel = it },
@@ -1138,7 +1182,7 @@ fun FullPlayerContent(
                             currentQueueSourceName = currentQueueSourceName,
                             currentMediaItemIndex = currentQueueIndex ?: currentMediaItemIndex,
                             lyrics = lyricsProvider(),
-                            isLoadingLyrics = stablePlayerState.isLoadingLyrics,
+                            isLoadingLyrics = isLoadingLyrics,
                             playbackPositionFlow = if (isRemotePlaybackActive) {
                                 playerViewModel.remotePosition
                             } else {
@@ -1162,16 +1206,17 @@ fun FullPlayerContent(
                 FullPlayerPortraitContent(
                     paddingValues = paddingValues,
                     layoutMetrics = layoutMetrics,
-                    albumCoverSection = albumCoverSection,
-                    songMetadataSection = portraitSongMetadataSection,
-                    playerProgressSection = playerProgressSection,
-                    controlsSection = controlsSection,
+                    albumCoverSection = movableAlbumCover,
+                    songMetadataSection = movablePortraitSongMetadata,
+                    playerProgressSection = movablePlayerProgress,
+                    controlsSection = movableControls,
                     bottomPreviewCard = if (isSideDockedCard) {
-                        {
+                        { compact ->
                             SideDockedLyricsPreviewCard(
                                 lyrics = lyricsProvider(),
                                 currentPositionProvider = currentPositionProvider,
                                 lyricsSyncOffset = lyricsSyncOffset,
+                                compact = compact,
                                 onLyricsCardClick = onOpenFullLyricsSheet,
                                 onQueueButtonClick = onShowQueueClicked,
                                 onExpandLyricsFullClick = onOpenFullLyricsSheet
@@ -1333,16 +1378,23 @@ fun FullPlayerContent(
 
     val artistPickerSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     if (showArtistPicker && currentSongArtists.isNotEmpty()) {
-        PlayerArtistPickerBottomSheet(
-            song = song,
-            artists = currentSongArtists,
-            sheetState = artistPickerSheetState,
-            onDismiss = { showArtistPicker = false },
-            onArtistClick = { artist ->
-                playerViewModel.triggerArtistNavigationFromPlayer(artist.id)
-                showArtistPicker = false
-            }
-        )
+        MaterialTheme(
+            colorScheme = LocalMaterialTheme.current,
+            typography = MaterialTheme.typography,
+            shapes = MaterialTheme.shapes
+        ) {
+            PlayerArtistPickerBottomSheet(
+                song = song,
+                artists = currentSongArtists,
+                sheetState = artistPickerSheetState,
+                onDismiss = { showArtistPicker = false },
+                onArtistClick = { artist ->
+                    playerViewModel.triggerArtistNavigationFromPlayer(artist.id)
+                    showArtistPicker = false
+                },
+                isContainedInCard = isSideDockedCardMode
+            )
+        }
     }
 }
 
@@ -1492,7 +1544,7 @@ private fun FullPlayerControlsSection(
         applyPlaceholderDelayOnClose = loadingTweaks.applyPlaceholdersOnClose,
         switchOnDragRelease = loadingTweaks.switchOnDragRelease,
         isSheetDragGestureActive = isSheetDragGestureActive,
-        sharedBoundsModifier = Modifier.fillMaxWidth().height(176.dp),
+        sharedBoundsModifier = Modifier.fillMaxWidth().heightIn(min = 148.dp),
         expansionFractionProvider = expansionFractionProvider,
         isExpandedOverride = currentSheetState == PlayerSheetState.EXPANDED,
         normalStartThreshold = 0.42f,
@@ -1512,10 +1564,7 @@ private fun FullPlayerControlsSection(
     ) {
         val colorScheme = LocalMaterialTheme.current
         val transportPlayPauseColors = expressivePlayPauseButtonColors(colorScheme)
-        val transportSkipColors = TransportButtonColors(
-            container = colorScheme.primary,
-            content = colorScheme.onPrimary
-        )
+        val transportSkipColors = expressiveSkipButtonColors(colorScheme)
         Column(
             modifier = Modifier.fillMaxWidth(),
             horizontalAlignment = Alignment.CenterHorizontally
@@ -1559,7 +1608,20 @@ private fun FullPlayerControlsSection(
                 showLyricsAndQueueToggles = showLyricsAndQueueToggles,
                 activeSidePanel = activeSidePanel,
                 onLyricsClick = onLyricsClick,
-                onQueueClick = onQueueClick
+                onQueueClick = onQueueClick,
+                activeColorMain = colorScheme.primaryFixed,
+                onActiveColorMain = colorScheme.onPrimaryFixed,
+                activeColorSecondary = colorScheme.secondaryFixed,
+                onActiveColorSecondary = colorScheme.onSecondaryFixed,
+                activeColorTertiary = colorScheme.tertiaryFixed,
+                onActiveColorTertiary = colorScheme.onTertiaryFixed,
+                sidePanelActiveColor = colorScheme.onPrimaryContainer,
+                onSidePanelActiveColor = colorScheme.primaryContainer,
+                inactiveColor = colorScheme.onPrimaryContainer.copy(alpha = 0.08f),
+                inactiveContentColor = colorScheme.onPrimaryContainer.copy(alpha = 0.90f),
+                containerColor = colorScheme.onPrimaryContainer.copy(alpha = 0.12f),
+                innerPadding = 6.dp,
+                itemSpacing = 6.dp
             )
         }
     }
@@ -1753,6 +1815,7 @@ private fun FullPlayerSongMetadataSection(
     }
 }
 
+@SuppressLint("UnusedBoxWithConstraintsScope")
 @Composable
 private fun FullPlayerPortraitContent(
     paddingValues: PaddingValues,
@@ -1761,7 +1824,7 @@ private fun FullPlayerPortraitContent(
     songMetadataSection: @Composable () -> Unit,
     playerProgressSection: @Composable () -> Unit,
     controlsSection: @Composable () -> Unit,
-    bottomPreviewCard: (@Composable () -> Unit)? = null
+    bottomPreviewCard: (@Composable (compact: Boolean) -> Unit)? = null
 ) {
     val isSideDockedCard = layoutMetrics.mode == NowPlayingLayoutMode.SIDE_DOCKED_PORTRAIT
     val isTabletFullscreenPortrait = layoutMetrics.mode == NowPlayingLayoutMode.PORTRAIT_TABLET_FULLSCREEN
@@ -1770,15 +1833,19 @@ private fun FullPlayerPortraitContent(
         isTabletFullscreenPortrait -> 32.dp
         else -> 24.dp
     }
-    Box(
+    BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
             .padding(
                 top = paddingValues.calculateTopPadding(),
-                bottom = if (isSideDockedCard) 12.dp else paddingValues.calculateBottomPadding()
+                bottom = if (isSideDockedCard) 10.dp else paddingValues.calculateBottomPadding()
             ),
         contentAlignment = Alignment.Center
     ) {
+        val isCompactCardHeight = isSideDockedCard && maxHeight < 640.dp
+        val isUltraShortCardHeight = isSideDockedCard && maxHeight < 500.dp
+        val showBottomPreviewCard = bottomPreviewCard != null && maxHeight >= 460.dp
+
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -1786,14 +1853,19 @@ private fun FullPlayerPortraitContent(
                 .padding(horizontal = horizontalPad),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = when {
-                isSideDockedCard -> Arrangement.spacedBy(10.dp, Alignment.CenterVertically)
+                isSideDockedCard -> Arrangement.spacedBy(
+                    if (isCompactCardHeight) 6.dp else 10.dp,
+                    Alignment.CenterVertically
+                )
                 isTabletFullscreenPortrait -> Arrangement.spacedBy(layoutMetrics.deckSpacing, Alignment.CenterVertically)
                 else -> Arrangement.SpaceAround
             }
         ) {
             albumCoverSection(
                 if (isSideDockedCard) {
-                    Modifier.weight(1f, fill = false)
+                    Modifier
+                        .weight(1f, fill = false)
+                        .heightIn(min = if (isUltraShortCardHeight) 96.dp else 140.dp)
                 } else {
                     Modifier
                 }
@@ -1801,7 +1873,7 @@ private fun FullPlayerPortraitContent(
 
             Column(
                 modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
+                verticalArrangement = Arrangement.spacedBy(if (isCompactCardHeight) 2.dp else 4.dp)
             ) {
                 Box(Modifier.align(Alignment.Start)) {
                     songMetadataSection()
@@ -1811,8 +1883,8 @@ private fun FullPlayerPortraitContent(
 
             controlsSection()
 
-            if (bottomPreviewCard != null) {
-                bottomPreviewCard()
+            if (showBottomPreviewCard) {
+                bottomPreviewCard?.invoke(isCompactCardHeight)
             }
         }
     }
@@ -1842,6 +1914,23 @@ private fun FullPlayerLandscapeContent(
     val statusBarTopPad = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     val navBarBottomPad = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
 
+    val latestSongMetadataSection by rememberUpdatedState(songMetadataSection)
+    val latestUtilityButtons by rememberUpdatedState(tabletUtilityButtons)
+    val movableAlbumCover = albumCoverSection
+    val movablePlayerProgress = playerProgressSection
+    val movableControls = controlsSection
+
+    val movableSongMetadata = remember {
+        movableContentOf {
+            latestSongMetadataSection()
+        }
+    }
+    val movableUtilityButtons = remember {
+        movableContentOf {
+            latestUtilityButtons?.invoke()
+        }
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -1851,130 +1940,134 @@ private fun FullPlayerLandscapeContent(
             ),
         contentAlignment = Alignment.Center
     ) {
-        AnimatedContent(
-            targetState = isSplitPanelOpen,
-            transitionSpec = {
-                fadeIn(animationSpec = motionScheme.fastEffectsSpec()) togetherWith
-                    fadeOut(animationSpec = motionScheme.fastEffectsSpec())
-            },
-            label = "TabletLandscapeNowPlayingSplit"
-        ) { splitOpen ->
-            if (!splitOpen) {
-                // Giao diện 3 (Image 2): Symmetrical 2-Column Full-Screen Showcase
-                Box(modifier = Modifier.fillMaxSize()) {
-                    Row(
+        // Move existing subtrees across layouts without AnimatedContent teardown/recreation.
+        if (!isSplitPanelOpen) {
+            // Giao diện 3 (Image 2): Symmetrical 2-Column Full-Screen Showcase
+            Box(modifier = Modifier.fillMaxSize()) {
+                Row(
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                        .fillMaxSize()
+                        .widthIn(max = 1320.dp)
+                        .padding(horizontal = horizontalPad),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
                         modifier = Modifier
-                            .align(Alignment.Center)
-                            .fillMaxSize()
-                            .widthIn(max = 1320.dp)
-                            .padding(horizontal = horizontalPad),
-                        verticalAlignment = Alignment.CenterVertically
+                            .fillMaxHeight()
+                            .weight(1f),
+                        contentAlignment = Alignment.Center
                     ) {
-                        Box(
-                            modifier = Modifier
+                        movableAlbumCover(
+                            Modifier
                                 .fillMaxHeight()
-                                .weight(1f),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            albumCoverSection(
-                                Modifier
-                                    .fillMaxHeight()
-                                    .widthIn(max = layoutMetrics.albumArtMaxSize)
-                            )
-                        }
-                        Spacer(Modifier.width(columnGap))
-                        Box(
-                            modifier = Modifier
-                                .fillMaxHeight()
-                                .weight(1f),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .widthIn(max = layoutMetrics.controlsMaxWidth),
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.spacedBy(
-                                    layoutMetrics.deckSpacing,
-                                    Alignment.CenterVertically
-                                )
-                            ) {
-                                songMetadataSection()
-                                playerProgressSection()
-                                controlsSection()
-                            }
-                        }
+                                .widthIn(max = layoutMetrics.albumArtMaxSize)
+                        )
                     }
-
-                    if (tabletUtilityButtons != null) {
-                        Box(
+                    Spacer(Modifier.width(columnGap))
+                    Box(
+                        modifier = Modifier
+                            .fillMaxHeight()
+                            .weight(1f),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(
                             modifier = Modifier
-                                .align(Alignment.TopEnd)
-                                .padding(end = horizontalPad, top = 4.dp)
+                                .fillMaxWidth()
+                                .widthIn(max = layoutMetrics.controlsMaxWidth),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(
+                                layoutMetrics.deckSpacing,
+                                Alignment.CenterVertically
+                            )
                         ) {
-                            tabletUtilityButtons()
+                            movableSongMetadata()
+                            movablePlayerProgress()
+                            movableControls()
                         }
                     }
                 }
-            } else {
-                // Full-Screen Split-Panel Mode (Left: Top utility bar + Large 1:1 album art + Bottom-anchored controls, Right: Lyrics / Up Next)
-                Row(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .widthIn(max = 1440.dp)
-                        .padding(horizontal = horizontalPad),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(24.dp)
-                ) {
-                    Column(
+
+                if (tabletUtilityButtons != null) {
+                    Box(
                         modifier = Modifier
-                            .weight(0.45f)
-                            .fillMaxHeight()
-                            .widthIn(max = 500.dp)
-                            .padding(vertical = 8.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
+                            .align(Alignment.TopEnd)
+                            .padding(end = horizontalPad, top = 4.dp)
                     ) {
-                        if (tabletUtilityButtons != null) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.End,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                tabletUtilityButtons()
-                            }
-                            Spacer(modifier = Modifier.height(10.dp))
-                        }
-
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .fillMaxWidth(),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            albumCoverSection(Modifier.fillMaxSize())
-                        }
-
-                        Spacer(modifier = Modifier.height(12.dp))
-
-                        Column(
+                        movableUtilityButtons()
+                    }
+                }
+            }
+        } else {
+            val panelEnterProgress = remember { Animatable(0f) }
+            LaunchedEffect(Unit) {
+                panelEnterProgress.animateTo(
+                    targetValue = 1f,
+                    animationSpec = motionScheme.defaultSpatialSpec()
+                )
+            }
+            // Full-Screen Split-Panel Mode (Left: Top utility bar + Large 1:1 album art + Bottom-anchored controls, Right: Lyrics / Up Next)
+            Row(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .widthIn(max = 1440.dp)
+                    .padding(horizontal = horizontalPad),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(24.dp)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .weight(0.45f)
+                        .fillMaxHeight()
+                        .widthIn(max = 500.dp)
+                        .padding(vertical = 8.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    if (tabletUtilityButtons != null) {
+                        Row(
                             modifier = Modifier.fillMaxWidth(),
-                            verticalArrangement = Arrangement.spacedBy(10.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally
+                            horizontalArrangement = Arrangement.End,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            songMetadataSection()
-                            playerProgressSection()
-                            controlsSection()
+                            movableUtilityButtons()
                         }
+                        Spacer(modifier = Modifier.height(10.dp))
                     }
 
                     Box(
                         modifier = Modifier
-                            .weight(0.55f)
-                            .fillMaxHeight()
-                            .padding(vertical = 8.dp)
+                            .weight(1f)
+                            .fillMaxWidth(),
+                        contentAlignment = Alignment.Center
                     ) {
-                        sidePanelContent(Modifier.fillMaxSize())
+                        movableAlbumCover(Modifier.fillMaxSize())
                     }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        movableSongMetadata()
+                        movablePlayerProgress()
+                        movableControls()
+                    }
+                }
+
+                Box(
+                    modifier = Modifier
+                        .weight(0.55f)
+                        .fillMaxHeight()
+                        .padding(vertical = 8.dp)
+                        .graphicsLayer {
+                            val p = panelEnterProgress.value
+                            alpha = p.coerceIn(0f, 1f)
+                            translationX = (1f - p) * 28.dp.toPx()
+                        }
+                ) {
+                    sidePanelContent(Modifier.fillMaxSize())
                 }
             }
         }
@@ -2113,33 +2206,21 @@ private fun SongMetadataDisplaySection(
         }
         
         val isBuffering = isBufferingProvider()
-
+        val motionScheme = MaterialTheme.motionScheme
 
         AnimatedVisibility(
             visible = isBuffering,
             enter = scaleIn(
                 initialScale = 0.85f,
-                animationSpec = tween(
-                    durationMillis = 400,
-                    delayMillis = 80,
-                    easing = FastOutSlowInEasing
-                )
+                animationSpec = motionScheme.fastSpatialSpec()
             ) + fadeIn(
-                animationSpec = tween(
-                    durationMillis = 300,
-                    delayMillis = 80
-                )
+                animationSpec = motionScheme.fastEffectsSpec()
             ),
             exit = scaleOut(
                 targetScale = 0.85f,
-                animationSpec = tween(
-                    durationMillis = 300,
-                    easing = FastOutSlowInEasing
-                )
+                animationSpec = motionScheme.fastSpatialSpec()
             ) + fadeOut(
-                animationSpec = tween(
-                    durationMillis = 200
-                )
+                animationSpec = motionScheme.fastEffectsSpec()
             )
         ) {
             Surface(
@@ -2320,7 +2401,9 @@ private fun PlayerProgressBarSection(
         }
     }
     val shouldRunRealtimeUpdates = allowRealtimeUpdates && isVisible
-    val shouldSampleProgress = isVisible
+    // Pause background progress sampling whenever overlays (Queue / Cast / LyricsSheet) occlude
+    // the full player, while keeping `isVisible` intact so the slider still draws during drag/back.
+    val shouldSampleProgress = shouldRunRealtimeUpdates
 
     val reportedDuration = totalDurationValue.coerceAtLeast(0L)
     val hintDuration = songDurationHintMs.coerceAtLeast(0L)
@@ -2545,7 +2628,7 @@ private fun EfficientSlider(
         isPlaying = isPlaying,
         isVisible = isVisible,
         trackEdgePadding = trackEdgePadding,
-        semanticsLabel = "Playback position",
+        semanticsLabel = stringResource(R.string.player_cd_playback_position),
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 8.dp, horizontal = 0.dp)
@@ -2621,6 +2704,7 @@ private fun EfficientTimeLabels(
     }
 }
 
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun DelayedContent(
     shouldDelay: Boolean,
@@ -2662,7 +2746,12 @@ private fun DelayedContent(
             }
 
             if (isExpandedOverride) {
-                isDelayGateOpen = true
+                val settleThreshold = appearThreshold.coerceIn(0.95f, 0.985f)
+                snapshotFlow { expansionFractionProvider().coerceIn(0f, 1f) }
+                    .first { fraction -> fraction >= settleThreshold }
+                if (!isSheetDragGestureActive && isExpandedOverride) {
+                    isDelayGateOpen = true
+                }
             } else {
                 snapshotFlow { expansionFractionProvider().coerceIn(0f, 1f) }
                     .first { fraction -> fraction <= 0.001f }
@@ -2727,24 +2816,22 @@ private fun DelayedContent(
                 .coerceIn(0f, 1f)
         }
     }
-    val contentBlendAlpha by animateFloatAsState(
+    val openEffectsSpec = MaterialTheme.motionScheme.defaultEffectsSpec<Float>()
+    val closeEffectsSpec = MaterialTheme.motionScheme.fastEffectsSpec<Float>()
+    val contentBlendAlphaState = animateFloatAsState(
         targetValue = if (isDelayGateOpen) 1f else 0f,
-        animationSpec = if (isDelayGateOpen) {
-            tween(durationMillis = 260, easing = FastOutSlowInEasing)
-        } else {
-            tween(durationMillis = 140, easing = FastOutSlowInEasing)
-        },
+        animationSpec = if (isDelayGateOpen) openEffectsSpec else closeEffectsSpec,
         label = "DelayedContentBlendAlpha"
     )
-    val placeholderBlendAlpha by animateFloatAsState(
+    val placeholderBlendAlphaState = animateFloatAsState(
         targetValue = if (isDelayGateOpen) 0f else 1f,
-        animationSpec = if (isDelayGateOpen) {
-            tween(durationMillis = 360, easing = FastOutSlowInEasing)
-        } else {
-            tween(durationMillis = 140, easing = FastOutSlowInEasing)
-        },
+        animationSpec = if (isDelayGateOpen) openEffectsSpec else closeEffectsSpec,
         label = "DelayedPlaceholderBlendAlpha"
     )
+
+    val isPlaceholderVisible by remember(placeholderBlendAlphaState) {
+        derivedStateOf { placeholderBlendAlphaState.value > 0.001f }
+    }
 
     if (shouldDelay) {
         Box(modifier = sharedBoundsModifier) {
@@ -2753,15 +2840,15 @@ private fun DelayedContent(
             if (shouldComposeContent) {
                 Box(
                     modifier = Modifier.graphicsLayer {
-                        alpha = contentBlendAlpha * baseAlphaProvider()
+                        alpha = contentBlendAlphaState.value * baseAlphaProvider()
                     }
                 ) {
                     content()
                 }
             }
-            if (showPlaceholders && placeholderBlendAlpha > 0.001f) {
+            if (showPlaceholders && (!isDelayGateOpen || isPlaceholderVisible)) {
                 Box(
-                    modifier = Modifier.graphicsLayer { alpha = placeholderBlendAlpha }
+                    modifier = Modifier.graphicsLayer { alpha = placeholderBlendAlphaState.value }
                 ) {
                     placeholder()
                 }
@@ -3212,137 +3299,4 @@ private fun expressiveSkipButtonColors(colorScheme: ColorScheme): TransportButto
         container = colorScheme.secondaryFixedDim,
         content = colorScheme.onSecondaryFixed
     )
-}
-
-@Composable
-private fun BottomToggleRow(
-    modifier: Modifier,
-    isShuffleEnabled: Boolean,
-    isShuffleTransitionInProgress: Boolean,
-    repeatMode: Int,
-    isFavoriteProvider: () -> Boolean,
-    onShuffleToggle: () -> Unit,
-    onRepeatToggle: () -> Unit,
-    onFavoriteToggle: () -> Unit,
-    showLyricsAndQueueToggles: Boolean = false,
-    activeSidePanel: NowPlayingSidePanel = NowPlayingSidePanel.NONE,
-    onLyricsClick: () -> Unit = {},
-    onQueueClick: () -> Unit = {}
-) {
-    val isFavorite = isFavoriteProvider()
-    val rowCorners = 60.dp
-    val scheme = LocalMaterialTheme.current
-    val containerBg = scheme.onPrimaryContainer.copy(alpha = 0.12f)
-    val inactiveBg = scheme.onPrimaryContainer.copy(alpha = 0.08f)
-    val inactiveContentColor = scheme.onPrimaryContainer.copy(alpha = 0.90f)
-
-    Box(
-        modifier = modifier.background(
-            color = containerBg,
-            shape = AbsoluteSmoothCornerShape(
-                cornerRadiusTL = rowCorners,
-                smoothnessAsPercentTL = 60,
-                cornerRadiusTR = rowCorners,
-                smoothnessAsPercentTR = 60,
-                cornerRadiusBL = rowCorners,
-                smoothnessAsPercentBL = 60,
-                cornerRadiusBR = rowCorners,
-                smoothnessAsPercentBR = 60
-            )
-        )
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(6.dp)
-                .clip(
-                    AbsoluteSmoothCornerShape(
-                        cornerRadiusTL = rowCorners,
-                        smoothnessAsPercentTL = 60,
-                        cornerRadiusTR = rowCorners,
-                        smoothnessAsPercentTR = 60,
-                        cornerRadiusBL = rowCorners,
-                        smoothnessAsPercentBL = 60,
-                        cornerRadiusBR = rowCorners,
-                        smoothnessAsPercentBR = 60
-                    )
-                )
-                .background(Color.Transparent),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            val commonModifier = Modifier.weight(1f)
-
-            ToggleSegmentButton(
-                modifier = commonModifier,
-                active = isShuffleEnabled,
-                enabled = !isShuffleTransitionInProgress,
-                activeColor = scheme.primaryFixed,
-                activeCornerRadius = rowCorners,
-                activeContentColor = scheme.onPrimaryFixed,
-                inactiveColor = inactiveBg,
-                inactiveContentColor = inactiveContentColor,
-                onClick = onShuffleToggle,
-                iconId = R.drawable.rounded_shuffle_24,
-                contentDesc = stringResource(R.string.queue_cd_toggle_shuffle_action)
-            )
-            val repeatActive = repeatMode != Player.REPEAT_MODE_OFF
-            val repeatIcon = when (repeatMode) {
-                Player.REPEAT_MODE_ONE -> R.drawable.rounded_repeat_one_24
-                Player.REPEAT_MODE_ALL -> R.drawable.rounded_repeat_24
-                else -> R.drawable.rounded_repeat_24
-            }
-            ToggleSegmentButton(
-                modifier = commonModifier,
-                active = repeatActive,
-                activeColor = scheme.secondaryFixed,
-                activeCornerRadius = rowCorners,
-                activeContentColor = scheme.onSecondaryFixed,
-                inactiveColor = inactiveBg,
-                inactiveContentColor = inactiveContentColor,
-                onClick = onRepeatToggle,
-                iconId = repeatIcon,
-                contentDesc = stringResource(R.string.queue_cd_toggle_repeat_action)
-            )
-            ToggleSegmentButton(
-                modifier = commonModifier,
-                active = isFavorite,
-                activeColor = scheme.tertiaryFixed,
-                activeCornerRadius = rowCorners,
-                activeContentColor = scheme.onTertiaryFixed,
-                inactiveColor = inactiveBg,
-                inactiveContentColor = inactiveContentColor,
-                onClick = onFavoriteToggle,
-                iconId = if (isFavorite) R.drawable.round_favorite_24 else R.drawable.rounded_favorite_24,
-                contentDesc = stringResource(R.string.player_cd_favorite)
-            )
-
-            if (showLyricsAndQueueToggles) {
-                ToggleSegmentButton(
-                    modifier = commonModifier,
-                    active = activeSidePanel == NowPlayingSidePanel.LYRICS,
-                    activeColor = scheme.onPrimaryContainer,
-                    activeCornerRadius = rowCorners,
-                    activeContentColor = scheme.primaryContainer,
-                    inactiveColor = inactiveBg,
-                    inactiveContentColor = inactiveContentColor,
-                    onClick = onLyricsClick,
-                    iconId = R.drawable.rounded_lyrics_24,
-                    contentDesc = stringResource(R.string.player_panel_lyrics)
-                )
-                ToggleSegmentButton(
-                    modifier = commonModifier,
-                    active = activeSidePanel == NowPlayingSidePanel.QUEUE,
-                    activeColor = scheme.onPrimaryContainer,
-                    activeCornerRadius = rowCorners,
-                    activeContentColor = scheme.primaryContainer,
-                    inactiveColor = inactiveBg,
-                    inactiveContentColor = inactiveContentColor,
-                    onClick = onQueueClick,
-                    iconId = R.drawable.rounded_queue_music_24,
-                    contentDesc = stringResource(R.string.player_panel_up_next)
-                )
-            }
-        }
-    }
 }

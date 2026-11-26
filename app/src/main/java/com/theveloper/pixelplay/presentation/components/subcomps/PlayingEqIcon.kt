@@ -15,6 +15,7 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import kotlinx.coroutines.isActive
 import kotlin.math.PI
 import kotlin.math.sin
@@ -73,7 +74,7 @@ fun PlayingEqIcon(
     val speeds = remember(bars) { List(bars) { (it + 1).toFloat() } } // 1f, 2f, 3f
     val shifts = remember(bars) { List(bars) { i -> i * 0.9f } }
 
-    Canvas(modifier = modifier) {
+    Canvas(modifier = modifier.graphicsLayer { }) {
         val phase = phaseAnim.value
         val wander = wanderAnim.value
         val w = size.width

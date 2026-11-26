@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
@@ -129,6 +130,7 @@ fun PlayerCardOverlaySheet(
         Surface(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
+                .widthIn(max = 560.dp)
                 .fillMaxWidth()
                 .heightIn(max = maxSheetHeight)
                 .graphicsLayer {
@@ -215,17 +217,34 @@ fun PlayerCardOverlayDialog(
 ) {
     val motionScheme = remember { MotionScheme.expressive() }
     val spatialSpec = remember(motionScheme) { motionScheme.defaultSpatialSpec<Float>() }
+    val fastSpatialSpec = remember(motionScheme) { motionScheme.fastSpatialSpec<Float>() }
     val effectsSpec = remember(motionScheme) { motionScheme.defaultEffectsSpec<Float>() }
+    val fastEffectsSpec = remember(motionScheme) { motionScheme.fastEffectsSpec<Float>() }
+    val scope = rememberCoroutineScope()
     val reveal = remember { Animatable(0f) }
     val alphaProgress = remember { Animatable(0f) }
+    var isDismissing by remember { mutableStateOf(false) }
+    val latestOnDismiss by rememberUpdatedState(onDismissRequest)
 
     LaunchedEffect(Unit) {
         launch { alphaProgress.animateTo(1f, animationSpec = effectsSpec) }
         reveal.animateTo(1f, animationSpec = spatialSpec)
     }
 
+    val dismissDialog: () -> Unit = {
+        if (!isDismissing) {
+            isDismissing = true
+            scope.launch {
+                val alphaJob = launch { alphaProgress.animateTo(0f, animationSpec = fastEffectsSpec) }
+                reveal.animateTo(0f, animationSpec = fastSpatialSpec)
+                alphaJob.join()
+                latestOnDismiss()
+            }
+        }
+    }
+
     BackHandler(enabled = true) {
-        onDismissRequest()
+        dismissDialog()
     }
 
     BoxWithConstraints(
@@ -247,7 +266,7 @@ fun PlayerCardOverlayDialog(
                 .clickable(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null,
-                    onClick = onDismissRequest
+                    onClick = dismissDialog
                 )
         )
 

@@ -38,6 +38,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
@@ -120,7 +121,7 @@ fun WavySliderExpressive(
 
     val thumbInteractionFraction by animateFloatAsState(
         targetValue = if (isInteracting) 1f else 0f,
-        animationSpec = tween(250, easing = FastOutSlowInEasing),
+        animationSpec = androidx.compose.material3.MaterialTheme.motionScheme.fastSpatialSpec(),
         label = "ThumbInteractionAnim"
     )
     val animatedAmplitude by animateFloatAsState(
@@ -237,58 +238,66 @@ fun WavySliderExpressive(
             },
         contentAlignment = Alignment.Center
     ) {
-        if (isVisible) {
-            LinearWavyProgressIndicator(
-                progress = { renderedNormalizedProgress.floatValue },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = effectiveTrackEdgePadding)
-                    // Decorative layer: avoid duplicate semantics updates from the visual track.
-                    .clearAndSetSemantics { },
-                color = activeTrackColor,
-                trackColor = inactiveTrackColor,
-                stroke = stroke,
-                trackStroke = stroke,
-                gapSize = 2f * dynamicGapSize.value * (1.0f + 0.1573f * animatedAmplitude * animatedAmplitude),
-                stopSize = 3.dp,
-                amplitude = { progress -> if (progress > 0f) animatedAmplitude else 0f },
-                wavelength = wavelength,
-                waveSpeed = waveSpeed
-            )
-        } else {
-            Spacer(modifier = Modifier.fillMaxWidth().height(containerHeight))
-        }
-
-
-        Canvas(modifier = Modifier.fillMaxSize()) {
-            if (!isVisible) return@Canvas
-            val edgePaddingPx = trackEdgePaddingPx.coerceIn(0f, size.width / 2f)
-            val trackStart = edgePaddingPx
-            val trackEnd = size.width - edgePaddingPx
-            val trackWidth = (trackEnd - trackStart).coerceAtLeast(0f)
-            val thumbY = size.height / 2
-            val renderedProgress = renderedNormalizedProgress.floatValue
-
-            fun lerp(start: Float, stop: Float, fraction: Float): Float {
-                return start + (stop - start) * fraction
+        // Isolate per-frame wavy progress + thumb invalidations inside a bounded hardware
+        // RenderNode (clip = false keeps 24dp thumb & stroke edges intact without redrawing parent tree).
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer { },
+            contentAlignment = Alignment.Center
+        ) {
+            if (isVisible) {
+                LinearWavyProgressIndicator(
+                    progress = { renderedNormalizedProgress.floatValue },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = effectiveTrackEdgePadding)
+                        // Decorative layer: avoid duplicate semantics updates from the visual track.
+                        .clearAndSetSemantics { },
+                    color = activeTrackColor,
+                    trackColor = inactiveTrackColor,
+                    stroke = stroke,
+                    trackStroke = stroke,
+                    gapSize = 2f * dynamicGapSize.value * (1.0f + 0.1573f * animatedAmplitude * animatedAmplitude),
+                    stopSize = 3.dp,
+                    amplitude = { progress -> if (progress > 0f) animatedAmplitude else 0f },
+                    wavelength = wavelength,
+                    waveSpeed = if (enabled && isVisible && isPlaying && animatedAmplitude > 0.001f) waveSpeed else 0.dp
+                )
+            } else {
+                Spacer(modifier = Modifier.fillMaxWidth().height(containerHeight))
             }
 
-            val currentWidth = lerp(thumbRadiusPx * 2f, strokeWidthPx * 1.2f, thumbInteractionFraction)
-            val currentHeight = lerp(thumbRadiusPx * 2f, thumbLineHeightPx, thumbInteractionFraction)
-            val rawThumbX = trackStart + (trackWidth * renderedProgress)
-            val minThumbCenter = (currentWidth / 2f).coerceAtMost(size.width / 2f)
-            val maxThumbCenter = (size.width - currentWidth / 2f).coerceAtLeast(minThumbCenter)
-            val thumbX = rawThumbX.coerceIn(minThumbCenter, maxThumbCenter)
-            
-            drawRoundRect(
-                color = thumbColor,
-                topLeft = Offset(
-                    thumbX - currentWidth / 2f,
-                    thumbY - currentHeight / 2f
-                ),
-                size = Size(currentWidth, currentHeight),
-                cornerRadius = CornerRadius(currentWidth / 2f)
-            )
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                if (!isVisible) return@Canvas
+                val edgePaddingPx = trackEdgePaddingPx.coerceIn(0f, size.width / 2f)
+                val trackStart = edgePaddingPx
+                val trackEnd = size.width - edgePaddingPx
+                val trackWidth = (trackEnd - trackStart).coerceAtLeast(0f)
+                val thumbY = size.height / 2
+                val renderedProgress = renderedNormalizedProgress.floatValue
+
+                fun lerp(start: Float, stop: Float, fraction: Float): Float {
+                    return start + (stop - start) * fraction
+                }
+
+                val currentWidth = lerp(thumbRadiusPx * 2f, strokeWidthPx * 1.2f, thumbInteractionFraction)
+                val currentHeight = lerp(thumbRadiusPx * 2f, thumbLineHeightPx, thumbInteractionFraction)
+                val rawThumbX = trackStart + (trackWidth * renderedProgress)
+                val minThumbCenter = (currentWidth / 2f).coerceAtMost(size.width / 2f)
+                val maxThumbCenter = (size.width - currentWidth / 2f).coerceAtLeast(minThumbCenter)
+                val thumbX = rawThumbX.coerceIn(minThumbCenter, maxThumbCenter)
+
+                drawRoundRect(
+                    color = thumbColor,
+                    topLeft = Offset(
+                        thumbX - currentWidth / 2f,
+                        thumbY - currentHeight / 2f
+                    ),
+                    size = Size(currentWidth, currentHeight),
+                    cornerRadius = CornerRadius(currentWidth / 2f)
+                )
+            }
         }
 
         Box(

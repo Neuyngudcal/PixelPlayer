@@ -6,9 +6,12 @@ import androidx.annotation.OptIn
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.AnimationVector1D
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
@@ -20,13 +23,14 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.layout
-import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.IntOffset
@@ -56,7 +60,8 @@ internal fun UnifiedPlayerQueueLayer(
     shouldRenderLayer: Boolean,
     keepQueueSheetWarm: Boolean,
     albumColorScheme: ColorScheme,
-    queueScrimAlpha: Float,
+    isQueueScrimVisible: Boolean,
+    queueScrimAlphaProvider: () -> Float,
     showQueueSheet: Boolean,
     isQueueCollapsing: Boolean,
     queueHiddenOffsetPx: Float,
@@ -102,13 +107,25 @@ internal fun UnifiedPlayerQueueLayer(
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
-        if (queueScrimAlpha > 0f) {
+        if (isQueueScrimVisible) {
             Box(
                 modifier = Modifier
                     .matchParentSize()
                     .zIndex(0f)
-                    .graphicsLayer { alpha = queueScrimAlpha }
+                    .graphicsLayer { alpha = queueScrimAlphaProvider() }
                     .background(MaterialTheme.colorScheme.scrim)
+                    .then(
+                        if (showQueueSheet) {
+                            Modifier.clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null
+                            ) {
+                                onDismissQueue()
+                            }
+                        } else {
+                            Modifier
+                        }
+                    )
             )
         }
 
@@ -122,61 +139,73 @@ internal fun UnifiedPlayerQueueLayer(
                 typography = MaterialTheme.typography,
                 shapes = MaterialTheme.shapes
             ) {
-                QueueBottomSheet(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .offset {
-                            val offsetVal = if (!showQueueSheet && !isQueueCollapsing && queueHiddenOffsetPx > 0f) {
-                                queueHiddenOffsetPx.roundToInt()
-                            } else {
-                                queueSheetOffset.value.roundToInt().coerceAtLeast(0)
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.BottomCenter
+                ) {
+                    QueueBottomSheet(
+                        modifier = Modifier
+                            .then(
+                                if (!isContainedInCard) {
+                                    Modifier.widthIn(max = 720.dp)
+                                } else {
+                                    Modifier
+                                }
+                            )
+                            .fillMaxSize()
+                            .offset {
+                                val offsetVal = if (!showQueueSheet && !isQueueCollapsing && queueHiddenOffsetPx > 0f) {
+                                    queueHiddenOffsetPx.roundToInt()
+                                } else {
+                                    queueSheetOffset.value.roundToInt().coerceAtLeast(0)
+                                }
+                                IntOffset(0, offsetVal)
                             }
-                            IntOffset(0, offsetVal)
-                        }
-                        .graphicsLayer {
-                            alpha = if (showQueueSheet || isQueueCollapsing) 1f else 0f
-                        }
-                        .onGloballyPositioned { coordinates ->
-                            val measuredHeight = coordinates.size.height.toFloat()
-                            if (measuredHeight >= minMeasuredQueueHeightPx && abs(queueSheetHeightPx - measuredHeight) > 1f) {
-                                onQueueSheetHeightPxChange(measuredHeight)
+                            .graphicsLayer {
+                                alpha = if (showQueueSheet || isQueueCollapsing) 1f else 0f
                             }
-                        },
-                    queue = currentPlaybackQueue,
-                    currentQueueSourceName = currentQueueSourceName,
-                    currentSongId = infrequentPlayerState.currentSong?.id,
-                    currentMediaItemIndex = currentMediaItemIndex,
-                    isVisible = showQueueSheet,
-                    isPlaying = infrequentPlayerState.isPlaying,
-                    onDismiss = onDismissQueue,
-                    onSongInfoClick = onSongInfoClick,
-                    onPlaySong = onPlaySong,
-                    onRemoveSong = onRemoveSong,
-                    onReorder = onReorder,
-                    repeatMode = infrequentPlayerState.repeatMode,
-                    isShuffleOn = infrequentPlayerState.isShuffleEnabled,
-                    onToggleRepeat = onToggleRepeat,
-                    onToggleShuffle = onToggleShuffle,
-                    onClearQueue = onClearQueue,
-                    activeTimerValueDisplay = activeTimerValueDisplay,
-                    activeTimerDurationMinutes = activeTimerDurationMinutes,
-                    playCount = playCount,
-                    isEndOfTrackTimerActive = isEndOfTrackTimerActive,
-                    onSetPredefinedTimer = onSetPredefinedTimer,
-                    onSetEndOfTrackTimer = onSetEndOfTrackTimer,
-                    onOpenCustomTimePicker = onOpenCustomTimePicker,
-                    onCancelTimer = onCancelTimer,
-                    onCancelCountedPlay = onCancelCountedPlay,
-                    onPlayCounter = onPlayCounter,
-                    onRequestSaveAsPlaylist = onRequestSaveAsPlaylist,
-                    onQueueDragStart = onQueueDragStart,
-                    onQueueDrag = onQueueDrag,
-                    onQueueRelease = onQueueRelease,
-                    predictiveBackProgress = queuePredictiveBackProgress,
-                    predictiveBackSwipeEdge = queuePredictiveBackSwipeEdge,
-                    queueSheetOffset = queueSheetOffset,
-                    isContainedInCard = isContainedInCard
-                )
+                            .onSizeChanged { intSize ->
+                                val measuredHeight = intSize.height.toFloat()
+                                if (measuredHeight >= minMeasuredQueueHeightPx && abs(queueSheetHeightPx - measuredHeight) > 1f) {
+                                    onQueueSheetHeightPxChange(measuredHeight)
+                                }
+                            },
+                        queue = currentPlaybackQueue,
+                        currentQueueSourceName = currentQueueSourceName,
+                        currentSongId = infrequentPlayerState.currentSong?.id,
+                        currentMediaItemIndex = currentMediaItemIndex,
+                        isVisible = showQueueSheet,
+                        isPlaying = infrequentPlayerState.isPlaying,
+                        onDismiss = onDismissQueue,
+                        onSongInfoClick = onSongInfoClick,
+                        onPlaySong = onPlaySong,
+                        onRemoveSong = onRemoveSong,
+                        onReorder = onReorder,
+                        repeatMode = infrequentPlayerState.repeatMode,
+                        isShuffleOn = infrequentPlayerState.isShuffleEnabled,
+                        onToggleRepeat = onToggleRepeat,
+                        onToggleShuffle = onToggleShuffle,
+                        onClearQueue = onClearQueue,
+                        activeTimerValueDisplay = activeTimerValueDisplay,
+                        activeTimerDurationMinutes = activeTimerDurationMinutes,
+                        playCount = playCount,
+                        isEndOfTrackTimerActive = isEndOfTrackTimerActive,
+                        onSetPredefinedTimer = onSetPredefinedTimer,
+                        onSetEndOfTrackTimer = onSetEndOfTrackTimer,
+                        onOpenCustomTimePicker = onOpenCustomTimePicker,
+                        onCancelTimer = onCancelTimer,
+                        onCancelCountedPlay = onCancelCountedPlay,
+                        onPlayCounter = onPlayCounter,
+                        onRequestSaveAsPlaylist = onRequestSaveAsPlaylist,
+                        onQueueDragStart = onQueueDragStart,
+                        onQueueDrag = onQueueDrag,
+                        onQueueRelease = onQueueRelease,
+                        predictiveBackProgress = queuePredictiveBackProgress,
+                        predictiveBackSwipeEdge = queuePredictiveBackSwipeEdge,
+                        queueSheetOffset = queueSheetOffset,
+                        isContainedInCard = isContainedInCard
+                    )
+                }
             }
         }
     }
@@ -193,7 +222,8 @@ internal fun UnifiedPlayerSongInfoLayer(
     onDismissSongInfo: () -> Unit,
     onNavigateToAlbum: (Song) -> Unit,
     onNavigateToArtist: (Song) -> Unit,
-    onNavigateToGenre: (Song) -> Unit
+    onNavigateToGenre: (Song) -> Unit,
+    isContainedInCard: Boolean = false
 ) {
     selectedSongForInfo?.let { staticSong ->
         val context = LocalContext.current
@@ -267,7 +297,8 @@ internal fun UnifiedPlayerSongInfoLayer(
                 removeFromListTrigger = {
                     playerViewModel.removeSongFromQueue(liveSong.id)
                     onDismissSongInfo()
-                }
+                },
+                isContainedInCard = isContainedInCard
             )
 
             if (showPlaylistBottomSheet) {
@@ -277,6 +308,7 @@ internal fun UnifiedPlayerSongInfoLayer(
                     onDismiss = { showPlaylistBottomSheet = false },
                     bottomBarHeight = 0.dp,
                     playerViewModel = playerViewModel,
+                    isContainedInCard = isContainedInCard
                 )
             }
         }
@@ -290,7 +322,8 @@ internal fun UnifiedPlayerQueueAndSongInfoHost(
     keepQueueSheetWarm: Boolean,
     isQueueTelemetryActive: Boolean,
     albumColorScheme: ColorScheme,
-    queueScrimAlpha: Float,
+    isQueueScrimVisible: Boolean,
+    queueScrimAlphaProvider: () -> Float,
     showQueueSheet: Boolean,
     isQueueCollapsing: Boolean,
     queueHiddenOffsetPx: Float,
@@ -413,7 +446,8 @@ internal fun UnifiedPlayerQueueAndSongInfoHost(
                 shouldRenderLayer = shouldRenderQueueLayer,
                 keepQueueSheetWarm = keepQueueSheetWarm,
                 albumColorScheme = albumColorScheme,
-                queueScrimAlpha = queueScrimAlpha,
+                isQueueScrimVisible = isQueueScrimVisible,
+                queueScrimAlphaProvider = queueScrimAlphaProvider,
                 showQueueSheet = showQueueSheet,
                 isQueueCollapsing = isQueueCollapsing,
                 queueHiddenOffsetPx = queueHiddenOffsetPx,
@@ -462,7 +496,8 @@ internal fun UnifiedPlayerQueueAndSongInfoHost(
                 onDismissSongInfo = { onSelectedSongForInfoChange(null) },
                 onNavigateToAlbum = onNavigateToAlbum,
                 onNavigateToArtist = onNavigateToArtist,
-                onNavigateToGenre = onNavigateToGenre
+                onNavigateToGenre = onNavigateToGenre,
+                isContainedInCard = isContainedInCard
             )
         }
     }
@@ -471,7 +506,8 @@ internal fun UnifiedPlayerQueueAndSongInfoHost(
 @Composable
 internal fun UnifiedPlayerSaveQueueLayer(
     pendingOverlay: SaveQueueOverlayData?,
-    onDismissOverlay: () -> Unit
+    onDismissOverlay: () -> Unit,
+    isContainedInCard: Boolean = false
 ) {
     pendingOverlay?.let { overlay ->
         SaveQueueAsPlaylistSheet(
@@ -481,7 +517,8 @@ internal fun UnifiedPlayerSaveQueueLayer(
             onConfirm = { name, selectedIds ->
                 overlay.onConfirm(name, selectedIds)
                 onDismissOverlay()
-            }
+            },
+            isContainedInCard = isContainedInCard
         )
     }
 }

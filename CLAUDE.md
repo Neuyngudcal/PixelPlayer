@@ -13,4 +13,5 @@ Không lặp lại quy tắc ở đây — sửa `AGENTS.md` hoặc `docs/standa
 - Khi xong thay đổi code, chạy `scripts/check-standards.sh` và sửa mọi `ERROR`; `WARN` phải sửa hoặc
   giải thích bằng comment `// Legacy: <lý do>`.
 - Môi trường cloud thường không có Android SDK: nếu không chạy được Gradle, nói rõ trong báo cáo cuối.
+- **Quy tắc nhánh trong phiên cloud:** KHÔNG BAO GIỜ tự ý tách nhánh mới (`git checkout -b`, `git switch -c`, `git branch ...`, hoặc nhánh `claude/*`) trong phiên cloud. Luôn giữ nguyên nhánh hiện tại (mặc định `main`) cho đến khi người dùng yêu cầu hoặc xác nhận điều chỉnh.
 - Lệnh `/check-standards` (trong `.claude/commands/`) rà diff hiện tại theo quy chuẩn.

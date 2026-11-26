@@ -33,8 +33,9 @@ internal data class SheetThemeState(
     val miniPlayerScheme: ColorScheme,
     val targetAlbumColorScheme: ColorScheme,
     val isPreparingPlayback: Boolean,
-    val miniReadyAlpha: Float,
-    val miniAppearScale: Float,
+    /** Draw-phase providers so mini-player entrance fade/scale never recomposes parent sheet. */
+    val miniReadyAlphaProvider: () -> Float,
+    val miniAppearScaleProvider: () -> Float,
     val playerAreaBackground: Color
 )
 
@@ -153,8 +154,12 @@ internal fun rememberSheetThemeState(
         }
     }
 
-    val miniReadyAlpha = miniAppearProgress.value
-    val miniAppearScale = lerp(0.985f, 1f, miniAppearProgress.value)
+    val miniReadyAlphaProvider: () -> Float = remember(miniAppearProgress) {
+        { miniAppearProgress.value }
+    }
+    val miniAppearScaleProvider: () -> Float = remember(miniAppearProgress) {
+        { lerp(0.985f, 1f, miniAppearProgress.value) }
+    }
     val playerAreaBackground = albumColorScheme.primaryContainer
 
     // NOTE: miniAlpha and effectivePlayerAreaElevation are no longer computed here.
@@ -171,8 +176,8 @@ internal fun rememberSheetThemeState(
         targetAlbumColorScheme = rawAlbumColorScheme,
         miniPlayerScheme = albumColorScheme,
         isPreparingPlayback = isPreparingPlayback,
-        miniReadyAlpha = miniReadyAlpha,
-        miniAppearScale = miniAppearScale,
+        miniReadyAlphaProvider = miniReadyAlphaProvider,
+        miniAppearScaleProvider = miniAppearScaleProvider,
         playerAreaBackground = playerAreaBackground
     )
 }

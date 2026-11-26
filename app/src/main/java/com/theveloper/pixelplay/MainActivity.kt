@@ -83,6 +83,7 @@ import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextAlign
@@ -94,7 +95,6 @@ import androidx.compose.ui.semantics.hideFromAccessibility
 import androidx.compose.foundation.gestures.detectTapGestures
 import com.theveloper.pixelplay.presentation.components.player.TabletPlayerDisplayMode
 import com.theveloper.pixelplay.presentation.components.player.resolveNowPlayingSheetBoundsSpec
-import com.theveloper.pixelplay.presentation.viewmodel.PlayerSheetState
 import com.theveloper.pixelplay.ui.theme.computeEffectiveContentWindowInfo
 
 import androidx.compose.ui.unit.Dp
@@ -597,21 +597,37 @@ class MainActivity : ComponentActivity() {
         var tabletDisplayMode by rememberSaveable {
             mutableStateOf(TabletPlayerDisplayMode.SIDE_DOCKED)
         }
-        val currentSheetState by playerViewModel.sheetState.collectAsStateWithLifecycle()
-        val isSideDockedExpanded =
+        val fullScreenFractionState = animateFloatAsState(
+            targetValue = if (
+                !sheetBoundsSpec.supportsSideDockedMode ||
+                    tabletDisplayMode == TabletPlayerDisplayMode.FULLSCREEN
+            ) {
+                1f
+            } else {
+                0f
+            },
+            animationSpec = MaterialTheme.motionScheme.slowSpatialSpec(),
+            label = "MainTabletFullScreenFraction"
+        )
+        val fullScreenFractionProvider = remember(fullScreenFractionState) {
+            { fullScreenFractionState.value }
+        }
+        val isSideDockedModeActive =
             sheetBoundsSpec.supportsSideDockedMode &&
                 tabletDisplayMode == TabletPlayerDisplayMode.SIDE_DOCKED &&
-                showPlayerContentInitially &&
-                currentSheetState == PlayerSheetState.EXPANDED
+                showPlayerContentInitially
         val sideDockedReservedWidth =
             sheetBoundsSpec.sideDockedWidth + sheetBoundsSpec.sideDockedEndMargin
-        val sideDockedReservedDp = if (isSideDockedExpanded) {
+        // Keep structural window info & Wide Rail eligibility invariant across sheet expand/collapse
+        // so opening or closing the Side-Docked Card never recomposes LocalPixelPlayWindowInfo,
+        // never collapses the Navigation Rail mid-morph, and never tears down multi-pane screens.
+        val sideDockedReservedDp = if (isSideDockedModeActive) {
             sideDockedReservedWidth.value.roundToInt()
         } else {
             0
         }
         val canKeepExpandedWideRail = windowInfo.supportsExpandableWideRail &&
-            (!isSideDockedExpanded ||
+            (!isSideDockedModeActive ||
                 (windowInfo.widthDp - NavigationRailExpandedWidth.value.roundToInt() - sideDockedReservedDp) >= 760)
         var isRailExpanded by rememberSaveable(windowInfo.startWithExpandedWideRail) {
             mutableStateOf(windowInfo.startWithExpandedWideRail)
@@ -697,7 +713,7 @@ class MainActivity : ComponentActivity() {
         val isMiniPlayerDismissing by playerViewModel.isMiniPlayerDismissing.collectAsStateWithLifecycle()
         val hapticsEnabled by playerViewModel.hapticsEnabled.collectAsStateWithLifecycle()
         val disableBlurAllOver by playerViewModel.disableBlurAllOver.collectAsStateWithLifecycle()
-        val predictiveBackCollapseFraction by playerViewModel.predictiveBackCollapseFraction.collectAsStateWithLifecycle()
+        val predictiveBackCollapseFractionState = playerViewModel.predictiveBackCollapseFraction.collectAsStateWithLifecycle()
         val rootView = LocalView.current
         val platformHapticFeedback = LocalHapticFeedback.current
         val appHapticsConfig = remember(hapticsEnabled) {
@@ -911,12 +927,12 @@ class MainActivity : ComponentActivity() {
                         val (collapsedStartPadding, collapsedEndPadding) = remember(
                             useNavigationRail,
                             containerWidth,
-                            animatedRailWidth,
+                            targetRailWidthDp,
                             windowInfo.miniPlayerMaxWidth,
                             horizontalPadding
                         ) {
                             if (useNavigationRail) {
-                                val safeRailWidth = animatedRailWidth.coerceAtLeast(0.dp)
+                                val safeRailWidth = targetRailWidthDp.dp.coerceAtLeast(0.dp)
                                 val contentWidth = (containerWidth - safeRailWidth).coerceAtLeast(0.dp)
                                 val maxMiniWidth = if (windowInfo.miniPlayerMaxWidth != Dp.Unspecified) {
                                     windowInfo.miniPlayerMaxWidth
@@ -956,30 +972,27 @@ class MainActivity : ComponentActivity() {
                         val expansionFractionProvider = remember(playerViewModel.playerContentExpansionFraction) {
                             { playerViewModel.playerContentExpansionFraction.value }
                         }
-                        val fullScreenFractionState = animateFloatAsState(
-                            targetValue = if (
-                                !sheetBoundsSpec.supportsSideDockedMode ||
-                                    tabletDisplayMode == TabletPlayerDisplayMode.FULLSCREEN
-                            ) {
-                                1f
-                            } else {
-                                0f
-                            },
-                            animationSpec = MaterialTheme.motionScheme.slowSpatialSpec(),
-                            label = "MainTabletFullScreenFraction"
-                        )
-                        val fullScreenFractionProvider = remember(fullScreenFractionState) {
-                            { fullScreenFractionState.value }
+                        val sideDockedReservedWidthPx = remember(sideDockedReservedWidth, density) {
+                            with(density) { sideDockedReservedWidth.toPx() }
                         }
-                        val sideDockedReservedEndPadding by animateDpAsState(
-                            targetValue = if (isSideDockedExpanded) {
-                                sideDockedReservedWidth
-                            } else {
-                                0.dp
-                            },
-                            animationSpec = MaterialTheme.motionScheme.defaultSpatialSpec(),
-                            label = "SideDockedReservedEndPadding"
-                        )
+                        val sideDockedFractionProvider = remember(
+                            sheetBoundsSpec.supportsSideDockedMode,
+                            showPlayerContentInitially,
+                            playerViewModel.playerContentExpansionFraction,
+                            fullScreenFractionProvider,
+                            predictiveBackCollapseFractionState
+                        ) {
+                            {
+                                if (!sheetBoundsSpec.supportsSideDockedMode || !showPlayerContentInitially) {
+                                    0f
+                                } else {
+                                    val expansion = playerViewModel.playerContentExpansionFraction.value.coerceIn(0f, 1f)
+                                    val predictiveBack = predictiveBackCollapseFractionState.value.coerceIn(0f, 1f)
+                                    val dockedWeight = 1f - fullScreenFractionProvider().coerceIn(0f, 1f)
+                                    (expansion * (1f - predictiveBack) * dockedWeight).coerceIn(0f, 1f)
+                                }
+                            }
+                        }
                         val effectiveLeftPaneWindowInfo = remember(
                             windowInfo,
                             targetRailWidthDp,
@@ -1005,7 +1018,7 @@ class MainActivity : ComponentActivity() {
                                     val fraction = (
                                         expansion *
                                             fullScreenFraction *
-                                            (1f - predictiveBackCollapseFraction)
+                                            (1f - predictiveBackCollapseFractionState.value)
                                         ).coerceIn(0f, 1f)
                                     // When the full player sheet is completely opaque and covering the
                                     // screen (FULLSCREEN mode), skip full-screen blur and hide the
@@ -1062,7 +1075,22 @@ class MainActivity : ComponentActivity() {
                                         modifier = Modifier
                                             .weight(1f)
                                             .fillMaxHeight()
-                                            .padding(end = sideDockedReservedEndPadding.coerceAtLeast(0.dp))
+                                            .layout { measurable, constraints ->
+                                                val reservedEndPx = (sideDockedReservedWidthPx * sideDockedFractionProvider())
+                                                    .roundToInt()
+                                                    .coerceIn(0, constraints.maxWidth)
+                                                val childMaxWidth = (constraints.maxWidth - reservedEndPx).coerceAtLeast(0)
+                                                val childMinWidth = constraints.minWidth.coerceAtMost(childMaxWidth)
+                                                val placeable = measurable.measure(
+                                                    constraints.copy(
+                                                        minWidth = childMinWidth,
+                                                        maxWidth = childMaxWidth
+                                                    )
+                                                )
+                                                layout(constraints.maxWidth, constraints.maxHeight) {
+                                                    placeable.placeRelative(0, 0)
+                                                }
+                                            }
                                     ) {
                                         CompositionLocalProvider(
                                             LocalPixelPlayWindowInfo provides effectiveLeftPaneWindowInfo

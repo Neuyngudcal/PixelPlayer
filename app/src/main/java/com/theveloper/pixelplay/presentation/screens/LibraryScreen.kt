@@ -2,6 +2,8 @@
 
 package com.theveloper.pixelplay.presentation.screens
 
+import com.theveloper.pixelplay.presentation.navigation.AlbumHeroRole
+import com.theveloper.pixelplay.presentation.navigation.albumHeroBounds
 import com.theveloper.pixelplay.presentation.navigation.navigateSafely
 import com.theveloper.pixelplay.presentation.navigation.navigateSafelyReplacing
 
@@ -66,6 +68,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.material.icons.rounded.ViewModule
+import com.theveloper.pixelplay.presentation.components.SmartImageGridTargetSize
 import com.theveloper.pixelplay.presentation.components.ToggleSegmentButton
 import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -3428,12 +3431,15 @@ fun AlbumGridItemRedesigned(
                     shape = cardShape
                 )
             ) {
-                Box(contentAlignment = Alignment.BottomStart) {
+                Box(
+                    modifier = Modifier.albumHeroBounds(album.id, AlbumHeroRole.GridCard),
+                    contentAlignment = Alignment.BottomStart
+                ) {
                     SmartImage(
                         model = album.albumArtUriString,
                         contentDescription = stringResource(R.string.common_album_art_for_title, album.title),
                         contentScale = ContentScale.Crop,
-                        targetSize = Size(256, 256),
+                        targetSize = SmartImageGridTargetSize,
                         crossfadeDurationMillis = 150,
                         modifier = Modifier
                             .fillMaxWidth()

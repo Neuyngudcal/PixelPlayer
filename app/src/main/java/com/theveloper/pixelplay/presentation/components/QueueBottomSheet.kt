@@ -93,6 +93,7 @@ import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import com.theveloper.pixelplay.presentation.components.player.PlayerCardOverlayDialog
+import com.theveloper.pixelplay.presentation.components.player.PlayerCardOverlaySheet
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -184,7 +185,7 @@ import androidx.compose.material3.MediumTopAppBar
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.ui.layout.layout
-import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.onSizeChanged
 import com.theveloper.pixelplay.presentation.components.scoped.QueueItemDismissGestureHandler
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.zIndex
@@ -520,29 +521,8 @@ fun QueueBottomSheet(
     fun activeKeyAt(index: Int): Long =
         activeKeys?.getOrNull(index) ?: (queueIndexOffset + index).toLong()
 
-    val useLightweightQueueListShape by remember {
-        derivedStateOf {
-            listState.isScrollInProgress ||
-                draggingSheetFromList ||
-                isReordering ||
-                reorderHandleInUse
-        }
-    }
-    val queueListShape = remember(useLightweightQueueListShape) {
-        if (useLightweightQueueListShape) {
-            RoundedCornerShape(topStart = 26.dp, topEnd = 26.dp)
-        } else {
-            AbsoluteSmoothCornerShape(
-                cornerRadiusTR = 26.dp,
-                smoothnessAsPercentTR = 60,
-                cornerRadiusTL = 26.dp,
-                smoothnessAsPercentTL = 60,
-                cornerRadiusBR = 0.dp,
-                smoothnessAsPercentBR = 60,
-                cornerRadiusBL = 0.dp,
-                smoothnessAsPercentBL = 60
-            )
-        }
+    val queueListShape = remember {
+        RoundedCornerShape(topStart = 26.dp, topEnd = 26.dp)
     }
 
     fun finalizeListDrag(velocity: Float = 0f) {
@@ -853,6 +833,7 @@ fun QueueBottomSheet(
                                         onDismissSong = { onRemoveSong(song.id) },
                                         isFromPlaylist = true,
                                         onMoreOptionsClick = { onSongInfoClick(song) },
+                                        flatElevation = true,
                                         dragHandle = {
                                             IconButton(
                                                 onClick = {},
@@ -938,12 +919,8 @@ fun QueueBottomSheet(
 
                     Spacer(modifier = Modifier.width(4.dp))
 
-                    MediumFloatingActionButton(
-                        modifier = Modifier
-                            .fillMaxHeight()
-                            .aspectRatio(1f),
-                        onClick = { isFabExpanded = !isFabExpanded },
-                        shape = AbsoluteSmoothCornerShape(
+                    val fabShape = remember {
+                        AbsoluteSmoothCornerShape(
                             cornerRadiusTR = 50.dp,
                             smoothnessAsPercentTR = 60,
                             cornerRadiusTL = 8.dp,
@@ -952,7 +929,14 @@ fun QueueBottomSheet(
                             smoothnessAsPercentBR = 60,
                             cornerRadiusBL = 8.dp,
                             smoothnessAsPercentBL = 60
-                        ),
+                        )
+                    }
+                    MediumFloatingActionButton(
+                        modifier = Modifier
+                            .fillMaxHeight()
+                            .aspectRatio(1f),
+                        onClick = { isFabExpanded = !isFabExpanded },
+                        shape = fabShape,
                         containerColor = MaterialTheme.colorScheme.tertiaryContainer,
                         contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
                         elevation = FloatingActionButtonDefaults.elevation(0.dp)
@@ -1540,6 +1524,7 @@ fun SaveQueueAsPlaylistSheet(
     defaultName: String,
     onDismiss: () -> Unit,
     onConfirm: (String, Set<String>) -> Unit,
+    isContainedInCard: Boolean = false
 ) {
     val focusRequester = remember { FocusRequester() }
     val animatedAlbumCornerRadius = 60.dp
@@ -1587,26 +1572,36 @@ fun SaveQueueAsPlaylistSheet(
 
     BackHandler(onBack = { onDismiss() })
 
-    Dialog(
-        onDismissRequest = { onDismiss() },
-        properties = DialogProperties(
-            usePlatformDefaultWidth = false,
-            dismissOnClickOutside = false,
-            decorFitsSystemWindows = false
-        )
-    ) {
+    val savePlaylistBody: @Composable () -> Unit = {
         Scaffold(
                 modifier = Modifier.fillMaxSize(),
-                containerColor = MaterialTheme.colorScheme.surface,
-                contentWindowInsets = WindowInsets.safeDrawing,
+                containerColor = if (isContainedInCard) {
+                    MaterialTheme.colorScheme.surfaceContainerLow
+                } else {
+                    MaterialTheme.colorScheme.surface
+                },
+                contentWindowInsets = if (isContainedInCard) {
+                    WindowInsets(0, 0, 0, 0)
+                } else {
+                    WindowInsets.safeDrawing
+                },
                 topBar = {
                     Column {
                         MediumTopAppBar(
+                            windowInsets = if (isContainedInCard) {
+                                WindowInsets(0, 0, 0, 0)
+                            } else {
+                                TopAppBarDefaults.windowInsets
+                            },
                             title = {
                                 Text(
                                     modifier = Modifier.padding(start = 4.dp),
                                     text = stringResource(R.string.queue_save_as_playlist_sheet_title),
-                                    style = MaterialTheme.typography.headlineMedium,
+                                    style = if (isContainedInCard) {
+                                        MaterialTheme.typography.titleLarge
+                                    } else {
+                                        MaterialTheme.typography.headlineMedium
+                                    },
                                     fontFamily = GoogleSansRounded,
                                     fontWeight = FontWeight.SemiBold,
                                     maxLines = 1,
@@ -1681,14 +1676,28 @@ fun SaveQueueAsPlaylistSheet(
                                 }
                             },
                             colors = TopAppBarDefaults.topAppBarColors(
-                                containerColor = MaterialTheme.colorScheme.surface,
-                                scrolledContainerColor = MaterialTheme.colorScheme.surface
+                                containerColor = if (isContainedInCard) {
+                                    MaterialTheme.colorScheme.surfaceContainerLow
+                                } else {
+                                    MaterialTheme.colorScheme.surface
+                                },
+                                scrolledContainerColor = if (isContainedInCard) {
+                                    MaterialTheme.colorScheme.surfaceContainerLow
+                                } else {
+                                    MaterialTheme.colorScheme.surface
+                                }
                             )
                         )
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .background(MaterialTheme.colorScheme.surface)
+                                .background(
+                                    if (isContainedInCard) {
+                                        MaterialTheme.colorScheme.surfaceContainerLow
+                                    } else {
+                                        MaterialTheme.colorScheme.surface
+                                    }
+                                )
                                 .padding(horizontal = 16.dp, vertical = 8.dp),
                             verticalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
@@ -1752,8 +1761,11 @@ fun SaveQueueAsPlaylistSheet(
                         modifier = Modifier
                             .fillMaxWidth()
                             .windowInsetsPadding(WindowInsets.ime)
-                            .windowInsetsPadding(WindowInsets.navigationBars)
-                            .padding(16.dp)
+                            .then(
+                                if (isContainedInCard) Modifier
+                                else Modifier.windowInsetsPadding(WindowInsets.navigationBars)
+                            )
+                            .padding(if (isContainedInCard) 12.dp else 16.dp)
                     ) {
                         Surface(
                             modifier = Modifier.fillMaxWidth(),
@@ -1927,7 +1939,31 @@ fun SaveQueueAsPlaylistSheet(
                 }
             }
         }
+
+    if (isContainedInCard) {
+        PlayerCardOverlaySheet(
+            onDismissRequest = onDismiss,
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+            maxHeightFraction = 0.96f,
+            zIndex = 36f
+        ) {
+            Box(modifier = Modifier.fillMaxSize()) {
+                savePlaylistBody()
+            }
+        }
+    } else {
+        Dialog(
+            onDismissRequest = { onDismiss() },
+            properties = DialogProperties(
+                usePlatformDefaultWidth = false,
+                dismissOnClickOutside = false,
+                decorFitsSystemWindows = false
+            )
+        ) {
+            savePlaylistBody()
+        }
     }
+}
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -2033,39 +2069,46 @@ fun QueuePlaylistSongItem(
     }
 
     val isSwipeTargeted = dismissHandler?.isInDismissZone == true
-    val currentOffsetPx = dismissOffsetAnimatable.value
-    val revealWidthPx = (-currentOffsetPx).coerceAtLeast(0f)
-    val revealProgress = if (density.density > 0f) {
-        (revealWidthPx / (56.dp.value * density.density)).coerceIn(0f, 1f)
-    } else 0f
-
-    val dismissBackgroundColor by animateColorAsState(
-        targetValue = if (isSwipeTargeted) colors.errorContainer else colors.errorContainer.copy(alpha = 0.82f),
-        animationSpec = tween(durationMillis = 150),
-        label = "dismissBackgroundColor"
-    )
-    val dismissIconAlpha by animateFloatAsState(
-        targetValue = revealProgress * if (isSwipeTargeted) 1f else 0.88f,
-        animationSpec = tween(durationMillis = 120),
-        label = "dismissIconAlpha"
-    )
-    val dismissIconScale by animateFloatAsState(
-        targetValue = if (isSwipeTargeted) 1.08f else 0.95f,
-        animationSpec = tween(durationMillis = 120),
-        label = "dismissIconScale"
-    )
+    val isRevealVisible by remember(dismissOffsetAnimatable) {
+        derivedStateOf { dismissOffsetAnimatable.value < -0.5f }
+    }
+    val isClickEnabled by remember(dismissOffsetAnimatable) {
+        derivedStateOf { abs(dismissOffsetAnimatable.value) < 0.5f }
+    }
 
     var surfaceHeightPx by remember { mutableStateOf(0f) }
 
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .onGloballyPositioned { coordinates ->
-                val measuredWidth = coordinates.size.width.toFloat()
+            .onSizeChanged { intSize ->
+                val measuredWidth = intSize.width.toFloat()
                 if (measuredWidth != itemWidthPx) itemWidthPx = measuredWidth
             }
     ) {
-        if (revealWidthPx > 0f && surfaceHeightPx > 0f) {
+        if (isRevealVisible && surfaceHeightPx > 0f) {
+            val currentOffsetPx = dismissOffsetAnimatable.value
+            val revealWidthPx = (-currentOffsetPx).coerceAtLeast(0f)
+            val revealProgress = if (density.density > 0f) {
+                (revealWidthPx / (56.dp.value * density.density)).coerceIn(0f, 1f)
+            } else 0f
+
+            val dismissBackgroundColor by animateColorAsState(
+                targetValue = if (isSwipeTargeted) colors.errorContainer else colors.errorContainer.copy(alpha = 0.82f),
+                animationSpec = tween(durationMillis = 150),
+                label = "dismissBackgroundColor"
+            )
+            val dismissIconAlpha by animateFloatAsState(
+                targetValue = revealProgress * if (isSwipeTargeted) 1f else 0.88f,
+                animationSpec = tween(durationMillis = 120),
+                label = "dismissIconAlpha"
+            )
+            val dismissIconScale by animateFloatAsState(
+                targetValue = if (isSwipeTargeted) 1.08f else 0.95f,
+                animationSpec = tween(durationMillis = 120),
+                label = "dismissIconScale"
+            )
+
             val revealWidthDp = with(density) { revealWidthPx.toDp() }
             val surfaceHeightDp = with(density) { surfaceHeightPx.toDp() }
             Box(
@@ -2095,15 +2138,15 @@ fun QueuePlaylistSongItem(
 
         Surface(
             modifier = Modifier
-                .graphicsLayer { translationX = currentOffsetPx }
-                .onGloballyPositioned { coordinates ->
-                    val h = coordinates.size.height.toFloat()
+                .graphicsLayer { translationX = dismissOffsetAnimatable.value }
+                .onSizeChanged { intSize ->
+                    val h = intSize.height.toFloat()
                     if (h != surfaceHeightPx) surfaceHeightPx = h
                 }
                 .padding(horizontal = 12.dp)
                 .clip(itemShape)
                 .clickable(
-                    enabled = currentOffsetPx == 0f
+                    enabled = isClickEnabled
                 ) {
                     onClick()
                 },

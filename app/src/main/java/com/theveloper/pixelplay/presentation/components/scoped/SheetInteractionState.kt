@@ -128,31 +128,19 @@ private class PlayerSheetDynamicShape(
     ): Outline {
         val topRadius = topRadiusProvider().nonNegative()
         val bottomRadius = bottomRadiusProvider().nonNegative()
-        if ((topRadius <= 1.dp && bottomRadius <= 1.dp) || !useSmoothShapeProvider()) {
-            val topRadiusPx = with(density) { topRadius.toPx() }
-            val bottomRadiusPx = with(density) { bottomRadius.toPx() }
-            return Outline.Rounded(
-                RoundRect(
-                    rect = Rect(0f, 0f, size.width, size.height),
-                    topLeft = CornerRadius(topRadiusPx, topRadiusPx),
-                    topRight = CornerRadius(topRadiusPx, topRadiusPx),
-                    bottomRight = CornerRadius(bottomRadiusPx, bottomRadiusPx),
-                    bottomLeft = CornerRadius(bottomRadiusPx, bottomRadiusPx)
-                )
+        val topRadiusPx = with(density) { topRadius.toPx() }
+        val bottomRadiusPx = with(density) { bottomRadius.toPx() }
+        // Use GPU hardware-accelerated Outline.Rounded(RoundRect) consistently so dragging and
+        // morphing never allocates per-frame CPU Bézier Paths or triggers software clipPath masks.
+        return Outline.Rounded(
+            RoundRect(
+                rect = Rect(0f, 0f, size.width, size.height),
+                topLeft = CornerRadius(topRadiusPx, topRadiusPx),
+                topRight = CornerRadius(topRadiusPx, topRadiusPx),
+                bottomRight = CornerRadius(bottomRadiusPx, bottomRadiusPx),
+                bottomLeft = CornerRadius(bottomRadiusPx, bottomRadiusPx)
             )
-        }
-        val shape =
-            AbsoluteSmoothCornerShape(
-                cornerRadiusTL = topRadius,
-                smoothnessAsPercentTL = 60,
-                cornerRadiusTR = topRadius,
-                smoothnessAsPercentTR = 60,
-                cornerRadiusBL = bottomRadius,
-                smoothnessAsPercentBL = 60,
-                cornerRadiusBR = bottomRadius,
-                smoothnessAsPercentBR = 60
-            )
-        return shape.createOutline(size, layoutDirection, density)
+        )
     }
 }
 

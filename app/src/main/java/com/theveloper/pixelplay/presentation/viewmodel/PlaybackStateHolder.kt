@@ -16,8 +16,11 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.coroutineScope
@@ -632,10 +635,14 @@ class PlaybackStateHolder @Inject constructor(
             // no lock-screen progress UI mounted), this collectLatest sits
             // idle and the CPU stays asleep. As soon as a subscriber appears
             // (player sheet opened, widget bound, etc.) the inner loop resumes.
-            _currentPosition.subscriptionCount.collectLatest { subscriberCount ->
-                if (subscriberCount == 0) return@collectLatest
-                coroutineScope {
-                    while (isActive) {
+            combine(
+                _currentPosition.subscriptionCount.map { it > 0 }.distinctUntilChanged(),
+                _sliderUiMounted
+            ) { hasSubscribers, _ -> hasSubscribers }
+                .collectLatest { hasSubscribers ->
+                    if (!hasSubscribers) return@collectLatest
+                    coroutineScope {
+                        while (isActive) {
                         val tickMs = currentProgressTickMs()
                         val castSession = castStateHolder.castSession.value
                         val remoteClient = castSession?.remoteMediaClient
