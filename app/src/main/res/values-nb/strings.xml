@@ -2,9 +2,6 @@
 <resources>
     <string name="app_name">PixelPlayer</string>
     <string name="app_tagline">Musikkspiller</string>
-    <string name="app_name_change_title">Endring av app-navn</string>
-    <string name="app_name_change_message">Vi har endret appens navn fra PixelPlay til PixelPlayer på grunn av et varemerkeproblem. Fortsett spillingen!</string>
-    <string name="app_name_change_do_not_show_again">Ikke vis igjen</string>
 
     <!-- Navigation Bar Labels -->
     <string name="nav_bar_home">Hjem</string>
@@ -28,15 +25,6 @@
     <string name="tile_last_playlist">Siste spilleliste</string>
     <string name="tile_last_playlist_unavailable">Ingen spilleliste tilgjengelig for åpning</string>
 
-    <!-- Playstore Announcement -->
-    <string name="playstore_dialog_action_open">Åpne Play Store</string>
-    <string name="playstore_dialog_action_continue_beta">Fortsett beta</string>
-    <string name="playstore_dialog_link_pending">Play Store-lenken vil bli aktivert snart.</string>
-    <string name="playstore_dialog_title">PixelPlayer er nå tilgjengelig på Google Play</string>
-    <string name="playstore_dialog_body">Bruk den stabile versjonen på Google Play for oppdateringer, mens vi holder beta-versjonene aktive.</string>
-    <string name="playstore_dialog_app_name">PixelPlayer</string>
-    <string name="playstore_dialog_release_announcement">Lanseringsmelding</string>
-    <string name="playstore_dialog_coming_soon">Kommer snart</string>
 
     <!-- Brick breaker -->
     <string name="easter_egg_thank_you">Takk for at du bruker PixelPlayer!</string>

@@ -186,8 +186,6 @@
     <string name="screen_about">حول التطبيق</string>
     <string name="about_maintainer_title">المشرف الرئيسي</string>
     <string name="about_maintainer_subtitle">الشخص الذي يقف وراء PixelPlayer.</string>
-    <string name="about_spotlight_title">أضواء على المجتمع</string>
-    <string name="about_spotlight_subtitle">تقدير وتكريم للمتعاونين ذوي التأثير الكبير.</string>
     <string name="about_contributors_section_title">المساهمون في المشروع مفتوح المصدر</string>
     <string name="about_contributors_section_subtitle">قائمة المساهمين المباشرة من GitHub.</string>
     <string name="about_signal_open_source">مفتوح المصدر</string>

@@ -2,9 +2,6 @@
 <resources>
     <string name="app_name">PixelPlayer</string>
     <string name="app_tagline">Lecteur de musique</string>
-    <string name="app_name_change_title">Changement de nom de l\'application</string>
-    <string name="app_name_change_message">Nous avons changé le nom de notre application de PixelPlay à PixelPlayer en raison d\'un problème de marque déposée. Bonne écoute !</string>
-    <string name="app_name_change_do_not_show_again">Ne plus afficher</string>
 
     <!-- Navigation Bar Labels -->
     <string name="nav_bar_home">Accueil</string>
@@ -28,15 +25,6 @@
     <string name="tile_last_playlist">Dernière liste de lecture</string>
     <string name="tile_last_playlist_unavailable">Aucune liste de lecture disponible à ouvrir</string>
 
-    <!-- Playstore Announcement -->
-    <string name="playstore_dialog_action_open">Ouvrir le Play Store</string>
-    <string name="playstore_dialog_action_continue_beta">Continuer la bêta</string>
-    <string name="playstore_dialog_link_pending">Le lien vers le Play Store sera activé à partir de la configuration GitHub.</string>
-    <string name="playstore_dialog_title">PixelPlayer est désormais disponible sur Google Play</string>
-    <string name="playstore_dialog_body">Utilisez la version stable sur Google Play pour les mises à jour finales tandis que nous gardons les versions bêta actives.</string>
-    <string name="playstore_dialog_app_name">PixelPlayer</string>
-    <string name="playstore_dialog_release_announcement">Annonce de la sortie</string>
-    <string name="playstore_dialog_coming_soon">Bientôt disponible</string>
 
     <!-- Brick breaker -->
     <string name="easter_egg_thank_you">Merci d\'utiliser PixelPlayer !</string>

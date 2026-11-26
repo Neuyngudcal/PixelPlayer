@@ -2,9 +2,6 @@
 <resources>
     <string name="app_name">PixelPlayer</string>
     <string name="app_tagline">Müzik Çalar</string>
-    <string name="app_name_change_title">Uygulama Adı Değişikliği</string>
-    <string name="app_name_change_message">Ticari marka kaynaklı bir sorun nedeniyle uygulamamızın adını PixelPlay\'den PixelPlayer olarak değiştirdik. Keyifli dinlemeler!</string>
-    <string name="app_name_change_do_not_show_again">Bir daha gösterme</string>
 
     <!-- Navigation Bar Labels -->
     <string name="nav_bar_home">Ana Sayfa</string>
@@ -28,15 +25,6 @@
     <string name="tile_last_playlist">Son Çalma Listesi</string>
     <string name="tile_last_playlist_unavailable">Açılacak çalma listesi yok</string>
 
-    <!-- Playstore Announcement -->
-    <string name="playstore_dialog_action_open">Play Store\'u Aç</string>
-    <string name="playstore_dialog_action_continue_beta">Beta\'ya devam et</string>
-    <string name="playstore_dialog_link_pending">Play Store bağlantısı GitHub yapılandırmasından etkinleştirilecek.</string>
-    <string name="playstore_dialog_title">PixelPlayer artık Google Play\'de mevcut</string>
-    <string name="playstore_dialog_body">Beta yapılarını aktif tutarken sürüm güncellemeleri için Google Play\'deki stabil kanalı kullanın.</string>
-    <string name="playstore_dialog_app_name">PixelPlayer</string>
-    <string name="playstore_dialog_release_announcement">Sürüm duyurusu</string>
-    <string name="playstore_dialog_coming_soon">Çok yakında</string>
 
     <!-- Brick breaker -->
     <string name="easter_egg_thank_you">PixelPlayer\'ı kullandığınız için teşekkür ederiz!</string>

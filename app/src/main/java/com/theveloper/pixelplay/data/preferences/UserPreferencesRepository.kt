@@ -89,7 +89,6 @@ class UserPreferencesRepository @Inject constructor(
     // ─── Preference keys ────────────────────────────────────────────────────
 
     private object PreferencesKeys {
-        val APP_REBRAND_DIALOG_SHOWN = booleanPreferencesKey("app_rebrand_dialog_shown")
         val BETA_05_CLEAN_INSTALL_DISCLAIMER_DISMISSED =
             booleanPreferencesKey("beta_05_clean_install_disclaimer_dismissed")
         val ALLOWED_DIRECTORIES = stringSetPreferencesKey("allowed_directories")
@@ -289,13 +288,6 @@ class UserPreferencesRepository @Inject constructor(
     }
 
     // ─── Onboarding / dialogs ─────────────────────────────────────────────────
-
-    val appRebrandDialogShownFlow: Flow<Boolean> =
-        pref { it[PreferencesKeys.APP_REBRAND_DIALOG_SHOWN] ?: false }
-
-    suspend fun setAppRebrandDialogShown(wasShown: Boolean) {
-        dataStore.edit { it[PreferencesKeys.APP_REBRAND_DIALOG_SHOWN] = wasShown }
-    }
 
     val beta05CleanInstallDisclaimerDismissedFlow: Flow<Boolean> =
         pref { it[PreferencesKeys.BETA_05_CLEAN_INSTALL_DISCLAIMER_DISMISSED] ?: false }
