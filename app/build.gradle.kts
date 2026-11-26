@@ -1,14 +1,6 @@
 import java.io.File
 import java.util.Properties
-import javax.inject.Inject
-import org.gradle.api.DefaultTask
 import org.gradle.api.GradleException
-import org.gradle.api.file.DirectoryProperty
-import org.gradle.api.file.FileSystemOperations
-import org.gradle.api.file.RegularFileProperty
-import org.gradle.api.tasks.InputFile
-import org.gradle.api.tasks.OutputDirectory
-import org.gradle.api.tasks.TaskAction
 
 plugins {
     alias(libs.plugins.android.application)
@@ -19,25 +11,6 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.baselineprofile)
     id("kotlin-parcelize")
-}
-
-abstract class CopyThirdPartyNotices : DefaultTask() {
-    @get:InputFile
-    abstract val sourceFile: RegularFileProperty
-
-    @get:OutputDirectory
-    abstract val outputDirectory: DirectoryProperty
-
-    @get:Inject
-    abstract val fileSystemOperations: FileSystemOperations
-
-    @TaskAction
-    fun copyNotice() {
-        fileSystemOperations.copy {
-            from(sourceFile)
-            into(outputDirectory)
-        }
-    }
 }
 
 // Load keystore properties early to avoid unresolved references inside the android block
@@ -62,12 +35,6 @@ val enableAbiSplits = providers.gradleProperty("pixelplay.enableAbiSplits")
 val enableComposeCompilerReports = providers.gradleProperty("pixelplay.enableComposeCompilerReports")
     .getOrElse("false")
     .toBoolean()
-
-val generatedNoticesAssets = layout.buildDirectory.dir("generated/assets/thirdPartyNotices")
-val copyThirdPartyNotices = tasks.register<CopyThirdPartyNotices>("copyThirdPartyNotices") {
-    sourceFile.set(rootProject.layout.projectDirectory.file("THIRD_PARTY_NOTICES.md"))
-    outputDirectory.set(generatedNoticesAssets)
-}
 
 @Suppress("DEPRECATION")
 android {
@@ -221,15 +188,6 @@ android {
         abi.enableSplit = true
         density.enableSplit = true
         language.enableSplit = true
-    }
-}
-
-androidComponents {
-    onVariants(selector().all()) { variant ->
-        variant.sources.assets?.addGeneratedSourceDirectory(
-            copyThirdPartyNotices,
-            CopyThirdPartyNotices::outputDirectory,
-        )
     }
 }
 
